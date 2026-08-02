@@ -43,7 +43,8 @@ library X86_64 {{
     Slot {{
         member key:string
         member offset:i64
-        __(key:string, offset:i64) -> void { self.key = key; self.offset = offset }
+        member typeName:string
+        __(key:string, offset:i64, typeName:string) -> void { self.key = key; self.offset = offset; self.typeName = typeName }
     }}
 
     Backend {{
@@ -96,7 +97,9 @@ library X86_64 {{
             self.filesystemRuntime()
             self.memoryRuntime()
             self.runtimeCore()
+            self.garbageCollectorRuntime()
             self.arrayRuntime()
+            self.gcTraceFunctions()
             self.stringRuntime()
             self.builderRuntime()
             self.stringData()
@@ -177,7 +180,7 @@ library X86_64 {{
             self.slots = new Array<Slot>(0)
             local parameterIndex:i64 = 0
             while parameterIndex < function.parameters.length {
-                self.reserve("name:" + function.parameters[parameterIndex].name)
+                self.reserve("name:" + function.parameters[parameterIndex].name, function.parameters[parameterIndex].typeName)
                 parameterIndex = parameterIndex + 1
             }
             local blockIndex:i64 = 0
@@ -186,14 +189,24 @@ library X86_64 {{
                 local index:i64 = 0
                 while index < instructions.length {
                     local instruction = instructions[index]
-                    if instruction.result != null { self.reserve("temp:" + instruction.result!.name) }
-                    if instruction.op == "declare_local" || instruction.op == "store_local" { self.reserve("name:" + instruction.name!) }
+                    if instruction.result != null { self.reserve("temp:" + instruction.result!.name, instruction.result!.typeName) }
+                    if instruction.op == "declare_local" || instruction.op == "store_local" { self.reserve("name:" + instruction.name!, instruction.first!.typeName) }
                     index = index + 1
                 }
                 blockIndex = blockIndex + 1
             }
-            local frameSize = self.align(self.slots.length * 8, 16)
+            local roots = new Array<ref Slot>(0)
+            local slotIndex:i64 = 0
+            while slotIndex < self.slots.length {
+                local candidate = self.slots[slotIndex]
+                if self.isManagedReferenceType(candidate.typeName) { roots.append(candidate) }
+                slotIndex = slotIndex + 1
+            }
+            local rootRecordSize:i64 = 24
+            local rootRecordOffset = self.slots.length * 8 + rootRecordSize
+            local frameSize = self.align(rootRecordOffset, 16)
             local endLabel = self.currentFunctionSymbol + "__return"
+            local rootTraceLabel = self.currentFunctionSymbol + "__gc_roots"
             self.writer.line(".globl " + self.currentFunctionSymbol)
             self.writer.line(self.currentFunctionSymbol + ":")
             self.writer.line("    push rbp")
@@ -204,6 +217,13 @@ library X86_64 {{
                 self.writer.line("    mov QWORD PTR [rbp-" + clearOffset.toString() + "], 0")
                 clearOffset = clearOffset + 8
             }
+            self.writer.line("    mov rax, QWORD PTR [rip+argon_gc_roots]")
+            self.writer.line("    mov QWORD PTR [rbp-" + rootRecordOffset.toString() + "], rax")
+            self.writer.line("    lea rax, [rip+" + rootTraceLabel + "]")
+            self.writer.line("    mov QWORD PTR [rbp-" + (rootRecordOffset - 8).toString() + "], rax")
+            self.writer.line("    mov QWORD PTR [rbp-" + (rootRecordOffset - 16).toString() + "], rbp")
+            self.writer.line("    lea rax, [rbp-" + rootRecordOffset.toString() + "]")
+            self.writer.line("    mov QWORD PTR [rip+argon_gc_roots], rax")
             parameterIndex = 0
             while parameterIndex < function.parameters.length {
                 local destination = self.slot("name:" + function.parameters[parameterIndex].name)
@@ -227,7 +247,20 @@ library X86_64 {{
                 blockIndex = blockIndex + 1
             }
             self.writer.line(endLabel + ":")
+            self.writer.line("    mov rcx, QWORD PTR [rbp-" + rootRecordOffset.toString() + "]")
+            self.writer.line("    mov QWORD PTR [rip+argon_gc_roots], rcx")
             self.writer.line("    leave")
+            self.writer.line("    ret")
+            self.writer.line(rootTraceLabel + ":")
+            self.writer.line("    push rbx")
+            self.writer.line("    mov rbx, rdi")
+            slotIndex = 0
+            while slotIndex < roots.length {
+                self.writer.line("    mov rdi, QWORD PTR [rbx-" + roots[slotIndex].offset.toString() + "]")
+                self.writer.line("    call argon_gc_mark")
+                slotIndex = slotIndex + 1
+            }
+            self.writer.line("    pop rbx")
             self.writer.line("    ret")
             self.writer.line("")
         }
@@ -293,7 +326,10 @@ library X86_64 {{
             if op == "binary" { self.generateBinary(instruction); return }
             if op == "allocate" {
                 self.writer.line("    mov rdi, " + self.typeSize(instruction.ownerType!).toString())
-                self.writer.line("    call argon_alloc")
+                self.writer.line("    lea rsi, [rip+" + self.gcTraceLabel(instruction.ownerType!) + "]")
+                self.writer.line("    lea rdx, [rip+" + self.gcWeakLabel(instruction.ownerType!) + "]")
+                self.writer.line("    xor ecx, ecx")
+                self.writer.line("    call argon_gc_alloc")
                 self.writer.line("    lea rcx, [rip+" + self.typeLabel(instruction.ownerType!) + "]")
                 self.writer.line("    mov QWORD PTR [rax], rcx")
                 self.writer.line("    mov QWORD PTR [rax+8], 1")
@@ -315,7 +351,9 @@ library X86_64 {{
             if op == "array_new" {
                 self.writer.line("    mov rdi, " + self.sizeOf(instruction.elementType!).toString())
                 self.load(instruction.first!, "rsi")
-                self.writer.line("    call argon_array_new")
+                self.writer.line("    lea rdx, [rip+" + self.gcArrayTraceLabel(instruction.result!.typeName) + "]")
+                self.writer.line("    lea rcx, [rip+" + self.gcArrayWeakLabel(instruction.result!.typeName) + "]")
+                self.writer.line("    call argon_gc_array_new")
                 self.storeResult(instruction, "rax")
                 return
             }
@@ -658,7 +696,10 @@ library X86_64 {{
             self.writer.line("    mov QWORD PTR [rip+argon_process_envp], rax")
             self.writer.line("    sub rsp, 16")
             self.writer.line("    mov rdi, " + entrySize.toString())
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    lea rsi, [rip+" + self.gcTraceLabel(entry!.ownerType) + "]")
+            self.writer.line("    lea rdx, [rip+" + self.gcWeakLabel(entry!.ownerType) + "]")
+            self.writer.line("    xor ecx, ecx")
+            self.writer.line("    call argon_gc_alloc")
             self.writer.line("    lea rcx, [rip+" + self.typeLabel(entry!.ownerType) + "]")
             self.writer.line("    mov QWORD PTR [rax], rcx")
             self.writer.line("    mov QWORD PTR [rbp-8], rax")
@@ -714,6 +755,84 @@ library X86_64 {{
             self.writer.line("")
         }
 
+        garbageCollectorRuntime() -> void {
+            self.writer.line(".globl argon_gc_alloc"); self.writer.line("argon_gc_alloc:")
+            self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15")
+            self.writer.line("    mov r12, rdi"); self.writer.line("    mov r13, rsi"); self.writer.line("    mov r14, rdx"); self.writer.line("    mov r15, rcx")
+            self.writer.line("    add rdi, 48"); self.writer.line("    mov rsi, rdi"); self.writer.line("    xor edi, edi"); self.writer.line("    mov edx, 3"); self.writer.line("    mov r10d, 34"); self.writer.line("    mov r8, -1"); self.writer.line("    xor r9d, r9d"); self.writer.line("    mov eax, 9"); self.writer.line("    syscall")
+            self.writer.line("    cmp rax, -4095"); self.writer.line("    jae .Lallocation_error"); self.writer.line("    mov rcx, QWORD PTR [rip+argon_gc_heap]"); self.writer.line("    mov QWORD PTR [rax], rcx")
+            self.writer.line("    lea rcx, [r12+48]"); self.writer.line("    mov QWORD PTR [rax+8], rcx"); self.writer.line("    mov QWORD PTR [rax+16], r13"); self.writer.line("    mov QWORD PTR [rax+24], r14"); self.writer.line("    mov QWORD PTR [rax+32], 0"); self.writer.line("    mov QWORD PTR [rax+40], r15"); self.writer.line("    mov QWORD PTR [rip+argon_gc_heap], rax"); self.writer.line("    add QWORD PTR [rip+argon_gc_bytes], rcx"); self.writer.line("    add rax, 48")
+            self.writer.line("    pop r15"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl argon_gc_maybe_collect"); self.writer.line("argon_gc_maybe_collect:"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl argon_gc_mark"); self.writer.line("argon_gc_mark:"); self.writer.line("    test rdi, rdi"); self.writer.line("    je .Lgc_mark_done"); self.writer.line("    cmp QWORD PTR [rdi+8], 0"); self.writer.line("    je .Lgc_mark_done"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi"); self.writer.line("    sub rbx, 48"); self.writer.line("    cmp QWORD PTR [rbx+32], 0"); self.writer.line("    jne .Lgc_mark_pop"); self.writer.line("    mov QWORD PTR [rbx+32], 1"); self.writer.line("    mov rax, QWORD PTR [rbx+16]"); self.writer.line("    test rax, rax"); self.writer.line("    je .Lgc_mark_pop"); self.writer.line("    call rax"); self.writer.line(".Lgc_mark_pop:"); self.writer.line("    pop rbx"); self.writer.line(".Lgc_mark_done:"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl argon_gc_collect"); self.writer.line("argon_gc_collect:"); self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14")
+            self.writer.line("    mov r12, QWORD PTR [rip+argon_gc_roots]"); self.writer.line(".Lgc_root_frame:"); self.writer.line("    test r12, r12"); self.writer.line("    je .Lgc_weak_start"); self.writer.line("    mov rax, QWORD PTR [r12+8]"); self.writer.line("    mov rdi, QWORD PTR [r12+16]"); self.writer.line("    call rax"); self.writer.line("    mov r12, QWORD PTR [r12]"); self.writer.line("    jmp .Lgc_root_frame")
+            self.writer.line(".Lgc_weak_start:"); self.writer.line("    mov r12, QWORD PTR [rip+argon_gc_heap]"); self.writer.line(".Lgc_weak_next:"); self.writer.line("    test r12, r12"); self.writer.line("    je .Lgc_sweep_start"); self.writer.line("    cmp QWORD PTR [r12+32], 0"); self.writer.line("    je .Lgc_weak_advance"); self.writer.line("    mov rax, QWORD PTR [r12+24]"); self.writer.line("    test rax, rax"); self.writer.line("    je .Lgc_weak_advance"); self.writer.line("    lea rdi, [r12+48]"); self.writer.line("    call rax"); self.writer.line(".Lgc_weak_advance:"); self.writer.line("    mov r12, QWORD PTR [r12]"); self.writer.line("    jmp .Lgc_weak_next")
+            self.writer.line(".Lgc_sweep_start:"); self.writer.line("    lea r12, [rip+argon_gc_heap]"); self.writer.line("    mov QWORD PTR [rip+argon_gc_bytes], 0"); self.writer.line(".Lgc_sweep_next:"); self.writer.line("    mov rbx, QWORD PTR [r12]"); self.writer.line("    test rbx, rbx"); self.writer.line("    je .Lgc_done"); self.writer.line("    cmp QWORD PTR [rbx+32], 0"); self.writer.line("    je .Lgc_reclaim"); self.writer.line("    mov QWORD PTR [rbx+32], 0"); self.writer.line("    mov rax, QWORD PTR [rbx+8]"); self.writer.line("    add QWORD PTR [rip+argon_gc_bytes], rax"); self.writer.line("    mov r12, rbx"); self.writer.line("    jmp .Lgc_sweep_next")
+            self.writer.line(".Lgc_reclaim:"); self.writer.line("    mov r14, QWORD PTR [rbx]"); self.writer.line("    mov QWORD PTR [r12], r14"); self.writer.line("    mov rax, QWORD PTR [rbx+40]"); self.writer.line("    test rax, rax"); self.writer.line("    je .Lgc_unmap"); self.writer.line("    lea rdi, [rbx+48]"); self.writer.line("    call rax"); self.writer.line(".Lgc_unmap:"); self.writer.line("    mov rsi, QWORD PTR [rbx+8]"); self.writer.line("    mov rdi, rbx"); self.writer.line("    mov eax, 11"); self.writer.line("    syscall"); self.writer.line("    jmp .Lgc_sweep_next")
+            self.writer.line(".Lgc_done:"); self.writer.line("    mov rax, QWORD PTR [rip+argon_gc_bytes]"); self.writer.line("    shl rax, 1"); self.writer.line("    cmp rax, 1048576"); self.writer.line("    jae .Lgc_threshold_store"); self.writer.line("    mov eax, 1048576"); self.writer.line(".Lgc_threshold_store:"); self.writer.line("    mov QWORD PTR [rip+argon_gc_threshold], rax"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    leave"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl argon_gc_array_new"); self.writer.line("argon_gc_array_new:"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    mov r12, rdi"); self.writer.line("    mov r13, rsi"); self.writer.line("    mov r14, rdx"); self.writer.line("    push rcx"); self.writer.line("    mov edi, 40"); self.writer.line("    mov rsi, r14"); self.writer.line("    mov rdx, QWORD PTR [rsp]"); self.writer.line("    lea rcx, [rip+argon_gc_array_finalize]"); self.writer.line("    call argon_gc_alloc"); self.writer.line("    add rsp, 8"); self.writer.line("    mov rbx, rax"); self.writer.line("    mov rax, r13"); self.writer.line("    cmp rax, 4"); self.writer.line("    jae .Lgc_array_capacity"); self.writer.line("    mov eax, 4"); self.writer.line(".Lgc_array_capacity:"); self.writer.line("    mov QWORD PTR [rbx], r13"); self.writer.line("    mov QWORD PTR [rbx+8], rax"); self.writer.line("    mov QWORD PTR [rbx+24], r12"); self.writer.line("    mov QWORD PTR [rbx+32], 1"); self.writer.line("    imul rax, r12"); self.writer.line("    mov rdi, rax"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rbx+16], rax"); self.writer.line("    mov rax, rbx"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("argon_gc_array_finalize:"); self.writer.line("    mov rsi, QWORD PTR [rdi+8]"); self.writer.line("    imul rsi, QWORD PTR [rdi+24]"); self.writer.line("    test rsi, rsi"); self.writer.line("    jne .Lgc_array_finalize_size"); self.writer.line("    mov esi, 1"); self.writer.line(".Lgc_array_finalize_size:"); self.writer.line("    mov rdi, QWORD PTR [rdi+16]"); self.writer.line("    mov eax, 11"); self.writer.line("    syscall"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl argon_System_collectGarbage"); self.writer.line("argon_System_collectGarbage:"); self.writer.line("    jmp argon_gc_collect"); self.writer.line("")
+        }
+
+        gcTraceFunctions() -> void {
+            local typeIndex:i64 = 0
+            while typeIndex < self.program.types.length {
+                local typeNode = self.program.types[typeIndex]
+                self.writer.line(self.gcTraceLabel(typeNode.name) + ":"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi")
+                local fieldIndex:i64 = 0
+                while fieldIndex < typeNode.fields.length {
+                    local field = typeNode.fields[fieldIndex]
+                    if field.ownership != "member-weak" && self.isManagedReferenceType(field.typeName) {
+                        local layout = self.findField(field.qualifiedName)
+                        self.writer.line("    mov rdi, QWORD PTR [rbx+" + layout!.offset.toString() + "]"); self.writer.line("    call argon_gc_mark")
+                    }
+                    fieldIndex = fieldIndex + 1
+                }
+                self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line(self.gcWeakLabel(typeNode.name) + ":"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi")
+                fieldIndex = 0
+                while fieldIndex < typeNode.fields.length {
+                    local field = typeNode.fields[fieldIndex]
+                    if field.ownership == "member-weak" {
+                        local layout = self.findField(field.qualifiedName)
+                        local keep = ".Lgc_weak_keep_" + self.nextLabel.toString(); self.nextLabel = self.nextLabel + 1
+                        self.writer.line("    mov rax, QWORD PTR [rbx+" + layout!.offset.toString() + "]"); self.writer.line("    test rax, rax"); self.writer.line("    je " + keep); self.writer.line("    sub rax, 48"); self.writer.line("    cmp QWORD PTR [rax+32], 0"); self.writer.line("    jne " + keep); self.writer.line("    mov QWORD PTR [rbx+" + layout!.offset.toString() + "], 0"); self.writer.line(keep + ":")
+                    }
+                    fieldIndex = fieldIndex + 1
+                }
+                self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("")
+                typeIndex = typeIndex + 1
+            }
+            local arrays = self.structuralArrayTypes()
+            local arrayIndex:i64 = 0
+            while arrayIndex < arrays.length {
+                local arrayType = arrays[arrayIndex]
+                local spec = arrayType.slice(6, arrayType.length - 7)
+                local ownership = "owned"
+                local element = spec
+                if spec.length > 4 { if spec.slice(0, 4) == "ref " { ownership = "ref"; element = spec.slice(4, spec.length - 4) } }
+                if spec.length > 5 { if spec.slice(0, 5) == "weak " { ownership = "weak"; element = spec.slice(5, spec.length - 5) } }
+                local trace = self.gcArrayTraceLabel(arrayType)
+                local traceLoop = trace + "_loop"
+                local traceDone = trace + "_done"
+                self.writer.line(trace + ":"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    xor ebx, ebx"); self.writer.line("    mov r12, rdi")
+                if ownership != "weak" && self.isManagedReferenceType(element) {
+                    self.writer.line(traceLoop + ":"); self.writer.line("    cmp rbx, QWORD PTR [r12]"); self.writer.line("    jae " + traceDone); self.writer.line("    imul rax, rbx, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]"); self.writer.line("    mov rdi, QWORD PTR [rax]"); self.writer.line("    call argon_gc_mark"); self.writer.line("    inc rbx"); self.writer.line("    jmp " + traceLoop)
+                }
+                self.writer.line(traceDone + ":"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    ret")
+                local weakLabel = self.gcArrayWeakLabel(arrayType)
+                local weakLoop = weakLabel + "_loop"
+                local weakNext = weakLabel + "_next"
+                local weakDone = weakLabel + "_done"
+                self.writer.line(weakLabel + ":"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    xor ebx, ebx"); self.writer.line("    mov r12, rdi")
+                if ownership == "weak" && self.isManagedReferenceType(element) {
+                    self.writer.line(weakLoop + ":"); self.writer.line("    cmp rbx, QWORD PTR [r12]"); self.writer.line("    jae " + weakDone); self.writer.line("    imul rax, rbx, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]"); self.writer.line("    mov rcx, QWORD PTR [rax]"); self.writer.line("    test rcx, rcx"); self.writer.line("    je " + weakNext); self.writer.line("    sub rcx, 48"); self.writer.line("    cmp QWORD PTR [rcx+32], 0"); self.writer.line("    jne " + weakNext); self.writer.line("    mov QWORD PTR [rax], 0"); self.writer.line(weakNext + ":"); self.writer.line("    inc rbx"); self.writer.line("    jmp " + weakLoop); self.writer.line(weakDone + ":")
+                }
+                self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("")
+                arrayIndex = arrayIndex + 1
+            }
+        }
+
         arrayRuntime() -> void {
             self.writer.line(".globl argon_array_new")
             self.writer.line("argon_array_new:")
@@ -727,8 +846,11 @@ library X86_64 {{
             self.writer.line("    mov rbx, rsi")
             self.writer.line("    test rbx, rbx")
             self.writer.line("    js .Larray_bounds_error")
-            self.writer.line("    mov edi, 24")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    mov edi, 40")
+            self.writer.line("    xor esi, esi")
+            self.writer.line("    xor edx, edx")
+            self.writer.line("    lea rcx, [rip+argon_gc_array_finalize]")
+            self.writer.line("    call argon_gc_alloc")
             self.writer.line("    mov r13, rax")
             self.writer.line("    mov rax, rbx")
             self.writer.line("    cmp rax, 4")
@@ -737,6 +859,8 @@ library X86_64 {{
             self.writer.line(".Larray_new_capacity:")
             self.writer.line("    mov QWORD PTR [r13], rbx")
             self.writer.line("    mov QWORD PTR [r13+8], rax")
+            self.writer.line("    mov QWORD PTR [r13+24], r12")
+            self.writer.line("    mov QWORD PTR [r13+32], 1")
             self.writer.line("    imul rax, r12")
             self.writer.line("    mov rdi, rax")
             self.writer.line("    call argon_alloc")
@@ -1521,6 +1645,16 @@ library X86_64 {{
             self.writer.line("    .zero 8")
             self.writer.line("argon_filesystem_error:")
             self.writer.line("    .zero 8")
+            self.writer.line("argon_gc_roots:")
+            self.writer.line("    .zero 8")
+            self.writer.line("argon_gc_heap:")
+            self.writer.line("    .zero 8")
+            self.writer.line("argon_gc_bytes:")
+            self.writer.line("    .zero 8")
+            self.writer.line(".section .data")
+            self.writer.line(".align 8")
+            self.writer.line("argon_gc_threshold:")
+            self.writer.line("    .quad 1048576")
             self.writer.line("")
         }
 
@@ -1532,6 +1666,15 @@ library X86_64 {{
         arrayHashLabel(typeName:string) -> string { return ".Largon_array_hash_" + self.mangle(typeName) }
         arrayCopyLabel(typeName:string) -> string { return ".Largon_array_copy_" + self.mangle(typeName) }
         arrayDestroyLabel(typeName:string) -> string { return ".Largon_array_destroy_" + self.mangle(typeName) }
+        gcTraceLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_gc_trace" }
+        gcWeakLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_gc_weak" }
+        gcArrayTraceLabel(typeName:string) -> string { return ".Largon_gc_array_trace_" + self.mangle(typeName) }
+        gcArrayWeakLabel(typeName:string) -> string { return ".Largon_gc_array_weak_" + self.mangle(typeName) }
+
+        isManagedReferenceType(typeName:string) -> bool {
+            local base = self.baseType(typeName)
+            return base == "StringBuilder" || self.isArray(base) || self.findProgramType(base) != null
+        }
 
         baseType(typeName:string) -> string {
             if typeName.length > 0 { if typeName[typeName.length - 1] == 63 { return typeName.slice(0, typeName.length - 1) } }
@@ -1736,6 +1879,9 @@ library X86_64 {{
                     while instructionIndex < self.program.functions[functionIndex].blocks[blockIndex].instructions.length {
                         local instruction = self.program.functions[functionIndex].blocks[blockIndex].instructions[instructionIndex]
                         if instruction.ownerType != null { self.addArrayType(result, instruction.ownerType!) }
+                        if instruction.typeName != null { self.addArrayType(result, instruction.typeName!) }
+                        if instruction.result != null { self.addArrayType(result, instruction.result!.typeName) }
+                        if instruction.first != null { self.addArrayType(result, instruction.first!.typeName) }
                         instructionIndex = instructionIndex + 1
                     }
                     blockIndex = blockIndex + 1
@@ -1813,7 +1959,7 @@ library X86_64 {{
                     self.writer.line("    imul rax, r13, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]"); self.writer.line("    mov rax, QWORD PTR [rax]"); self.writer.line("    test rax, rax"); self.writer.line("    jz " + next); self.writer.line("    mov QWORD PTR [rax+8], 0")
                 }
             }
-            self.writer.line(next + ":"); self.writer.line("    inc r13"); self.writer.line("    jmp " + loop); self.writer.line(liveDone + ":"); self.writer.line("    mov QWORD PTR [r12+24], 0"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line(done + ":"); self.writer.line("    ret")
+            self.writer.line(next + ":"); self.writer.line("    inc r13"); self.writer.line("    jmp " + loop); self.writer.line(liveDone + ":"); self.writer.line("    mov QWORD PTR [r12+32], 0"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line(done + ":"); self.writer.line("    ret")
         }
 
         stableTypeHash(name:string) -> i64 {
@@ -1893,9 +2039,9 @@ library X86_64 {{
             if typeName == "i32" { self.writer.line("    movsxd " + register + ", " + self.register32(register)) }
         }
 
-        reserve(key:string) -> void {
+        reserve(key:string, typeName:string) -> void {
             if self.findSlot(key) != null { return }
-            self.slots.append(new Slot(key, (self.slots.length + 1) * 8))
+            self.slots.append(new Slot(key, (self.slots.length + 1) * 8, typeName))
         }
 
         slot(key:string) -> string { return "QWORD PTR [rbp-" + self.findSlot(key)!.offset.toString() + "]" }

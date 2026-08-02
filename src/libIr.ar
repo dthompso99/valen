@@ -663,6 +663,7 @@ library Ir {{
                     local destroyed = new Instruction("destroy_object")
                     destroyed.first = operand
                     self.emit(destroyed)
+                    self.consumeLifetime(expression.left!)
                     return new Value("void", "", "void")
                 }
                 local instruction = self.temporary("unary", expression.inferredType!)
@@ -1005,7 +1006,9 @@ library Ir {{
         consumeLifetime(expression:Ast.Expression) -> void {
             if expression.symbol == null { return }
             local binding = self.findBinding(expression.symbol!)
-            if binding != null { binding!.lifetimeActive = false }
+            if binding != null {
+                binding!.lifetimeActive = false
+            }
         }
 
         destroyBindings(start:i64) -> void {

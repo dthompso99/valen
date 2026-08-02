@@ -11,9 +11,11 @@ library System {{
     native openWrite(path:string) -> File?
     native read(file:File, count:i64) -> string?
     native writeFile(file:File, input:string) -> i64
-    native close(file:File) -> i64
+    native close(own file:File) -> i64
     native lastError() -> i64
     native currentDirectory() -> string?
+    native environmentVariable(name:string) -> string?
+    native collectGarbage() -> void
     native memoryCopy(destination:Array<u8>, destinationOffset:i64, source:Array<u8>, sourceOffset:i64, count:i64) -> bool
     native memoryCompare(left:Array<u8>, leftOffset:i64, right:Array<u8>, rightOffset:i64, count:i64) -> i64
 

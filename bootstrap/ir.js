@@ -373,6 +373,7 @@ export class IrGenerator {
                 }
                 if (expression.operator === 'delete') {
                     this.emit('destroy_object', {value: operand});
+                    this.consumeLifetime(expression.operand);
                     return {kind: 'void', type: 'void'};
                 }
                 return this.result('unary', expression.inferredType, {operator: expression.operator, operand});
@@ -603,7 +604,9 @@ export class IrGenerator {
 
     consumeLifetime(expression) {
         const local = this.locals.get(expression?.semanticSymbol);
-        if (local) local.lifetimeActive = false;
+        if (local) {
+            local.lifetimeActive = false;
+        }
     }
 
     destroyLifetimeScope(scope) {

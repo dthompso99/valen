@@ -50,9 +50,11 @@ library Semantics {{
             self.declareModules()
             self.bindImports()
             self.declareMembers()
+            self.identifyExternalResources()
             self.bindRelationships()
             self.validateRelationships()
             self.analyzeModules()
+            self.validateFieldInitializerCycles()
             return new Analysis(self.graph, self.diagnostics)
         }
 
@@ -966,6 +968,7 @@ library Semantics {{
                 local operand = self.analyzeExpression(expression.left!, scope, moduleScope)
                 if expression.operator! == "copy" {
                     if !self.isReference(operand) { self.error(expression.span, "copy requires a reference value") }
+                    if self.isExternalResource(operand) { self.error(expression.span, "Native resources cannot be copied") }
                     return self.typed(expression, operand)
                 }
                 if expression.operator! == "delete" {
@@ -974,12 +977,14 @@ library Semantics {{
                     if self.isOptional(operand) || self.findCanonical(deletedType) == null {
                         self.error(expression.span, "delete requires a non-optional object reference")
                     } else {
-                        if expression.left!.symbol == null || (expression.left!.symbol!.kind != "Local" && expression.left!.symbol!.kind != "Parameter") || expression.left!.symbol!.ownership != "owned" {
+                        if self.isExternalResource(deletedType) {
+                            self.error(expression.span, "Native resource '" + deletedType + "' must be passed to its owning cleanup operation")
+                        } else { if expression.left!.symbol == null || (expression.left!.symbol!.kind != "Local" && expression.left!.symbol!.kind != "Parameter") || expression.left!.symbol!.ownership != "owned" {
                             self.error(expression.span, "delete requires an owned local or parameter")
                         } else {
                             expression.left!.symbol!.ownership = "destroyed"
                             expression.left!.symbol!.ownershipVersion = expression.left!.symbol!.ownershipVersion + 1
-                        }
+                        } }
                     }
                     return self.typed(expression, "void")
                 }
@@ -1196,6 +1201,127 @@ library Semantics {{
             return null
         }
 
+        identifyExternalResources() -> void {
+            local moduleIndex:i64 = 0
+            while moduleIndex < self.modules.length {
+                local index:i64 = 0
+                while index < self.modules[moduleIndex].scope.symbols.length {
+                    self.identifyExternalResourcesIn(self.modules[moduleIndex].scope.symbols[index])
+                    index = index + 1
+                }
+                moduleIndex = moduleIndex + 1
+            }
+        }
+
+        identifyExternalResourcesIn(symbol:Symbols.Symbol) -> void {
+            if symbol.memberScope == null { return }
+            local index:i64 = 0
+            while index < symbol.memberScope!.symbols.length {
+                local child = symbol.memberScope!.symbols[index]
+                if child.kind == "Method" && child.isNative && child.returnType != null {
+                    local returned = child.returnType!
+                    if self.isOptional(returned) { returned = returned.slice(0, returned.length - 1) }
+                    local resource = self.findCanonical(returned)
+                    if resource != null { resource!.externalResource = true }
+                }
+                if child.kind == "Object" { self.identifyExternalResourcesIn(child) }
+                index = index + 1
+            }
+        }
+
+        validateFieldInitializerCycles() -> void {
+            local moduleIndex:i64 = 0
+            while moduleIndex < self.graph.modules.length {
+                local index:i64 = 0
+                while index < self.graph.modules[moduleIndex].program.declarations.length {
+                    self.validateInitializerDeclaration(self.graph.modules[moduleIndex].program.declarations[index])
+                    index = index + 1
+                }
+                moduleIndex = moduleIndex + 1
+            }
+        }
+
+        validateInitializerDeclaration(declaration:Ast.Declaration) -> void {
+            self.visitInitializerObject(declaration.symbol!, declaration.span)
+            local index:i64 = 0
+            while index < declaration.members.length {
+                if declaration.members[index].kind == "Object" { self.visitInitializerObject(declaration.members[index].symbol!, declaration.members[index].span) }
+                index = index + 1
+            }
+        }
+
+        visitInitializerObject(symbol:Symbols.Symbol, span:Compiler.SourceSpan) -> void {
+            if symbol.initializerCycleState == 2 { return }
+            if symbol.initializerCycleState == 1 {
+                self.error(span, "Unconditional field-initializer cycle involving '" + symbol.qualifiedName + "'")
+                return
+            }
+            symbol.initializerCycleState = 1
+            local node = self.memberNodeForSymbol(symbol)
+            local top = self.declarationForSymbol(symbol)
+            if node != null { self.visitInitializerMembers(node!.members) } else { if top != null { self.visitInitializerMembers(top!.members) } }
+            symbol.initializerCycleState = 2
+        }
+
+        visitInitializerMembers(members:Array<Ast.MemberDeclaration>) -> void {
+            local index:i64 = 0
+            while index < members.length {
+                local field = members[index]
+                if field.kind == "Field" && field.initializer != null {
+                    local dependency = self.initializerDependency(field.initializer!)
+                    if dependency != null { self.visitInitializerObject(dependency!, field.span) }
+                }
+                index = index + 1
+            }
+        }
+
+        initializerDependency(expression:Ast.Expression) -> ref Symbols.Symbol? {
+            local current = expression
+            while current.kind == "Conversion" || current.kind == "Unwrap" { current = current.left! }
+            if current.kind == "New" { return current.symbol }
+            return null
+        }
+
+        memberNodeForSymbol(symbol:Symbols.Symbol) -> ref Ast.MemberDeclaration? {
+            local moduleIndex:i64 = 0
+            while moduleIndex < self.graph.modules.length {
+                local declarations = self.graph.modules[moduleIndex].program.declarations
+                local index:i64 = 0
+                while index < declarations.length {
+                    local found = self.memberNodeForSymbolIn(declarations[index].members, symbol)
+                    if found != null { return found }
+                    index = index + 1
+                }
+                moduleIndex = moduleIndex + 1
+            }
+            return null
+        }
+
+        declarationForSymbol(symbol:Symbols.Symbol) -> ref Ast.Declaration? {
+            local moduleIndex:i64 = 0
+            while moduleIndex < self.graph.modules.length {
+                local declarations = self.graph.modules[moduleIndex].program.declarations
+                local index:i64 = 0
+                while index < declarations.length {
+                    if declarations[index].symbol === symbol { return declarations[index] }
+                    index = index + 1
+                }
+                moduleIndex = moduleIndex + 1
+            }
+            return null
+        }
+
+        memberNodeForSymbolIn(members:Array<Ast.MemberDeclaration>, symbol:Symbols.Symbol) -> ref Ast.MemberDeclaration? {
+            local index:i64 = 0
+            while index < members.length {
+                if members[index].symbol === symbol { return members[index] }
+                local found = self.memberNodeForSymbolIn(members[index].members, symbol)
+                if found != null { return found }
+                index = index + 1
+            }
+            return null
+        }
+
         isUsedContract(target:Symbols.Symbol) -> bool {
             local moduleIndex:i64 = 0
             while moduleIndex < self.modules.length {
@@ -1369,19 +1495,34 @@ library Semantics {{
         consumeOwnership(expression:Ast.Expression, parameter:Symbols.Symbol) -> void {
             if self.isOwningExpression(expression) { return }
             if expression.kind == "Call" { return }
-            if expression.symbol != null {
-                local source = expression.symbol!
+            local resolvedSource = self.ownershipSource(expression)
+            if resolvedSource != null {
+                local source = resolvedSource!
                 if source.kind == "Local" || source.kind == "Parameter" {
                     if source.ownership != "owned" {
                         self.error(expression.span, "Cannot pass borrowed reference '" + source.name + "' to owning parameter '" + parameter.name + "'; use 'copy " + source.name + "'")
                         return
                     }
-                    source.ownership = "borrowed"
+                    if !self.isExternalResource(source.typeName!) || parameter.owner == null || !parameter.owner!.isNative { source.ownership = "borrowed" }
                     expression.ownership = "consume"
                     return
                 }
             }
             self.error(expression.span, "Owning parameter '" + parameter.name + "' requires an owned value; use 'copy' to create one")
+        }
+
+        ownershipSource(expression:Ast.Expression) -> ref Symbols.Symbol? {
+            if expression.symbol != null { return expression.symbol }
+            if expression.kind == "Unwrap" || expression.kind == "Propagate" { return self.ownershipSource(expression.left!) }
+            return null
+        }
+
+        isExternalResource(typeName:string) -> bool {
+            local base = typeName
+            if self.isOptional(base) { base = base.slice(0, base.length - 1) }
+            local symbol = self.findCanonical(base)
+            if symbol == null { return false }
+            return symbol!.externalResource
         }
         isInteger(name:string) -> bool { return name == "u8" || name == "i8" || name == "u16" || name == "i16" || name == "u32" || name == "i32" || name == "u64" || name == "i64" }
 

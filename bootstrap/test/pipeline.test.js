@@ -97,7 +97,7 @@ entry {{
 test('sample programs pass semantic analysis and IR generation', () => {
     for (const file of ['examples/simple/simple.ar', 'examples/nested/nested.ar']) {
         const filePath = path.join(projectRoot, file);
-        const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+        const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot, libraryPath: path.join(projectRoot, 'lib')});
         assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
         const ir = new IrGenerator().generate(semantic);
         assert.ok(ir.entry);
@@ -143,7 +143,7 @@ test('dynamic arrays support construction, indexing, assignment, length, and app
 
 test('hashed symbol collections and parent-linked scopes resolve end to end', () => {
     const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/scopes.ar');
-    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot, libraryPath: path.join(projectRoot, 'lib')});
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     const ir = new IrGenerator().generate(semantic);
     const declarations = ir.functions.flatMap(fn => fn.blocks.flatMap(block =>
@@ -221,6 +221,50 @@ test('file operations lower to native open, read, write, and close facilities', 
     for (const symbol of ['openRead', 'openWrite', 'read', 'writeFile', 'close']) {
         assert.match(assembly, new RegExp(`argon_System_${symbol}:`));
     }
+});
+
+test('native object handles transfer through owning cleanup operations and cannot be copied or deleted', () => {
+    const valid = new SemanticAnalyzer().analyze(new Parser().parse(`
+        library Native {{
+            native acquire() -> Handle?
+            native release(own handle:Handle) -> void
+            Handle {{}}
+        }}
+        entry {{
+            __() -> void {
+                local handle = Native.acquire()
+                if handle != null { Native.release(handle!) }
+            }
+        }}
+    `, 'native-resource.ar'));
+    assert.equal(valid.success, true, JSON.stringify(valid.diagnostics));
+    const release = valid.program.libraries[0].members.find(member => member.name === 'release');
+    assert.equal(release.semanticSymbol.parameters[0].ownership, 'owned');
+
+    for (const operation of ['copy handle!', 'delete handle!']) {
+        const invalid = new SemanticAnalyzer().analyze(new Parser().parse(`
+            library Native {{ native acquire() -> Handle?; Handle {{}} }}
+            entry {{ __() -> void { local handle = Native.acquire(); ${operation} } }}
+        `, 'invalid-native-resource.ar'));
+        assert.equal(invalid.success, false);
+        assert.match(invalid.diagnostics[0].message, /Native resource/);
+    }
+});
+
+test('unconditional field-initializer allocation cycles are rejected', () => {
+    const cyclic = new SemanticAnalyzer().analyze(new Parser().parse(`
+        First {{ member second:Second = new Second() }}
+        Second {{ member first:First = new First() }}
+        entry {{ __() -> void {} }}
+    `, 'initializer-cycle.ar'));
+    assert.equal(cyclic.success, false);
+    assert.ok(cyclic.diagnostics.some(diagnostic => /field-initializer cycle/.test(diagnostic.message)));
+
+    const finite = new SemanticAnalyzer().analyze(new Parser().parse(`
+        Node {{ member next:Node? = null }}
+        entry {{ __() -> void { local node = new Node() } }}
+    `, 'finite-initializer.ar'));
+    assert.equal(finite.success, true, JSON.stringify(finite.diagnostics));
 });
 
 test('runtime paths, filesystem errors, allocation checks, and memory operations lower natively', () => {
@@ -634,6 +678,19 @@ test('array insertion transfers element ownership through semantic analysis and 
     assert.match(assembly, /call argon_array_append/);
     assert.match(assembly, /mov QWORD PTR \[rdx\+8\], 0/);
     assert.match(assembly, /cmp QWORD PTR \[rax\+8\], 0/);
+});
+
+test('managed objects publish precise roots, trace callbacks, and runtime finalizers', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/garbage-collection.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot, libraryPath: path.join(projectRoot, 'lib')});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
+    assert.match(assembly, /argon_gc_roots/);
+    assert.match(assembly, /call argon_gc_mark/);
+    assert.match(assembly, /argon_gc_collect:/);
+    assert.match(assembly, /argon_gc_array_finalize:/);
+    assert.match(assembly, /call rax\n\.Lgc_unmap:/);
+    assert.match(assembly, /argon_System_collectGarbage:/);
 });
 
 test('UTF-8 strings support length, byte indexing, equality, concatenation, and slicing', () => {

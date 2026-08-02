@@ -151,7 +151,7 @@ The active post-bootstrap roadmap is maintained in [`language_checklist.md`](lan
 - [ ] Flow-sensitive optional narrowing and general `Result` propagation
 - [ ] Diagnostic severity enums, notes, and multi-span labels
 - [ ] Deep structural equality for objects and arrays, including cycle and hashing rules
-- [ ] Tracing garbage collection and precise root tracking
+- [x] Explicit tracing garbage collection and precise stack-slot root tracking
 - [ ] Explicit `delete`, deterministic disposal, and external-resource lifetime semantics
 - [ ] Detect unconditional cycles between field initializers
 - [ ] Process-lifetime arena allocator to batch native allocations

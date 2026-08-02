@@ -49,6 +49,7 @@ export class X86_64Backend {
             'argon_System_lastError',
             'argon_System_currentDirectory',
             'argon_System_environmentVariable',
+            'argon_System_collectGarbage',
             'argon_System_link',
             'argon_System_memoryCopy',
             'argon_System_memoryCompare'
@@ -72,6 +73,8 @@ export class X86_64Backend {
         for (const fn of program.functions) lines.push(...this.generateFunction(fn));
         lines.push(...this.generateMain());
         lines.push(...this.structuralRuntime());
+        lines.push(...this.gcTraceFunctions());
+        lines.push(...this.gcArrayTraceFunctions());
 
         if (runtimeSymbols.has('argon_System_print')) lines.push(...this.printI64Runtime());
         if (this.needsProcessArguments) lines.push(...this.argumentsRuntime());
@@ -86,16 +89,20 @@ export class X86_64Backend {
         if (runtimeSymbols.has('argon_System_lastError')) lines.push(...this.lastErrorRuntime());
         if (runtimeSymbols.has('argon_System_currentDirectory')) lines.push(...this.currentDirectoryRuntime());
         if (runtimeSymbols.has('argon_System_environmentVariable')) lines.push(...this.environmentVariableRuntime());
+        if (runtimeSymbols.has('argon_System_collectGarbage')) lines.push('.globl argon_System_collectGarbage', 'argon_System_collectGarbage:', '    jmp argon_gc_collect', '');
         if (runtimeSymbols.has('argon_System_link')) lines.push(...this.linkRuntime());
         if (runtimeSymbols.has('argon_System_memoryCopy')) lines.push(...this.memoryCopyRuntime());
         if (runtimeSymbols.has('argon_System_memoryCompare')) lines.push(...this.memoryCompareRuntime());
         lines.push(...this.runtimeErrorRuntime());
         lines.push(...this.allocationRuntime());
+        lines.push(...this.garbageCollectorRuntime());
+        lines.push(...this.gcArrayRuntime());
         lines.push(...this.arrayRuntime());
         lines.push(...this.stringRuntime());
         lines.push(...this.builderRuntime());
         lines.push(...this.stringData());
         lines.push(...this.typeData());
+        lines.push(...this.gcData());
         if (this.needsProcessArguments) lines.push(...this.processData());
         if (this.needsFilesystemState) lines.push(...this.filesystemData());
         lines.push('.section .note.GNU-stack,"",@progbits');
@@ -105,20 +112,25 @@ export class X86_64Backend {
     generateFunction(fn) {
         this.fn = fn;
         this.slots = new Map();
+        const slotTypes = new Map();
         let slotCount = 0;
-        const reserve = key => {
+        const reserve = (key, type = null) => {
             if (!this.slots.has(key)) this.slots.set(key, ++slotCount * 8);
+            if (type) slotTypes.set(key, type);
         };
 
-        for (const parameter of fn.parameters) reserve(`name:${parameter.name}`);
+        for (const parameter of fn.parameters) reserve(`name:${parameter.name}`, parameter.type);
         for (const instruction of fn.blocks.flatMap(block => block.instructions)) {
-            if (instruction.result) reserve(`temp:${instruction.result}`);
+            if (instruction.result) reserve(`temp:${instruction.result}`, instruction.type);
             if (instruction.op === 'declare_local' || instruction.op === 'store_local') {
-                reserve(`name:${instruction.name}`);
+                reserve(`name:${instruction.name}`, instruction.type ?? instruction.value?.type);
             }
         }
 
-        const frameSize = Math.ceil((slotCount * 8) / 16) * 16;
+        const roots = [...slotTypes].filter(([, type]) => this.isManagedReferenceType(type));
+        const rootRecordSize = 24;
+        const frameSize = Math.ceil((slotCount * 8 + rootRecordSize) / 16) * 16;
+        const rootRecordOffset = slotCount * 8 + rootRecordSize;
         const symbol = this.functionSymbols.get(fn.name);
         const endLabel = `${symbol}__return`;
         const lines = [
@@ -131,6 +143,11 @@ export class X86_64Backend {
         for (let offset = 8; offset <= frameSize; offset += 8) {
             lines.push(`    mov QWORD PTR [rbp-${offset}], 0`);
         }
+        const rootTraceLabel = `${symbol}__gc_roots`;
+        lines.push('    mov rax, QWORD PTR [rip+argon_gc_roots]', `    mov QWORD PTR [rbp-${rootRecordOffset}], rax`,
+            `    lea rax, [rip+${rootTraceLabel}]`, `    mov QWORD PTR [rbp-${rootRecordOffset - 8}], rax`,
+            `    mov QWORD PTR [rbp-${rootRecordOffset - 16}], rbp`);
+        lines.push(`    lea rax, [rbp-${rootRecordOffset}]`, '    mov QWORD PTR [rip+argon_gc_roots], rax');
 
         fn.parameters.forEach((parameter, index) => {
             if (index < argumentRegisters.length) {
@@ -150,8 +167,17 @@ export class X86_64Backend {
             }
         }
 
-        lines.push(`${endLabel}:`, '    leave', '    ret', '');
+        lines.push(`${endLabel}:`, `    mov rcx, QWORD PTR [rbp-${rootRecordOffset}]`, '    mov QWORD PTR [rip+argon_gc_roots], rcx', '    leave', '    ret',
+            `${rootTraceLabel}:`, '    push rbx', '    mov rbx, rdi');
+        for (const [key] of roots) lines.push(`    mov rdi, QWORD PTR [rbx-${this.slots.get(key)}]`, '    call argon_gc_mark');
+        lines.push('    pop rbx', '    ret', '');
         return lines;
+    }
+
+    isManagedReferenceType(type) {
+        if (!type) return false;
+        const base = type.endsWith('?') ? type.slice(0, -1) : type;
+        return base === 'StringBuilder' || base.startsWith('Array<') || this.typeSizes.has(base);
     }
 
     generateInstruction(instruction, endLabel) {
@@ -210,7 +236,8 @@ export class X86_64Backend {
                 lines.push(...this.binary(instruction));
                 break;
             case 'allocate':
-                lines.push(`    mov rdi, ${this.typeSizes.get(instruction.objectType) ?? 8}`, '    call argon_alloc');
+                lines.push(`    mov rdi, ${this.typeSizes.get(instruction.objectType) ?? 8}`,
+                    `    lea rsi, [rip+${this.gcTraceLabel(instruction.objectType)}]`, `    lea rdx, [rip+${this.gcWeakLabel(instruction.objectType)}]`, '    xor ecx, ecx', '    call argon_gc_alloc');
                 lines.push(`    lea rcx, [rip+${this.typeLabel(instruction.objectType)}]`, '    mov QWORD PTR [rax], rcx');
                 lines.push('    mov QWORD PTR [rax+8], 1');
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
@@ -227,7 +254,8 @@ export class X86_64Backend {
             case 'array_new':
                 lines.push(`    mov rdi, ${this.sizeOf(instruction.elementType)}`);
                 lines.push(...this.load(instruction.length, 'rsi'));
-                lines.push('    call argon_array_new', `    mov ${this.temp(instruction.result)}, rax`);
+                lines.push(`    lea rdx, [rip+${this.gcArrayTraceLabel(instruction.type)}]`, `    lea rcx, [rip+${this.gcArrayWeakLabel(instruction.type)}]`,
+                    '    call argon_gc_array_new', `    mov ${this.temp(instruction.result)}, rax`);
                 break;
             case 'array_length':
                 lines.push(...this.load(instruction.array, 'rax'));
@@ -545,6 +573,7 @@ export class X86_64Backend {
         };
         for (const type of this.program.types) for (const field of type.fields) add(field.type);
         for (const fn of this.program.functions) for (const block of fn.blocks) for (const instruction of block.instructions) {
+            add(instruction.type);
             add(instruction.valueType);
             add(instruction.arrayType);
             add(instruction.objectType);
@@ -743,7 +772,7 @@ export class X86_64Backend {
             lines.push(`    imul rax, r13, ${size}`, '    add rax, QWORD PTR [r12+16]', '    mov rax, QWORD PTR [rax]',
                 '    test rax, rax', `    jz ${loop}_next`, '    mov QWORD PTR [rax+8], 0', `${loop}_next:`);
         }
-        lines.push('    inc r13', `    jmp ${loop}`, `${done}_live:`, '    mov QWORD PTR [r12+24], 0', '    pop r13', '    pop r12', `${done}:`, '    ret', '');
+        lines.push('    inc r13', `    jmp ${loop}`, `${done}_live:`, '    mov QWORD PTR [r12+32], 0', '    pop r13', '    pop r12', `${done}:`, '    ret', '');
         return lines;
     }
 
@@ -1364,6 +1393,105 @@ export class X86_64Backend {
         ];
     }
 
+    garbageCollectorRuntime() {
+        return [
+            '.globl argon_gc_alloc', 'argon_gc_alloc:',
+            '    push r12', '    push r13', '    push r14', '    push r15', '    mov r12, rdi', '    mov r13, rsi', '    mov r14, rdx', '    mov r15, rcx',
+            '    add rdi, 48', '    mov rsi, rdi', '    xor edi, edi', '    mov edx, 3', '    mov r10d, 34', '    mov r8, -1', '    xor r9d, r9d', '    mov eax, 9', '    syscall',
+            '    cmp rax, -4095', '    jae .Lallocation_error', '    mov rcx, QWORD PTR [rip+argon_gc_heap]', '    mov QWORD PTR [rax], rcx',
+            '    lea rcx, [r12+48]', '    mov QWORD PTR [rax+8], rcx', '    mov QWORD PTR [rax+16], r13', '    mov QWORD PTR [rax+24], r14',
+            '    mov QWORD PTR [rax+32], 0', '    mov QWORD PTR [rax+40], r15', '    mov QWORD PTR [rip+argon_gc_heap], rax',
+            '    add QWORD PTR [rip+argon_gc_bytes], rcx', '    add rax, 48', '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    ret', '',
+            '.globl argon_gc_maybe_collect', 'argon_gc_maybe_collect:', '    ret', '',
+            '.globl argon_gc_mark', 'argon_gc_mark:', '    test rdi, rdi', '    je .Lgc_mark_done', '    cmp QWORD PTR [rdi+8], 0', '    je .Lgc_mark_done', '    push rbx', '    mov rbx, rdi', '    sub rbx, 48',
+            '    cmp QWORD PTR [rbx+32], 0', '    jne .Lgc_mark_pop',
+            '    mov QWORD PTR [rbx+32], 1', '    mov rax, QWORD PTR [rbx+16]', '    test rax, rax', '    je .Lgc_mark_pop', '    call rax',
+            '.Lgc_mark_pop:', '    pop rbx', '.Lgc_mark_done:', '    ret', '',
+            '.globl argon_gc_collect', 'argon_gc_collect:', '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    push r13', '    push r14',
+            '    mov r12, QWORD PTR [rip+argon_gc_roots]', '.Lgc_root_frame:', '    test r12, r12', '    je .Lgc_weak_start', '    mov rax, QWORD PTR [r12+8]', '    mov rdi, QWORD PTR [r12+16]', '    call rax',
+            '    mov r12, QWORD PTR [r12]', '    jmp .Lgc_root_frame',
+            '.Lgc_weak_start:', '    mov r12, QWORD PTR [rip+argon_gc_heap]', '.Lgc_weak_next:', '    test r12, r12', '    je .Lgc_sweep_start',
+            '    cmp QWORD PTR [r12+32], 0', '    je .Lgc_weak_advance', '    mov rax, QWORD PTR [r12+24]', '    test rax, rax', '    je .Lgc_weak_advance', '    lea rdi, [r12+48]', '    call rax',
+            '.Lgc_weak_advance:', '    mov r12, QWORD PTR [r12]', '    jmp .Lgc_weak_next',
+            '.Lgc_sweep_start:', '    lea r12, [rip+argon_gc_heap]', '    mov QWORD PTR [rip+argon_gc_bytes], 0', '.Lgc_sweep_next:', '    mov rbx, QWORD PTR [r12]', '    test rbx, rbx', '    je .Lgc_done',
+            '    cmp QWORD PTR [rbx+32], 0', '    je .Lgc_reclaim', '    mov QWORD PTR [rbx+32], 0', '    mov rax, QWORD PTR [rbx+8]', '    add QWORD PTR [rip+argon_gc_bytes], rax', '    mov r12, rbx', '    jmp .Lgc_sweep_next',
+            '.Lgc_reclaim:', '    mov r14, QWORD PTR [rbx]', '    mov QWORD PTR [r12], r14', '    mov rax, QWORD PTR [rbx+40]', '    test rax, rax', '    je .Lgc_unmap', '    lea rdi, [rbx+48]', '    call rax',
+            '.Lgc_unmap:', '    mov rsi, QWORD PTR [rbx+8]', '    mov rdi, rbx', '    mov eax, 11', '    syscall', '    jmp .Lgc_sweep_next',
+            '.Lgc_done:', '    mov rax, QWORD PTR [rip+argon_gc_bytes]', '    shl rax, 1', '    cmp rax, 1048576', '    jae .Lgc_threshold_store', '    mov eax, 1048576', '.Lgc_threshold_store:', '    mov QWORD PTR [rip+argon_gc_threshold], rax', '    pop r14', '    pop r13', '    pop r12', '    pop rbx', '    leave', '    ret', ''
+        ];
+    }
+
+    gcArrayRuntime() {
+        return [
+            '.globl argon_gc_array_new', 'argon_gc_array_new:', '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    push r13', '    push r14', '    push r15', '    sub rsp, 8',
+            '    mov r12, rdi', '    mov r13, rsi', '    mov r14, rdx', '    mov r15, rcx', '    test r13, r13', '    js .Larray_bounds_error',
+            '    mov edi, 40', '    mov rsi, r14', '    mov rdx, r15', '    lea rcx, [rip+argon_gc_array_finalize]', '    call argon_gc_alloc', '    mov rbx, rax',
+            '    mov rax, r13', '    cmp rax, 4', '    jae .Lgc_array_capacity', '    mov eax, 4', '.Lgc_array_capacity:',
+            '    mov QWORD PTR [rbx], r13', '    mov QWORD PTR [rbx+8], rax', '    mov QWORD PTR [rbx+24], r12', '    mov QWORD PTR [rbx+32], 1', '    imul rax, r12', '    mov rdi, rax', '    call argon_alloc', '    mov QWORD PTR [rbx+16], rax', '    mov rax, rbx',
+            '    add rsp, 8', '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    pop rbx', '    leave', '    ret', '',
+            'argon_gc_array_finalize:', '    mov rsi, QWORD PTR [rdi+8]', '    imul rsi, QWORD PTR [rdi+24]', '    test rsi, rsi', '    jne .Lgc_array_finalize_size', '    mov esi, 1',
+            '.Lgc_array_finalize_size:', '    mov rdi, QWORD PTR [rdi+16]', '    mov eax, 11', '    syscall', '    ret', ''
+        ];
+    }
+
+    gcTraceFunctions() {
+        const lines = [];
+        for (const type of this.program.types) {
+            lines.push(`${this.gcTraceLabel(type.name)}:`, '    push rbx', '    mov rbx, rdi');
+            for (const field of type.fields) {
+                if (field.ownership === 'member-weak' || !this.isManagedReferenceType(field.type)) continue;
+                const layout = this.fieldOffsets.get(field.symbol);
+                lines.push(`    mov rdi, QWORD PTR [rbx+${layout.offset}]`, '    call argon_gc_mark');
+            }
+            lines.push('    pop rbx', '    ret', `${this.gcWeakLabel(type.name)}:`, '    push rbx', '    mov rbx, rdi');
+            for (const field of type.fields) {
+                if (field.ownership !== 'member-weak') continue;
+                const layout = this.fieldOffsets.get(field.symbol);
+                const keep = `.Lgc_weak_keep_${this.runtimeLabel++}`;
+                lines.push(`    mov rax, QWORD PTR [rbx+${layout.offset}]`, '    test rax, rax', `    je ${keep}`, '    sub rax, 48',
+                    '    cmp QWORD PTR [rax+32], 0', `    jne ${keep}`, `    mov QWORD PTR [rbx+${layout.offset}], 0`, `${keep}:`);
+            }
+            lines.push('    pop rbx', '    ret', '');
+        }
+        return lines;
+    }
+
+    gcArrayTraceFunctions() {
+        const lines = [];
+        for (const type of this.structuralArrayTypes()) {
+            const spec = type.slice(6, -1);
+            const ownership = spec.startsWith('ref ') ? 'ref' : spec.startsWith('weak ') ? 'weak' : 'owned';
+            const element = ownership === 'ref' ? spec.slice(4) : ownership === 'weak' ? spec.slice(5) : spec;
+            const size = this.sizeOf(element);
+            const managed = this.isManagedReferenceType(element);
+            const traceLoop = `${this.gcArrayTraceLabel(type)}_loop`, traceDone = `${this.gcArrayTraceLabel(type)}_done`;
+            lines.push(`${this.gcArrayTraceLabel(type)}:`, '    push rbx', '    push r12', '    xor ebx, ebx', '    mov r12, rdi');
+            if (managed && ownership !== 'weak') {
+                lines.push(`${traceLoop}:`, '    cmp rbx, QWORD PTR [r12]', `    jae ${traceDone}`, `    imul rax, rbx, ${size}`,
+                    '    add rax, QWORD PTR [r12+16]', '    mov rdi, QWORD PTR [rax]', '    call argon_gc_mark', '    inc rbx', `    jmp ${traceLoop}`);
+            }
+            lines.push(`${traceDone}:`, '    pop r12', '    pop rbx', '    ret', `${this.gcArrayWeakLabel(type)}:`, '    push rbx', '    push r12', '    xor ebx, ebx', '    mov r12, rdi');
+            if (managed && ownership === 'weak') {
+                const weakLoop = `${this.gcArrayWeakLabel(type)}_loop`, weakNext = `${this.gcArrayWeakLabel(type)}_next`, weakDone = `${this.gcArrayWeakLabel(type)}_done`;
+                lines.push(`${weakLoop}:`, '    cmp rbx, QWORD PTR [r12]', `    jae ${weakDone}`, `    imul rax, rbx, ${size}`,
+                    '    add rax, QWORD PTR [r12+16]', '    mov rcx, QWORD PTR [rax]', '    test rcx, rcx', `    je ${weakNext}`,
+                    '    sub rcx, 48', '    cmp QWORD PTR [rcx+32], 0', `    jne ${weakNext}`, '    mov QWORD PTR [rax], 0',
+                    `${weakNext}:`, '    inc rbx', `    jmp ${weakLoop}`, `${weakDone}:`);
+            }
+            lines.push('    pop r12', '    pop rbx', '    ret', '');
+        }
+        return lines;
+    }
+
+    gcData() {
+        return ['.section .bss', '.align 8', 'argon_gc_roots:', '    .zero 8', 'argon_gc_heap:', '    .zero 8', 'argon_gc_bytes:', '    .zero 8', '.section .data', '.align 8', 'argon_gc_threshold:', '    .quad 1048576', '.text'];
+    }
+
+    gcTraceLabel(typeName) { return `${this.typeLabel(typeName)}_gc_trace`; }
+    gcWeakLabel(typeName) { return `${this.typeLabel(typeName)}_gc_weak`; }
+    gcArrayTraceLabel(typeName) { return `.Largon_gc_array_trace_${this.mangle(typeName)}`; }
+    gcArrayWeakLabel(typeName) { return `.Largon_gc_array_weak_${this.mangle(typeName)}`; }
+
     arrayRuntime() {
         return [
             '.globl argon_array_new',
@@ -1378,8 +1506,7 @@ export class X86_64Backend {
             '    mov rbx, rsi',
             '    test rbx, rbx',
             '    js .Larray_bounds_error',
-            '    mov edi, 24',
-            '    call argon_alloc',
+            '    mov edi, 40', '    xor esi, esi', '    xor edx, edx', '    lea rcx, [rip+argon_gc_array_finalize]', '    call argon_gc_alloc',
             '    mov r13, rax',
             '    mov rax, rbx',
             '    cmp rax, 4',
@@ -1388,6 +1515,8 @@ export class X86_64Backend {
             '.Larray_new_capacity:',
             '    mov QWORD PTR [r13], rbx',
             '    mov QWORD PTR [r13+8], rax',
+            '    mov QWORD PTR [r13+24], r12',
+            '    mov QWORD PTR [r13+32], 1',
             '    imul rax, r12',
             '    mov rdi, rax',
             '    call argon_alloc',

@@ -31,10 +31,12 @@ export class SemanticAnalyzer {
         for (const declaration of program.libraries) this.declareObject(declaration, null, this.globals, 'Library');
         for (const declaration of program.objects) this.declareMembers(declaration);
         for (const declaration of program.libraries) this.declareMembers(declaration);
+        this.identifyExternalResources();
         for (const declaration of [...program.objects, ...program.libraries]) this.bindRelationships(declaration);
         for (const declaration of [...program.objects, ...program.libraries]) this.validateRelationships(declaration);
         for (const declaration of program.objects) this.analyzeObject(declaration);
         for (const declaration of program.libraries) this.analyzeObject(declaration);
+        this.validateFieldInitializerCycles();
 
         return {
             program,
@@ -77,6 +79,7 @@ export class SemanticAnalyzer {
                 this.declareMembers(declaration);
             }
         }
+        this.identifyExternalResources();
         for (const module of graph.modules.values()) {
             for (const declaration of [...module.program.objects, ...module.program.libraries]) this.bindRelationships(declaration);
         }
@@ -88,6 +91,7 @@ export class SemanticAnalyzer {
                 this.analyzeObject(declaration);
             }
         }
+        this.validateFieldInitializerCycles();
 
         return {
             program: graph.entry?.program ?? null,
@@ -203,7 +207,8 @@ export class SemanticAnalyzer {
                 defaultValue: parameter.defaultValue,
                 declaration: parameter,
                 owning: parameter.owning,
-                ownership: parameter.owning ? 'owned' : 'borrowed'
+                ownership: parameter.owning ? 'owned' : 'borrowed',
+                owner: method
             }));
             let sawDefault = false;
             for (const parameter of method.parameters) {
@@ -804,12 +809,18 @@ export class SemanticAnalyzer {
                 const operand = this.analyzeExpression(expression.operand, scope, object);
                 if (expression.operator === 'copy') {
                     if (!this.isReferenceType(operand)) this.report(expression.operand.span, `copy requires a reference value, got '${operand}'`);
+                    if (this.isExternalResourceType(operand)) {
+                        const resourceType = this.isOptionalType(operand) ? this.optionalBaseType(operand) : operand;
+                        this.report(expression.span, `Native resource '${resourceType}' cannot be copied`);
+                    }
                     type = operand;
                 } else if (expression.operator === 'delete') {
                     const base = this.isOptionalType(operand) ? this.optionalBaseType(operand) : operand;
                     const source = expression.operand.semanticSymbol;
                     if (this.isOptionalType(operand) || !this.findObjectType(base)) {
                         this.report(expression.span, `delete requires a non-optional object reference`);
+                    } else if (this.isExternalResourceType(base)) {
+                        this.report(expression.span, `Native resource '${base}' must be passed to its owning cleanup operation`);
                     } else if (!source || !['Local', 'Parameter'].includes(source.kind) || source.ownership !== 'owned') {
                         this.report(expression.span, `delete requires an owned local or parameter`);
                     } else {
@@ -1267,17 +1278,74 @@ export class SemanticAnalyzer {
 
     consumeOwnership(expression, parameter) {
         if (this.isOwningExpression(expression) || expression?.kind === 'CallExpression') return;
-        const source = expression?.semanticSymbol;
+        const source = this.ownershipSource(expression);
         if (source?.kind === 'Local' || source?.kind === 'Parameter') {
             if (source.ownership !== 'owned') {
                 this.report(expression.span, `Cannot pass borrowed reference '${source.name}' to owning parameter '${parameter.name}'; use 'copy ${source.name}'`);
                 return;
             }
-            source.ownership = 'borrowed';
+            if (!this.isExternalResourceType(source.type) || !parameter.owner?.isNative) source.ownership = 'borrowed';
             expression.ownership = 'consume';
             return;
         }
         this.report(expression.span, `Owning parameter '${parameter.name}' requires an owned value; use 'copy' to create one`);
+    }
+
+    ownershipSource(expression) {
+        if (expression?.semanticSymbol) return expression.semanticSymbol;
+        if (expression?.kind === 'UnwrapExpression' || expression?.kind === 'PropagateExpression') {
+            return this.ownershipSource(expression.expression);
+        }
+        return null;
+    }
+
+    isExternalResourceType(type) {
+        if (!type) return false;
+        const base = this.isOptionalType(type) ? this.optionalBaseType(type) : type;
+        return this.findObjectType(base)?.externalResource === true;
+    }
+
+    identifyExternalResources() {
+        for (const object of this.objectSymbols.values()) {
+            for (const methods of object.methodOverloads.values()) {
+                for (const method of methods) {
+                    if (!method.isNative) continue;
+                    const base = this.isOptionalType(method.returnType) ? this.optionalBaseType(method.returnType) : method.returnType;
+                    const returned = this.findObjectType(base);
+                    if (returned) returned.externalResource = true;
+                }
+            }
+        }
+    }
+
+    validateFieldInitializerCycles() {
+        const state = new Map();
+        const stack = [];
+        const visit = object => {
+            if (state.get(object) === 2) return;
+            if (state.get(object) === 1) {
+                const start = stack.indexOf(object);
+                const cycle = [...stack.slice(start), object];
+                this.report(object.declaration.span, `Unconditional field-initializer cycle: ${cycle.map(item => item.qualifiedName).join(' -> ')}`);
+                return;
+            }
+            state.set(object, 1);
+            stack.push(object);
+            for (const field of object.fields.values()) {
+                const dependency = this.fieldInitializerDependency(field.declaration.initializer);
+                if (dependency) visit(dependency);
+            }
+            stack.pop();
+            state.set(object, 2);
+        };
+        for (const object of this.objectSymbols.values()) if (object.kind === 'Object') visit(object);
+    }
+
+    fieldInitializerDependency(expression) {
+        while (expression?.kind === 'ConversionExpression' || expression?.kind === 'UnwrapExpression') expression = expression.expression;
+        return expression?.kind === 'NewExpression' && expression.semanticSymbol?.kind === 'Object'
+            ? expression.semanticSymbol
+            : null;
     }
 
     requireAssignable(actual, expected, span, expression = null) {

@@ -22,6 +22,8 @@ library Symbols {{
         member borrowedVersion:i64
         member base:Symbol?
         member contracts:Array<ref Symbol>
+        member externalResource:bool
+        member initializerCycleState:i64
 
         __(kind:string, name:string, qualifiedName:string, span:Compiler.SourceSpan) -> void {
             self.kind = kind
@@ -44,6 +46,8 @@ library Symbols {{
             self.borrowedVersion = 0
             self.base = null
             self.contracts = new Array<ref Symbol>(0)
+            self.externalResource = false
+            self.initializerCycleState = 0
         }
     }}
 

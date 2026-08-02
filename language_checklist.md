@@ -32,10 +32,10 @@ The bootstrap compiler proves the language can compile native programs. This roa
 - [x] Preserve cycle-safe deep copying for ordinary owning arrays
 - [x] Add `Array<ref T>` and `Array<weak T?>` policies before destroying replaced elements or recursively destroying arrays at scope exit
 - [x] Add explicit `delete` with deterministic logical destruction (physical reclamation deferred)
-- [ ] Define native/external-resource ownership
-- [ ] Detect unconditional field-initializer cycles
-- [ ] Add precise root tracking and tracing garbage collection
-- [ ] Define cycle collection and finalization behavior
+- [x] Define native/external-resource ownership
+- [x] Detect unconditional field-initializer cycles
+- [x] Add precise stack-slot root tracking and explicit tracing garbage collection
+- [x] Define cycle collection, weak-reference clearing, and internal runtime finalization behavior
 - [ ] Reserve an explicit unsafe/raw-memory boundary without exposing pointers in ordinary code
 
 ## 3. Type-system expansion
