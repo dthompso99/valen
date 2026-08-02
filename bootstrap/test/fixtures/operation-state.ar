@@ -1,0 +1,43 @@
+import Operations from '../../../src/libOperations.ar'
+
+ManualOperation implements Operations.Operation {{
+    member terminal:Operations.OperationResult?
+
+    __() -> void { self.terminal = null }
+
+    complete() -> bool { return self.terminal != null }
+    cancel() -> bool {
+        if self.terminal != null { return false }
+        self.terminal = new Operations.Cancelled("requested")
+        return true
+    }
+    result() -> ref Operations.OperationResult? { return self.terminal }
+    wait() -> ref Operations.OperationResult {
+        if self.terminal == null { self.terminal = new Operations.Succeeded() }
+        return self.terminal!
+    }
+}}
+
+entry {{
+    __() -> i32 {
+        local successful:Operations.Operation = new ManualOperation()
+        if successful.complete() { return 1 }
+        local success = successful.wait()
+        if !successful.complete() { return 2 }
+        if !success.succeeded() { return 3 }
+        if success !== successful.result()! { return 4 }
+
+        local cancelled:Operations.Operation = new ManualOperation()
+        if !cancelled.cancel() { return 5 }
+        if cancelled.cancel() { return 6 }
+        local cancellation = cancelled.wait()
+        if !cancellation.cancelled() { return 7 }
+        if cancellation.detail()! != "requested" { return 8 }
+
+        local failure:Operations.OperationResult = new Operations.Failed(81, "printer offline")
+        if !failure.failed() { return 9 }
+        if failure.code() != 81 { return 10 }
+        if failure.detail()! != "printer offline" { return 11 }
+        return 0
+    }
+}}

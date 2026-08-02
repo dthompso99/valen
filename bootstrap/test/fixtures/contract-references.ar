@@ -1,0 +1,48 @@
+Printable {{
+    print() -> i64 { return 1 }
+}}
+
+Report implements Printable {{
+    print() -> i64 { return 9 }
+    reportOnly() -> i64 { return 4 }
+}}
+
+Other implements Printable {{
+    print() -> i64 { return 6 }
+}}
+
+Holder {{
+    member value:Printable
+
+    __(value:Printable) -> void { self.value = value }
+}}
+
+Services {{
+    identity(value:Printable) -> ref Printable { return value }
+    invoke(value:Printable) -> i64 { return value.print() }
+}}
+
+entry {{
+    __() -> i32 {
+        local report = new Report()
+        local printable:Printable = report
+        if printable.print() != 9 { return 1 }
+        if printable !== report { return 2 }
+        if !(printable is Printable) { return 3 }
+        if !(printable is Report) { return 4 }
+        local recovered:Report? = printable as Report?
+        if recovered == null { return 5 }
+        if recovered!.reportOnly() != 4 { return 6 }
+        local wrong:Other? = printable as Other?
+        if wrong != null { return 7 }
+        local holder = new Holder(report)
+        if holder.value.print() != 9 { return 8 }
+        local values = new Array<Printable>(0)
+        values.append(report)
+        if values[0].print() != 9 { return 9 }
+        local services = new Services()
+        if services.invoke(report) != 9 { return 10 }
+        if services.identity(report).print() != 9 { return 11 }
+        return 0
+    }
+}}

@@ -1,4 +1,4 @@
-import Scopes from '/libScopes.ar'
+import Scopes from '/lib/libScopes.ar'
 
 entry {{
     __() -> i64 {

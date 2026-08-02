@@ -1,0 +1,5 @@
+import Shared from 'shared.ar'
+
+entry {{
+    __() -> i64 { return Shared.answer() }
+}}

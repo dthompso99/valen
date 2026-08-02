@@ -1,0 +1,13 @@
+Engine {{}}
+
+Holder {{
+    member ref engine:Engine?
+
+    attach(value:Engine) -> void {
+        self.engine = value
+    }
+}}
+
+entry {{
+    __() -> void {}
+}}

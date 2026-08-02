@@ -1,0 +1,27 @@
+Engine {{}}
+
+Factory {{
+    make() -> Engine {
+        local engine = new Engine()
+        return engine
+    }
+}}
+
+Observer {{
+    member weak engine:Engine?
+    watch(value:Engine) -> void { self.engine = value }
+}}
+
+entry {{
+    __() -> i64 {
+        local factory = new Factory()
+        local observer = new Observer()
+        {
+            local engine = factory.make()
+            observer.watch(engine)
+            if observer.engine == null { return 1 }
+        }
+        if observer.engine == null { return 0 }
+        return 2
+    }
+}}

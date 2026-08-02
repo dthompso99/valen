@@ -1,0 +1,30 @@
+Engine {{}}
+
+Observer {{
+    member weak engine:Engine?
+    watch(value:Engine) -> void { self.engine = value }
+}}
+
+entry {{
+    __() -> i64 {
+        local engines = new Array<Engine>(0)
+        local engine = new Engine()
+        local observer = new Observer()
+        observer.watch(engine)
+        engines.append(engine)
+        engines[0] = new Engine()
+        if observer.engine != null { return 1 }
+
+        local borrowed = new Engine()
+        local references = new Array<ref Engine>(0)
+        references.append(borrowed)
+        delete borrowed
+
+        local weakOwner = new Engine()
+        local weakReferences = new Array<weak Engine?>(0)
+        weakReferences.append(weakOwner)
+        delete weakOwner
+        if weakReferences[0] != null { return 2 }
+        return 0
+    }
+}}

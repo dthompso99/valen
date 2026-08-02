@@ -1,0 +1,44 @@
+FROM node:20-alpine AS bootstrap
+RUN apk update && apk add --no-cache build-base
+WORKDIR /app
+COPY bootstrap/package.json ./
+RUN npm install --omit=dev
+COPY bootstrap/ ./
+COPY src/ ./src/
+COPY lib/ ./lib/
+ENV ARGON_LIBRARY_PATH=/app/lib
+
+RUN mkdir dist
+RUN ["node", "compiler.js", "src/argon.ar", "dist/argon"]
+CMD ["ls", "-l", "dist/argon"]
+
+FROM alpine:3.20 AS stage2
+RUN apk update && apk add --no-cache build-base
+WORKDIR /app
+COPY --from=bootstrap /app/dist/argon .
+RUN chmod +x argon
+COPY src/ ./src/
+COPY lib/ ./lib/
+
+ENV ARGON_LIBRARY_PATH=/app/lib
+RUN mkdir dist
+RUN ["./argon", "src/argon.ar", "-o", "dist/argon"]
+RUN ls -al dist
+
+
+FROM alpine:3.20 AS stage3
+RUN apk update && apk add --no-cache build-base
+WORKDIR /app
+COPY --from=stage2 /app/dist/argon .
+#for now, we'll use stage3 as a testing stage.
+COPY examples/ ./examples/
+COPY lib/ ./lib/
+ENV ARGON_LIBRARY_PATH=/app/lib
+RUN mkdir dist
+RUN ls -al ./examples
+RUN ["./argon", "examples/simple/simple.ar", "-o", "dist/simple"]
+RUN ["dist/simple"]
+RUN ["./argon", "examples/nested/nested.ar", "-o", "dist/nested"]
+RUN ["dist/nested"]
+RUN ls -al dist
+CMD ["/bin/bash"]

@@ -1,0 +1,31 @@
+Defaults {{
+    member value:i64
+    member label:string
+
+    __(value:i64, label:string="argon") -> void {
+        self.value = value
+        self.label = label
+    }
+
+    add(left:i64, right:i64=0) -> i64 { return left + right }
+}}
+
+Parent {{
+    member total:i64
+    __(left:i64, right:i64=2) -> void { self.total = left + right }
+}}
+
+Child inherits Parent {{
+    __(value:i64) -> void { super(value) }
+}}
+
+entry {{
+    __() -> i32 {
+        local defaults = new Defaults(9)
+        if defaults.label != "argon" { return 1 }
+        if defaults.add(5) != 5 { return 2 }
+        local child = new Child(3)
+        if child.total != 5 { return 3 }
+        return 0
+    }
+}}

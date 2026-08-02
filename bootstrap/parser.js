@@ -77,14 +77,15 @@ export class Parser {
 
         this.skipSeparators();
         while (!(this.check('RIGHT_BRACE') && this.peek(1).type === 'RIGHT_BRACE') && !this.check('EOF')) {
+            const visibility = this.parseVisibility();
             if (this.isObjectDeclarationStart()) {
-                members.push(this.parseObject());
+                members.push(this.parseObject(visibility));
             } else if (this.check('MEMBER')) {
                 this.error(this.peek(), 'Libraries cannot declare instance members');
             } else if (this.check('NATIVE')) {
-                members.push(this.parseMethod(true));
+                members.push(this.parseMethod(true, visibility));
             } else {
-                members.push(this.parseMethod());
+                members.push(this.parseMethod(false, visibility));
             }
             this.skipSeparators();
         }
@@ -94,7 +95,7 @@ export class Parser {
         return new LibraryDeclaration(name.value, members, this.span(start, end));
     }
 
-    parseObject() {
+    parseObject(visibility = 'public') {
         const start = this.consume('IDENTIFIER', 'Expected an object name');
         const inheritedType = this.match('INHERITS') ? this.parseTypeReference() : null;
         const implementedTypes = [];
@@ -108,21 +109,30 @@ export class Parser {
 
         this.skipSeparators();
         while (!(this.check('RIGHT_BRACE') && this.peek(1).type === 'RIGHT_BRACE') && !this.check('EOF')) {
+            const memberVisibility = this.parseVisibility();
             if (this.isObjectDeclarationStart()) {
-                members.push(this.parseObject());
+                members.push(this.parseObject(memberVisibility));
             } else if (this.check('MEMBER')) {
-                members.push(this.parseField());
+                members.push(this.parseField(memberVisibility));
             } else if (this.check('NATIVE')) {
                 this.error(this.peek(), 'Native methods can only be declared in libraries');
             } else {
-                members.push(this.parseMethod());
+                members.push(this.parseMethod(false, memberVisibility));
             }
             this.skipSeparators();
         }
 
         this.consume('RIGHT_BRACE', `Expected '}}' after object ${start.value}`);
         const end = this.consume('RIGHT_BRACE', `Expected '}}' after object ${start.value}`);
-        return new ObjectDeclaration(start.value, inheritedType, implementedTypes, members, this.span(start, end));
+        const declaration = new ObjectDeclaration(start.value, inheritedType, implementedTypes, members, this.span(start, end));
+        declaration.visibility = visibility;
+        return declaration;
+    }
+
+    parseVisibility() {
+        if (this.match('PRIVATE')) return 'private';
+        if (this.match('PUBLIC')) return 'public';
+        return 'public';
     }
 
     isObjectDeclarationStart() {
@@ -132,8 +142,10 @@ export class Parser {
             this.peek(1).type === 'IMPLEMENTS';
     }
 
-    parseField() {
+    parseField(visibility = 'public') {
         const start = this.consume('MEMBER', "Expected 'member'");
+        const reference = this.match('REF');
+        const weak = !reference && this.match('WEAK');
         const name = this.consume('IDENTIFIER', 'Expected a field name');
         this.consume('COLON', `Expected ':' after field name ${name.value}`);
         const fieldType = this.parseTypeReference();
@@ -143,10 +155,14 @@ export class Parser {
             this.error(this.peek(), `Expected a newline or ';' after field ${name.value}`);
         }
         const end = initializer ?? fieldType;
-        return new FieldDeclaration(name.value, fieldType, initializer, this.span(start, end));
+        const field = new FieldDeclaration(name.value, fieldType, initializer, this.span(start, end));
+        field.visibility = visibility;
+        field.reference = reference;
+        field.weakReference = weak;
+        return field;
     }
 
-    parseMethod(isNative = false) {
+    parseMethod(isNative = false, visibility = 'public') {
         const start = isNative
             ? this.consume('NATIVE', "Expected 'native'")
             : this.peek();
@@ -156,27 +172,40 @@ export class Parser {
 
         if (!this.check('RIGHT_PAREN')) {
             do {
+                const owning = this.match('OWN');
+                const start = owning ? this.previous() : this.peek();
                 const name = this.consume('IDENTIFIER', 'Expected a parameter name');
                 this.consume('COLON', `Expected ':' after parameter ${name.value}`);
                 const parameterType = this.parseTypeReference();
-                parameters.push(new ParameterDeclaration(name.value, parameterType, this.span(name, parameterType)));
+                const defaultValue = this.match('EQUAL') ? this.parseExpression() : null;
+                parameters.push(new ParameterDeclaration(name.value, parameterType, defaultValue, this.span(start, defaultValue ?? parameterType), owning));
             } while (this.match('COMMA'));
         }
 
         this.consume('RIGHT_PAREN', 'Expected closing parenthesis after parameters');
         this.consume('ARROW', `Expected '->' after parameters for ${name.value}`);
+        const returnReference = this.match('REF');
         const returnType = this.parseTypeReference();
         if (isNative) {
             if (!this.atSeparator() && !(this.check('RIGHT_BRACE') && this.peek(1).type === 'RIGHT_BRACE')) {
                 this.error(this.peek(), `Native method '${name.value}' cannot have a body`);
             }
-            return new MethodDeclaration(name.value, parameters, returnType, null, true, this.span(start, returnType));
+            const method = new MethodDeclaration(name.value, parameters, returnType, null, true, this.span(start, returnType));
+            method.visibility = visibility;
+            method.returnReference = returnReference;
+            return method;
         }
         const body = this.parseBlock();
-        return new MethodDeclaration(name.value, parameters, returnType, body, false, this.span(start, body));
+        const method = new MethodDeclaration(name.value, parameters, returnType, body, false, this.span(start, body));
+        method.visibility = visibility;
+        method.returnReference = returnReference;
+        return method;
     }
 
     parseTypeReference() {
+        let ownership = 'owned';
+        if (this.match('REF')) ownership = 'ref';
+        else if (this.match('WEAK')) ownership = 'weak';
         const name = this.consume('IDENTIFIER', 'Expected a type name');
         let qualifiedName = name.value;
         const typeArguments = [];
@@ -193,7 +222,7 @@ export class Parser {
         }
         const optional = this.match('QUESTION');
         if (optional) end = this.previous();
-        return new TypeReference(qualifiedName, typeArguments, optional, this.span(name, end));
+        return new TypeReference(qualifiedName, typeArguments, optional, this.span(name, end), ownership);
     }
 
     parseBlock() {
@@ -291,7 +320,7 @@ export class Parser {
     }
 
     parseUnary() {
-        if (this.match('BANG') || this.match('MINUS')) {
+        if (this.match('BANG') || this.match('MINUS') || this.match('COPY') || this.match('DELETE')) {
             const operator = this.previous();
             const operand = this.parseUnary();
             return new UnaryExpression(operator.value, operand, this.span(operator, operand));

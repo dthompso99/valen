@@ -1,0 +1,21 @@
+Engine {{}}
+
+Observer {{
+    member weak engine:Engine?
+
+    watch(value:Engine) -> void {
+        self.engine = value
+    }
+}}
+
+entry {{
+    __() -> i64 {
+        local engine = new Engine()
+        local observer = new Observer()
+        observer.watch(engine)
+        if observer.engine == null { return 1 }
+        delete engine
+        if observer.engine == null { return 0 }
+        return 2
+    }
+}}

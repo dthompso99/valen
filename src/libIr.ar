@@ -21,7 +21,7 @@ library Ir {{
         member first:Value?
         member second:Value?
         member third:Value?
-        member arguments:Array<Value>
+        member arguments:Array<ref Value>
         member name:string?
         member target:string?
         member alternateTarget:string?
@@ -29,6 +29,7 @@ library Ir {{
         member typeName:string?
         member ownerType:string?
         member elementType:string?
+        member elementOwnership:string?
         member text:string?
         member slot:i64
 
@@ -38,7 +39,7 @@ library Ir {{
             self.first = null
             self.second = null
             self.third = null
-            self.arguments = new Array<Value>(0)
+            self.arguments = new Array<ref Value>(0)
             self.name = null
             self.target = null
             self.alternateTarget = null
@@ -46,6 +47,7 @@ library Ir {{
             self.typeName = null
             self.ownerType = null
             self.elementType = null
+            self.elementOwnership = null
             self.text = null
             self.slot = -1
         }
@@ -53,11 +55,11 @@ library Ir {{
 
     Block {{
         member label:string
-        member instructions:Array<Instruction>
+        member instructions:Array<ref Instruction>
 
         __(label:string) -> void {
             self.label = label
-            self.instructions = new Array<Instruction>(0)
+            self.instructions = new Array<ref Instruction>(0)
         }
     }}
 
@@ -75,17 +77,17 @@ library Ir {{
         member name:string
         member displayName:string
         member ownerType:string
-        member parameters:Array<Parameter>
+        member parameters:Array<ref Parameter>
         member returnType:string
-        member blocks:Array<Block>
+        member blocks:Array<ref Block>
 
         __(name:string, displayName:string, ownerType:string, returnType:string) -> void {
             self.name = name
             self.displayName = displayName
             self.ownerType = ownerType
-            self.parameters = new Array<Parameter>(0)
+            self.parameters = new Array<ref Parameter>(0)
             self.returnType = returnType
-            self.blocks = new Array<Block>(0)
+            self.blocks = new Array<ref Block>(0)
         }
     }}
 
@@ -93,14 +95,14 @@ library Ir {{
         member name:string
         member displayName:string
         member runtimeName:string
-        member parameters:Array<Parameter>
+        member parameters:Array<ref Parameter>
         member returnType:string
 
         __(name:string, displayName:string, runtimeName:string, returnType:string) -> void {
             self.name = name
             self.displayName = displayName
             self.runtimeName = runtimeName
-            self.parameters = new Array<Parameter>(0)
+            self.parameters = new Array<ref Parameter>(0)
             self.returnType = returnType
         }
     }}
@@ -109,12 +111,14 @@ library Ir {{
         member name:string
         member qualifiedName:string
         member typeName:string
+        member ownership:string
         member index:i64
 
-        __(name:string, qualifiedName:string, typeName:string, index:i64) -> void {
+        __(name:string, qualifiedName:string, typeName:string, ownership:string, index:i64) -> void {
             self.name = name
             self.qualifiedName = qualifiedName
             self.typeName = typeName
+            self.ownership = ownership
             self.index = index
         }
     }}
@@ -129,34 +133,48 @@ library Ir {{
         }
     }}
 
+    ContractEntry {{
+        member name:string
+        member methods:Array<ref VirtualMethod>
+        member isSelf:bool
+
+        __(name:string, isSelf:bool) -> void {
+            self.name = name
+            self.methods = new Array<ref VirtualMethod>(0)
+            self.isSelf = isSelf
+        }
+    }}
+
     Type {{
         member name:string
         member displayName:string
         member initializer:string?
-        member fields:Array<Field>
+        member fields:Array<ref Field>
         member baseName:string?
-        member virtualMethods:Array<VirtualMethod>
+        member virtualMethods:Array<ref VirtualMethod>
+        member contracts:Array<ref ContractEntry>
 
         __(name:string, displayName:string) -> void {
             self.name = name
             self.displayName = displayName
             self.initializer = null
-            self.fields = new Array<Field>(0)
+            self.fields = new Array<ref Field>(0)
             self.baseName = null
-            self.virtualMethods = new Array<VirtualMethod>(0)
+            self.virtualMethods = new Array<ref VirtualMethod>(0)
+            self.contracts = new Array<ref ContractEntry>(0)
         }
     }}
 
     Program {{
-        member types:Array<Type>
-        member functions:Array<Function>
-        member externals:Array<ExternalFunction>
+        member types:Array<ref Type>
+        member functions:Array<ref Function>
+        member externals:Array<ref ExternalFunction>
         member entry:string?
 
         __() -> void {
-            self.types = new Array<Type>(0)
-            self.functions = new Array<Function>(0)
-            self.externals = new Array<ExternalFunction>(0)
+            self.types = new Array<ref Type>(0)
+            self.functions = new Array<ref Function>(0)
+            self.externals = new Array<ref ExternalFunction>(0)
             self.entry = null
         }
 
@@ -189,10 +207,12 @@ library Ir {{
     Binding {{
         member symbol:Symbols.Symbol
         member value:Value
+        member lifetimeActive:bool
 
         __(symbol:Symbols.Symbol, value:Value) -> void {
             self.symbol = symbol
             self.value = value
+            self.lifetimeActive = false
         }
     }}
 
@@ -211,8 +231,8 @@ library Ir {{
         member program:Program
         member currentFunction:Function?
         member currentBlock:Block?
-        member bindings:Array<Binding>
-        member loops:Array<Loop>
+        member bindings:Array<ref Binding>
+        member loops:Array<ref Loop>
         member breakTarget:string?
         member continueTarget:string?
         member nextLocal:i64
@@ -224,8 +244,8 @@ library Ir {{
             self.program = new Program()
             self.currentFunction = null
             self.currentBlock = null
-            self.bindings = new Array<Binding>(0)
-            self.loops = new Array<Loop>(0)
+            self.bindings = new Array<ref Binding>(0)
+            self.loops = new Array<ref Loop>(0)
             self.breakTarget = null
             self.continueTarget = null
             self.nextLocal = 0
@@ -233,7 +253,7 @@ library Ir {{
             self.nextBlock = 0
         }
 
-        generate() -> Program {
+        generate() -> ref Program {
             local moduleIndex:i64 = 0
             while moduleIndex < self.analysis.graph.modules.length {
                 local declarations = self.analysis.graph.modules[moduleIndex].program.declarations
@@ -281,6 +301,8 @@ library Ir {{
             if symbol.base != null { typeNode.baseName = symbol.base!.qualifiedName }
             self.appendFields(typeNode, symbol)
             self.appendVirtualMethods(typeNode, symbol)
+            self.appendContractEntry(typeNode, symbol, symbol, true)
+            self.appendImplementedContracts(typeNode, symbol, symbol)
             local index:i64 = 0
             while index < members.length {
                 local memberNode = members[index]
@@ -297,18 +319,78 @@ library Ir {{
             local index:i64 = 0
             while index < symbol.memberScope!.symbols.length {
                 local method = symbol.memberScope!.symbols[index]
-                if method.kind == "Method" && method.name != "__" {
+                if method.kind == "Method" && method.name != "__" && method.visibility != "private" {
                     local slot:i64 = -1
                     local search:i64 = 0
                     while search < typeNode.virtualMethods.length {
-                        if typeNode.virtualMethods[search].name == method.name { slot = search; break }
+                        if typeNode.virtualMethods[search].name == self.methodKey(method) { slot = search; break }
                         search = search + 1
                     }
-                    local entry = new VirtualMethod(method.name, method.qualifiedName)
+                    local entry = new VirtualMethod(self.methodKey(method), method.qualifiedName)
                     if slot < 0 { typeNode.virtualMethods.append(entry) } else { typeNode.virtualMethods[slot] = entry }
                 }
                 index = index + 1
             }
+        }
+
+        appendImplementedContracts(typeNode:Type, implementation:Symbols.Symbol, source:Symbols.Symbol) -> void {
+            if source.base != null { self.appendImplementedContracts(typeNode, implementation, source.base!) }
+            local index:i64 = 0
+            while index < source.contracts.length {
+                local contract:Symbols.Symbol? = source.contracts[index]
+                while contract != null {
+                    self.appendContractEntry(typeNode, implementation, contract!, false)
+                    contract = contract!.base
+                }
+                index = index + 1
+            }
+        }
+
+        appendContractEntry(typeNode:Type, implementation:Symbols.Symbol, contract:Symbols.Symbol, isSelf:bool) -> void {
+            local entry = new ContractEntry(contract.qualifiedName, isSelf)
+            self.appendContractMethods(entry, implementation, contract)
+            local index:i64 = 0
+            while index < typeNode.contracts.length {
+                if typeNode.contracts[index].name == entry.name { typeNode.contracts[index] = entry; return }
+                index = index + 1
+            }
+            typeNode.contracts.append(entry)
+        }
+
+        appendContractMethods(entry:ContractEntry, implementation:Symbols.Symbol, contract:Symbols.Symbol) -> void {
+            if contract.base != null { self.appendContractMethods(entry, implementation, contract.base!) }
+            local index:i64 = 0
+            while index < contract.memberScope!.symbols.length {
+                local required = contract.memberScope!.symbols[index]
+                if required.kind == "Method" && required.name != "__" && required.visibility != "private" {
+                    local actual = self.findSymbolMethod(implementation, required)
+                    local slot:i64 = -1
+                    local search:i64 = 0
+                    while search < entry.methods.length {
+                        if entry.methods[search].name == self.methodKey(required) { slot = search; break }
+                        search = search + 1
+                    }
+                    local method = new VirtualMethod(self.methodKey(required), actual!.qualifiedName)
+                    if slot < 0 { entry.methods.append(method) } else { entry.methods[slot] = method }
+                }
+                index = index + 1
+            }
+        }
+
+        findSymbolMethod(owner:Symbols.Symbol, required:Symbols.Symbol) -> ref Symbols.Symbol? {
+            local current:Symbols.Symbol? = owner
+            while current != null {
+                local index:i64 = 0
+                while index < current!.memberScope!.symbols.length {
+                    local method = current!.memberScope!.symbols[index]
+                    if method.kind == "Method" && method.name == required.name && method.visibility != "private" {
+                        if self.methodKey(method) == self.methodKey(required) { return method }
+                    }
+                    index = index + 1
+                }
+                current = current!.base
+            }
+            return null
         }
 
         appendFields(typeNode:Type, symbol:Symbols.Symbol) -> void {
@@ -317,7 +399,7 @@ library Ir {{
             while index < symbol.memberScope!.symbols.length {
                 local field = symbol.memberScope!.symbols[index]
                 if field.kind == "Field" {
-                    typeNode.fields.append(new Field(field.name, field.qualifiedName, field.typeName!, typeNode.fields.length))
+                    typeNode.fields.append(new Field(field.name, field.qualifiedName, field.typeName!, field.ownership, typeNode.fields.length))
                 }
                 index = index + 1
             }
@@ -402,8 +484,8 @@ library Ir {{
             self.currentFunction = new Function(name, displayName, ownerType, returnType)
             self.currentBlock = new Block("entry")
             self.currentFunction!.blocks.append(self.currentBlock!)
-            self.bindings = new Array<Binding>(0)
-            self.loops = new Array<Loop>(0)
+            self.bindings = new Array<ref Binding>(0)
+            self.loops = new Array<ref Loop>(0)
             self.breakTarget = null
             self.continueTarget = null
             self.nextLocal = 0
@@ -418,12 +500,14 @@ library Ir {{
         }
 
         lowerBlock(block:Ast.Block) -> void {
+            local lifetimeStart = self.bindings.length
             local index:i64 = 0
             while index < block.statements.length {
                 if self.isTerminated() { return }
                 self.lowerStatement(block.statements[index])
                 index = index + 1
             }
+            if !self.isTerminated() { self.destroyBindings(lifetimeStart) }
         }
 
         lowerStatement(statement:Ast.Statement) -> void {
@@ -434,6 +518,7 @@ library Ir {{
                 self.nextLocal = self.nextLocal + 1
                 local localValue = new Value("local", localName, statement.symbol!.typeName!)
                 self.bindings.append(new Binding(statement.symbol!, localValue))
+                if statement.symbol!.declaredOwnership == "owned" && self.findType(localValue.typeName) != null { self.bindings[self.bindings.length - 1].lifetimeActive = true }
                 local instruction = new Instruction("declare_local")
                 instruction.name = localName
                 instruction.typeName = localValue.typeName
@@ -443,7 +528,11 @@ library Ir {{
             }
             if statement.kind == "Return" {
                 local instruction = new Instruction("return")
-                if statement.expression != null { instruction.first = self.lowerExpression(statement.expression!) }
+                if statement.expression != null {
+                    instruction.first = self.lowerExpression(statement.expression!)
+                    if statement.ownership == "transfer" { self.consumeLifetime(statement.expression!) }
+                }
+                self.destroyBindingsForReturn()
                 self.emit(instruction)
                 return
             }
@@ -518,7 +607,7 @@ library Ir {{
             self.emit(instruction)
         }
 
-        newBlock(prefix:string) -> Block {
+        newBlock(prefix:string) -> ref Block {
             local block = new Block(prefix + "_" + self.nextBlock.toString())
             self.nextBlock = self.nextBlock + 1
             self.currentFunction!.blocks.append(block)
@@ -546,7 +635,7 @@ library Ir {{
             return "argon_" + symbol.owner!.name + "_" + symbol.name
         }
 
-        lowerExpression(expression:Ast.Expression) -> Value {
+        lowerExpression(expression:Ast.Expression) -> ref Value {
             if expression.kind == "Integer" { return self.constant(expression.text!, expression.inferredType!) }
             if expression.kind == "Boolean" {
                 if expression.text! == "true" { return self.constant("1", "bool") }
@@ -564,6 +653,18 @@ library Ir {{
             if expression.kind == "Assignment" { return self.lowerAssignment(expression) }
             if expression.kind == "Unary" {
                 local operand = self.lowerExpression(expression.left!)
+                if expression.operator! == "copy" {
+                    local copied = self.temporary("structural_copy", expression.inferredType!)
+                    copied.first = operand
+                    copied.ownerType = expression.inferredType
+                    return copied.result!
+                }
+                if expression.operator! == "delete" {
+                    local destroyed = new Instruction("destroy_object")
+                    destroyed.first = operand
+                    self.emit(destroyed)
+                    return new Value("void", "", "void")
+                }
                 local instruction = self.temporary("unary", expression.inferredType!)
                 instruction.operator = expression.operator
                 instruction.first = operand
@@ -597,13 +698,13 @@ library Ir {{
             return new Value("error", "", "error")
         }
 
-        constant(textValue:string, typeName:string) -> Value {
+        constant(textValue:string, typeName:string) -> ref Value {
             local instruction = self.temporary("constant", typeName)
             instruction.text = textValue
             return instruction.result!
         }
 
-        lowerIdentifier(expression:Ast.Expression) -> Value {
+        lowerIdentifier(expression:Ast.Expression) -> ref Value {
             local symbol = expression.symbol!
             if symbol.name == "self" { return new Value("parameter", "self", expression.inferredType!) }
             if symbol.kind == "Field" {
@@ -620,7 +721,7 @@ library Ir {{
             return instruction.result!
         }
 
-        lowerMember(expression:Ast.Expression) -> Value {
+        lowerMember(expression:Ast.Expression) -> ref Value {
             if expression.name! == "length" {
                 local owner = self.lowerExpression(expression.left!)
                 local op = "array_length"
@@ -642,7 +743,7 @@ library Ir {{
             return new Value("symbol", expression.name!, expression.inferredType!)
         }
 
-        lowerIndex(expression:Ast.Expression) -> Value {
+        lowerIndex(expression:Ast.Expression) -> ref Value {
             local container = self.lowerExpression(expression.left!)
             local indexValue = self.lowerExpression(expression.right!)
             local op = "array_load"
@@ -651,11 +752,13 @@ library Ir {{
             instruction.first = container
             instruction.second = indexValue
             instruction.elementType = expression.inferredType
+            instruction.elementOwnership = expression.text
             return instruction.result!
         }
 
-        lowerAssignment(expression:Ast.Expression) -> Value {
+        lowerAssignment(expression:Ast.Expression) -> ref Value {
             local value = self.lowerExpression(expression.right!)
+            if expression.right!.ownership == "consume" { self.consumeLifetime(expression.right!) }
             local target = expression.left!
             if target.kind == "Index" {
                 local instruction = new Instruction("array_store")
@@ -663,6 +766,7 @@ library Ir {{
                 instruction.second = self.lowerExpression(target.right!)
                 instruction.third = value
                 instruction.elementType = target.inferredType
+                instruction.elementOwnership = target.text
                 self.emit(instruction)
                 return value
             }
@@ -683,7 +787,7 @@ library Ir {{
             return value
         }
 
-        lowerBinary(expression:Ast.Expression) -> Value {
+        lowerBinary(expression:Ast.Expression) -> ref Value {
             local left = self.lowerExpression(expression.left!)
             if expression.operator! == "is" {
                 local tested = self.temporary("type_test", "bool")
@@ -694,16 +798,19 @@ library Ir {{
             local right = self.lowerExpression(expression.right!)
             local op = "binary"
             if left.typeName == "string" {
-                if expression.operator! == "+" { op = "string_concat" } else { op = "string_equal" }
+                if expression.operator! == "+" { op = "string_concat" }
+                if expression.operator! == "==" || expression.operator! == "!=" { op = "string_equal" }
             }
+            if (expression.operator! == "==" || expression.operator! == "!=") && self.isReference(left.typeName) { op = "structural_equal" }
             local instruction = self.temporary(op, expression.inferredType!)
             instruction.first = left
             instruction.second = right
             instruction.operator = expression.operator
+            instruction.ownerType = left.typeName
             return instruction.result!
         }
 
-        lowerCall(expression:Ast.Expression) -> Value {
+        lowerCall(expression:Ast.Expression) -> ref Value {
             local callee = expression.left!
             local name = ""
             if callee.kind == "Member" { name = callee.name! }
@@ -721,9 +828,20 @@ library Ir {{
                     return new Value("void", "", "void")
                 }
             }
-            if name == "append" || name == "appendByte" {
+            local receiverType = ""
+            if callee.kind == "Member" {
+                if callee.left!.inferredType != null { receiverType = callee.left!.inferredType! }
+            }
+            if name == "hash" {
+                local hashValue = self.lowerExpression(callee.left!)
+                local hashed = self.temporary("structural_hash", "i64")
+                hashed.first = hashValue
+                hashed.ownerType = receiverType
+                return hashed.result!
+            }
+            if (name == "append" || name == "appendByte") && (receiverType == "StringBuilder" || self.isArray(receiverType)) {
                 local op = "array_append"
-                if callee.left!.inferredType! == "StringBuilder" {
+                if receiverType == "StringBuilder" {
                     if name == "appendByte" { op = "builder_append_byte" } else { op = "builder_append_string" }
                 }
                 local instruction = new Instruction(op)
@@ -737,16 +855,18 @@ library Ir {{
                     }
                 }
                 instruction.second = appended
-                instruction.elementType = expression.arguments[0].inferredType
+                instruction.elementType = self.arrayElementType(receiverType)
+                instruction.elementOwnership = self.arrayElementOwnership(receiverType)
+                if expression.arguments[0].ownership == "consume" { self.consumeLifetime(expression.arguments[0]) }
                 self.emit(instruction)
                 return new Value("void", "", "void")
             }
-            if name == "slice" || name == "toString" || name == "build" {
+            if (name == "slice" && receiverType == "string") || (name == "toString" && self.isInteger(receiverType)) || (name == "build" && receiverType == "StringBuilder") {
                 local op = "string_slice"
                 if name == "toString" { op = "integer_to_string" }
                 if name == "build" { op = "builder_build" }
                 local owner = self.lowerExpression(callee.left!)
-                local loweredArguments = new Array<Value>(0)
+                local loweredArguments = new Array<ref Value>(0)
                 local index:i64 = 0
                 while index < expression.arguments.length { loweredArguments.append(self.lowerExpression(expression.arguments[index])); index = index + 1 }
                 local instruction = self.temporary(op, expression.inferredType!)
@@ -774,14 +894,35 @@ library Ir {{
             }
             local index:i64 = 0
             while index < expression.arguments.length { instruction.arguments.append(self.lowerExpression(expression.arguments[index])); index = index + 1 }
+            index = 0
+            while index < expression.arguments.length { if expression.arguments[index].ownership == "consume" { self.consumeLifetime(expression.arguments[index]) }; index = index + 1 }
             if callee.symbol != null {
                 if callee.symbol!.kind == "Method" && callee.symbol!.name != "__" && callee.symbol!.owner!.kind == "Object" && callee.text == null {
                     local ownerType = self.findType(callee.symbol!.owner!.qualifiedName)
                     if ownerType != null {
-                        local slotIndex:i64 = 0
-                        while slotIndex < ownerType!.virtualMethods.length {
-                            if ownerType!.virtualMethods[slotIndex].name == callee.symbol!.name { instruction.op = "virtual_call"; instruction.slot = slotIndex; break }
-                            slotIndex = slotIndex + 1
+                        if self.isContractType(ownerType!.name) {
+                            local contractIndex:i64 = 0
+                            while contractIndex < ownerType!.contracts.length {
+                                if ownerType!.contracts[contractIndex].name == ownerType!.name {
+                                    local methodIndex:i64 = 0
+                                    while methodIndex < ownerType!.contracts[contractIndex].methods.length {
+                                        if ownerType!.contracts[contractIndex].methods[methodIndex].name == self.methodKey(callee.symbol!) {
+                                            instruction.op = "contract_call"
+                                            instruction.slot = methodIndex
+                                            instruction.ownerType = ownerType!.name
+                                            break
+                                        }
+                                        methodIndex = methodIndex + 1
+                                    }
+                                }
+                                contractIndex = contractIndex + 1
+                            }
+                        } else {
+                            local slotIndex:i64 = 0
+                            while slotIndex < ownerType!.virtualMethods.length {
+                                if ownerType!.virtualMethods[slotIndex].name == self.methodKey(callee.symbol!) { instruction.op = "virtual_call"; instruction.slot = slotIndex; break }
+                                slotIndex = slotIndex + 1
+                            }
                         }
                     }
                 }
@@ -794,7 +935,7 @@ library Ir {{
             return instruction.result!
         }
 
-        lowerNew(expression:Ast.Expression) -> Value {
+        lowerNew(expression:Ast.Expression) -> ref Value {
             local typeName = expression.inferredType!
             if typeName == "StringBuilder" {
                 local builder = self.temporary("builder_new", typeName)
@@ -811,10 +952,9 @@ library Ir {{
             instruction.ownerType = typeName
             local instance = instruction.result!
             self.lowerInitializers(expression.symbol!, instance)
-            local constructor = self.findMethod(expression.symbol!, "__")
-            if constructor != null {
+            if expression.text != null {
                 local call = new Instruction("call")
-                call.target = constructor!.qualifiedName
+                call.target = expression.text!
                 call.arguments.append(instance)
                 local index:i64 = 0
                 while index < expression.arguments.length { call.arguments.append(self.lowerExpression(expression.arguments[index])); index = index + 1 }
@@ -853,7 +993,7 @@ library Ir {{
             return new Value(value.kind, value.name, expression.inferredType!)
         }
 
-        findBinding(symbol:Symbols.Symbol) -> Binding? {
+        findBinding(symbol:Symbols.Symbol) -> ref Binding? {
             local index = self.bindings.length
             while index > 0 {
                 index = index - 1
@@ -862,23 +1002,111 @@ library Ir {{
             return null
         }
 
-        findType(name:string) -> Type? {
+        consumeLifetime(expression:Ast.Expression) -> void {
+            if expression.symbol == null { return }
+            local binding = self.findBinding(expression.symbol!)
+            if binding != null { binding!.lifetimeActive = false }
+        }
+
+        destroyBindings(start:i64) -> void {
+            local index = self.bindings.length
+            while index > start {
+                index = index - 1
+                local binding = self.bindings[index]
+                if binding.lifetimeActive {
+                    local op = "destroy_object"
+                    if self.isArray(binding.value.typeName) { op = "destroy_array" }
+                    local instruction = new Instruction(op)
+                    instruction.first = binding.value
+                    instruction.ownerType = binding.value.typeName
+                    self.emit(instruction)
+                    binding.lifetimeActive = false
+                }
+            }
+        }
+
+        destroyBindingsForReturn() -> void {
+            local index = self.bindings.length
+            while index > 0 {
+                index = index - 1
+                local binding = self.bindings[index]
+                if binding.lifetimeActive {
+                    local op = "destroy_object"
+                    if self.isArray(binding.value.typeName) { op = "destroy_array" }
+                    local instruction = new Instruction(op)
+                    instruction.first = binding.value
+                    instruction.ownerType = binding.value.typeName
+                    self.emit(instruction)
+                }
+            }
+        }
+
+        findType(name:string) -> ref Type? {
             local index:i64 = 0
             while index < self.program.types.length { if self.program.types[index].name == name { return self.program.types[index] }; index = index + 1 }
             return null
         }
 
-        findMethod(owner:Symbols.Symbol, name:string) -> Symbols.Symbol? {
+        isContractType(name:string) -> bool {
+            local typeIndex:i64 = 0
+            while typeIndex < self.program.types.length {
+                local contractIndex:i64 = 0
+                while contractIndex < self.program.types[typeIndex].contracts.length {
+                    local entry = self.program.types[typeIndex].contracts[contractIndex]
+                    if entry.name == name && !entry.isSelf { return true }
+                    contractIndex = contractIndex + 1
+                }
+                typeIndex = typeIndex + 1
+            }
+            return false
+        }
+
+        findMethod(owner:Symbols.Symbol, name:string) -> ref Symbols.Symbol? {
             if owner.memberScope == null { return null }
             local symbol = owner.memberScope!.lookupLocal(name)
             if symbol != null { if symbol!.kind == "Method" { return symbol } }
             return null
         }
 
+        methodKey(method:Symbols.Symbol) -> string {
+            local key = method.name + "("
+            local index:i64 = 0
+            while index < method.parameters.length {
+                if index > 0 { key = key + "," }
+                key = key + method.parameters[index].typeName!
+                index = index + 1
+            }
+            return key + ")"
+        }
+
         isArray(name:string) -> bool {
             if name.length <= 7 { return false }
             if name.slice(0, 6) != "Array<" { return false }
             return name[name.length - 1] == 62
+        }
+
+        arrayElementOwnership(name:string) -> string {
+            local element = name.slice(6, name.length - 7)
+            if element.length > 4 { if element.slice(0, 4) == "ref " { return "ref" } }
+            if element.length > 5 { if element.slice(0, 5) == "weak " { return "weak" } }
+            return "owned"
+        }
+
+        arrayElementType(name:string) -> string {
+            local element = name.slice(6, name.length - 7)
+            if element.length > 4 { if element.slice(0, 4) == "ref " { return element.slice(4, element.length - 4) } }
+            if element.length > 5 { if element.slice(0, 5) == "weak " { return element.slice(5, element.length - 5) } }
+            return element
+        }
+
+        isReference(name:string) -> bool {
+            local base = name
+            if base.length > 0 { if base[base.length - 1] == 63 { base = base.slice(0, base.length - 1) } }
+            return base == "string" || self.isArray(base) || self.findType(base) != null
+        }
+
+        isInteger(name:string) -> bool {
+            return name == "u8" || name == "i8" || name == "u16" || name == "i16" || name == "u32" || name == "i32" || name == "u64" || name == "i64"
         }
     }}
 }}

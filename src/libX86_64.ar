@@ -18,8 +18,9 @@ library X86_64 {{
     FieldLayout {{
         member name:string
         member typeName:string
+        member ownership:string
         member offset:i64
-        __(name:string, typeName:string, offset:i64) -> void { self.name = name; self.typeName = typeName; self.offset = offset }
+        __(name:string, typeName:string, ownership:string, offset:i64) -> void { self.name = name; self.typeName = typeName; self.ownership = ownership; self.offset = offset }
     }}
 
     TypeLayout {{
@@ -86,10 +87,12 @@ library X86_64 {{
                 index = index + 1
             }
             self.generateMain()
+            self.structuralRuntime()
             if self.usesPrint { self.printRuntime() }
             if self.usesWrite { self.writeRuntime("argon_System_write", 1) }
             if self.usesWriteError { self.writeRuntime("argon_System_writeError", 2) }
             self.processRuntime()
+            self.linkRuntime()
             self.filesystemRuntime()
             self.memoryRuntime()
             self.runtimeCore()
@@ -107,7 +110,7 @@ library X86_64 {{
             local typeIndex:i64 = 0
             while typeIndex < self.program.types.length {
                 local typeNode = self.program.types[typeIndex]
-                local offset:i64 = 8
+                local offset:i64 = 16
                 local alignment:i64 = 1
                 local fieldIndex:i64 = 0
                 while fieldIndex < typeNode.fields.length {
@@ -116,7 +119,7 @@ library X86_64 {{
                     local fieldAlignment = size
                     if fieldAlignment > 8 { fieldAlignment = 8 }
                     offset = self.align(offset, fieldAlignment)
-                    self.fields.append(new FieldLayout(field.qualifiedName, field.typeName, offset))
+                    self.fields.append(new FieldLayout(field.qualifiedName, field.typeName, field.ownership, offset))
                     offset = offset + size
                     if fieldAlignment > alignment { alignment = fieldAlignment }
                     fieldIndex = fieldIndex + 1
@@ -196,6 +199,11 @@ library X86_64 {{
             self.writer.line("    push rbp")
             self.writer.line("    mov rbp, rsp")
             if frameSize > 0 { self.writer.line("    sub rsp, " + frameSize.toString()) }
+            local clearOffset:i64 = 8
+            while clearOffset <= frameSize {
+                self.writer.line("    mov QWORD PTR [rbp-" + clearOffset.toString() + "], 0")
+                clearOffset = clearOffset + 8
+            }
             parameterIndex = 0
             while parameterIndex < function.parameters.length {
                 local destination = self.slot("name:" + function.parameters[parameterIndex].name)
@@ -261,6 +269,16 @@ library X86_64 {{
                 local field = self.findField(instruction.name!)
                 self.load(instruction.first!, "rax")
                 self.loadMemory("[rax+" + field!.offset.toString() + "]", field!.typeName, "rax")
+                if field!.ownership == "member-weak" {
+                    local label = self.nextLabel
+                    self.nextLabel = self.nextLabel + 1
+                    self.writer.line("    test rax, rax")
+                    self.writer.line("    jz .Lweak_done_" + label.toString())
+                    self.writer.line("    cmp QWORD PTR [rax+8], 0")
+                    self.writer.line("    jne .Lweak_done_" + label.toString())
+                    self.writer.line("    xor eax, eax")
+                    self.writer.line(".Lweak_done_" + label.toString() + ":")
+                }
                 self.storeResult(instruction, "rax")
                 return
             }
@@ -278,7 +296,20 @@ library X86_64 {{
                 self.writer.line("    call argon_alloc")
                 self.writer.line("    lea rcx, [rip+" + self.typeLabel(instruction.ownerType!) + "]")
                 self.writer.line("    mov QWORD PTR [rax], rcx")
+                self.writer.line("    mov QWORD PTR [rax+8], 1")
                 self.storeResult(instruction, "rax")
+                return
+            }
+            if op == "destroy_object" {
+                self.load(instruction.first!, "rax")
+                local done = ".Ldestroy_null_" + self.nextLabel.toString(); self.nextLabel = self.nextLabel + 1
+                self.writer.line("    test rax, rax"); self.writer.line("    je " + done)
+                self.writer.line("    mov QWORD PTR [rax+8], 0"); self.writer.line(done + ":")
+                return
+            }
+            if op == "destroy_array" {
+                self.load(instruction.first!, "rdi")
+                self.writer.line("    call " + self.arrayDestroyLabel(instruction.ownerType!))
                 return
             }
             if op == "array_new" {
@@ -304,6 +335,14 @@ library X86_64 {{
                     self.writer.line("    mov rdx, " + self.sizeOf(instruction.elementType!).toString())
                     self.writer.line("    call argon_array_address")
                     self.loadMemory("[rax]", instruction.elementType!, "rax")
+                    if instruction.elementOwnership != null { if instruction.elementOwnership! == "weak" {
+                        local live = ".Lweak_array_live_" + self.nextLabel.toString(); self.nextLabel = self.nextLabel + 1
+                        local done = ".Lweak_array_done_" + self.nextLabel.toString(); self.nextLabel = self.nextLabel + 1
+                        self.writer.line("    test rax, rax"); self.writer.line("    je " + done)
+                        self.writer.line("    cmp QWORD PTR [rax+8], 0"); self.writer.line("    jne " + live)
+                        self.writer.line("    xor eax, eax"); self.writer.line("    jmp " + done)
+                        self.writer.line(live + ":"); self.writer.line(done + ":")
+                    } }
                 }
                 self.storeResult(instruction, "rax")
                 return
@@ -313,6 +352,14 @@ library X86_64 {{
                 self.load(instruction.second!, "rsi")
                 self.writer.line("    mov rdx, " + self.sizeOf(instruction.elementType!).toString())
                 self.writer.line("    call argon_array_address")
+                if instruction.elementOwnership != null { if instruction.elementOwnership! == "owned" {
+                    local elementBase = self.baseType(instruction.elementType!)
+                    if self.findProgramType(elementBase) != null {
+                        local empty = ".Larray_replace_empty_" + self.nextLabel.toString(); self.nextLabel = self.nextLabel + 1
+                        self.writer.line("    mov rdx, QWORD PTR [rax]"); self.writer.line("    test rdx, rdx"); self.writer.line("    je " + empty)
+                        self.writer.line("    mov QWORD PTR [rdx+8], 0"); self.writer.line(empty + ":")
+                    }
+                } }
                 self.load(instruction.third!, "rcx")
                 self.writer.line("    mov " + self.memorySize(instruction.elementType!) + " PTR [rax], " + self.registerForSize("rcx", instruction.elementType!))
                 return
@@ -337,6 +384,29 @@ library X86_64 {{
                     self.writer.line("    call argon_string_equal")
                     if instruction.operator! == "!=" { self.writer.line("    xor eax, 1") }
                 }
+                self.storeResult(instruction, "rax")
+                return
+            }
+            if op == "structural_equal" {
+                self.load(instruction.first!, "rdi")
+                self.load(instruction.second!, "rsi")
+                self.writer.line("    xor edx, edx")
+                self.writer.line("    call " + self.equalityFunction(instruction.ownerType!))
+                if instruction.operator! == "!=" { self.writer.line("    xor eax, 1") }
+                self.storeResult(instruction, "rax")
+                return
+            }
+            if op == "structural_hash" {
+                self.load(instruction.first!, "rdi")
+                self.writer.line("    xor esi, esi")
+                self.writer.line("    call " + self.hashFunction(instruction.ownerType!))
+                self.storeResult(instruction, "rax")
+                return
+            }
+            if op == "structural_copy" {
+                self.load(instruction.first!, "rdi")
+                self.writer.line("    xor esi, esi")
+                self.writer.line("    call " + self.copyFunction(instruction.ownerType!))
                 self.storeResult(instruction, "rax")
                 return
             }
@@ -383,12 +453,15 @@ library X86_64 {{
             }
             if op == "call" { self.generateCall(instruction); return }
             if op == "virtual_call" { self.generateVirtualCall(instruction); return }
+            if op == "contract_call" { self.generateContractCall(instruction); return }
             if op == "type_test" || op == "checked_cast" {
                 local label = self.nextLabel
                 self.nextLabel = self.nextLabel + 1
                 local loop = ".Ltype_test_" + label.toString()
                 local matched = ".Ltype_match_" + label.toString()
                 local done = ".Ltype_done_" + label.toString()
+                local scan = ".Ltype_contract_" + label.toString()
+                local next = ".Ltype_next_" + label.toString()
                 self.load(instruction.first!, "rcx")
                 self.writer.line("    xor eax, eax")
                 self.writer.line("    test rcx, rcx")
@@ -400,6 +473,18 @@ library X86_64 {{
                 self.writer.line("    jz " + done)
                 self.writer.line("    cmp rdx, r8")
                 self.writer.line("    je " + matched)
+                self.writer.line("    mov r9, QWORD PTR [rdx+8]")
+                self.writer.line("    mov r10, QWORD PTR [r9]")
+                self.writer.line("    add r9, 8")
+                self.writer.line(scan + ":")
+                self.writer.line("    test r10, r10")
+                self.writer.line("    jz " + next)
+                self.writer.line("    cmp QWORD PTR [r9], r8")
+                self.writer.line("    je " + matched)
+                self.writer.line("    add r9, 16")
+                self.writer.line("    dec r10")
+                self.writer.line("    jmp " + scan)
+                self.writer.line(next + ":")
                 self.writer.line("    mov rdx, QWORD PTR [rdx]")
                 self.writer.line("    jmp " + loop)
                 self.writer.line(matched + ":")
@@ -512,7 +597,49 @@ library X86_64 {{
                 self.writer.line("    push rax")
             }
             self.writer.line("    mov rax, QWORD PTR [rdi]")
-            self.writer.line("    call QWORD PTR [rax+" + (8 + instruction.slot * 8).toString() + "]")
+            self.writer.line("    call QWORD PTR [rax+" + (40 + instruction.slot * 8).toString() + "]")
+            local stackBytes = stackCount * 8 + padding
+            if stackBytes > 0 { self.writer.line("    add rsp, " + stackBytes.toString()) }
+            if instruction.result != null { self.storeResult(instruction, "rax") }
+        }
+
+        generateContractCall(instruction:Ir.Instruction) -> void {
+            local index:i64 = 0
+            while index < instruction.arguments.length {
+                if index >= 6 { break }
+                self.load(instruction.arguments[index], self.argumentRegister(index))
+                index = index + 1
+            }
+            local stackCount = instruction.arguments.length - 6
+            if stackCount < 0 { stackCount = 0 }
+            local padding:i64 = 0
+            if stackCount - (stackCount / 2) * 2 == 1 { padding = 8; self.writer.line("    sub rsp, 8") }
+            index = instruction.arguments.length
+            while index > 6 {
+                index = index - 1
+                self.load(instruction.arguments[index], "rax")
+                self.writer.line("    push rax")
+            }
+            local label = self.nextLabel
+            self.nextLabel = self.nextLabel + 1
+            local loop = ".Lcontract_call_" + label.toString()
+            local found = ".Lcontract_found_" + label.toString()
+            self.writer.line("    mov rax, QWORD PTR [rdi]")
+            self.writer.line("    mov rdx, QWORD PTR [rax+8]")
+            self.writer.line("    mov rcx, QWORD PTR [rdx]")
+            self.writer.line("    add rdx, 8")
+            self.writer.line("    lea r8, [rip+" + self.typeLabel(instruction.ownerType!) + "]")
+            self.writer.line(loop + ":")
+            self.writer.line("    test rcx, rcx")
+            self.writer.line("    jz .Lcontract_dispatch_error")
+            self.writer.line("    cmp QWORD PTR [rdx], r8")
+            self.writer.line("    je " + found)
+            self.writer.line("    add rdx, 16")
+            self.writer.line("    dec rcx")
+            self.writer.line("    jmp " + loop)
+            self.writer.line(found + ":")
+            self.writer.line("    mov rax, QWORD PTR [rdx+8]")
+            self.writer.line("    call QWORD PTR [rax+" + (instruction.slot * 8).toString() + "]")
             local stackBytes = stackCount * 8 + padding
             if stackBytes > 0 { self.writer.line("    add rsp, " + stackBytes.toString()) }
             if instruction.result != null { self.storeResult(instruction, "rax") }
@@ -527,6 +654,8 @@ library X86_64 {{
             self.writer.line("    mov rbp, rsp")
             self.writer.line("    mov QWORD PTR [rip+argon_process_argc], rdi")
             self.writer.line("    mov QWORD PTR [rip+argon_process_argv], rsi")
+            self.writer.line("    lea rax, [rsi+rdi*8+8]")
+            self.writer.line("    mov QWORD PTR [rip+argon_process_envp], rax")
             self.writer.line("    sub rsp, 16")
             self.writer.line("    mov rdi, " + entrySize.toString())
             self.writer.line("    call argon_alloc")
@@ -553,6 +682,9 @@ library X86_64 {{
             self.writer.line("    jmp .Lruntime_error")
             self.writer.line(".Loptional_unwrap_error:")
             self.writer.line("    mov edi, 71")
+            self.writer.line("    jmp .Lruntime_error")
+            self.writer.line(".Lcontract_dispatch_error:")
+            self.writer.line("    mov edi, 75")
             self.writer.line("    jmp .Lruntime_error")
             self.writer.line(".Lruntime_error:")
             self.writer.line("    mov eax, 60")
@@ -1011,6 +1143,89 @@ library X86_64 {{
             self.writer.line("    syscall")
             self.writer.line("    ud2")
             self.writer.line("")
+            self.writer.line(".globl argon_System_environmentVariable")
+            self.writer.line("argon_System_environmentVariable:")
+            self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push r12"); self.writer.line("    push r13")
+            self.writer.line("    mov r8, QWORD PTR [rdi]"); self.writer.line("    mov r9, QWORD PTR [rdi+8]"); self.writer.line("    mov r10, QWORD PTR [rip+argon_process_envp]")
+            self.writer.line(".Lenvironment_next:"); self.writer.line("    mov rdx, QWORD PTR [r10]"); self.writer.line("    test rdx, rdx"); self.writer.line("    je .Lenvironment_missing"); self.writer.line("    xor ecx, ecx")
+            self.writer.line(".Lenvironment_compare:"); self.writer.line("    cmp rcx, r9"); self.writer.line("    je .Lenvironment_name_end"); self.writer.line("    mov al, BYTE PTR [rdx+rcx]"); self.writer.line("    cmp al, BYTE PTR [r8+rcx]"); self.writer.line("    jne .Lenvironment_advance"); self.writer.line("    inc rcx"); self.writer.line("    jmp .Lenvironment_compare")
+            self.writer.line(".Lenvironment_name_end:"); self.writer.line("    cmp BYTE PTR [rdx+rcx], 61"); self.writer.line("    jne .Lenvironment_advance"); self.writer.line("    lea r12, [rdx+rcx+1]"); self.writer.line("    xor r13d, r13d")
+            self.writer.line(".Lenvironment_value_length:"); self.writer.line("    cmp BYTE PTR [r12+r13], 0"); self.writer.line("    je .Lenvironment_wrap"); self.writer.line("    inc r13"); self.writer.line("    jmp .Lenvironment_value_length")
+            self.writer.line(".Lenvironment_wrap:"); self.writer.line("    mov edi, 16"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rax], r12"); self.writer.line("    mov QWORD PTR [rax+8], r13"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    leave"); self.writer.line("    ret")
+            self.writer.line(".Lenvironment_advance:"); self.writer.line("    add r10, 8"); self.writer.line("    jmp .Lenvironment_next")
+            self.writer.line(".Lenvironment_missing:"); self.writer.line("    xor eax, eax"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    leave"); self.writer.line("    ret"); self.writer.line("")
+        }
+
+        linkRuntime() -> void {
+            self.writer.line(".globl argon_System_link")
+            self.writer.line("argon_System_link:")
+            self.writer.line("    push rbp")
+            self.writer.line("    mov rbp, rsp")
+            self.writer.line("    push r12")
+            self.writer.line("    push r13")
+            self.writer.line("    sub rsp, 16")
+            self.writer.line("    mov r12, QWORD PTR [rdi]")
+            self.writer.line("    mov r13, QWORD PTR [rsi]")
+            self.writer.line("    mov eax, 57")
+            self.writer.line("    syscall")
+            self.writer.line("    test rax, rax")
+            self.writer.line("    js .Llink_fork_error")
+            self.writer.line("    jz .Llink_child")
+            self.writer.line("    mov rdi, rax")
+            self.writer.line("    lea rsi, [rbp-24]")
+            self.writer.line("    xor edx, edx")
+            self.writer.line("    xor r10d, r10d")
+            self.writer.line("    mov eax, 61")
+            self.writer.line("    syscall")
+            self.writer.line("    test rax, rax")
+            self.writer.line("    js .Llink_wait_error")
+            self.writer.line("    mov eax, DWORD PTR [rbp-24]")
+            self.writer.line("    mov edx, eax")
+            self.writer.line("    and edx, 127")
+            self.writer.line("    jnz .Llink_signaled")
+            self.writer.line("    shr eax, 8")
+            self.writer.line("    and eax, 255")
+            self.writer.line("    jmp .Llink_done")
+            self.writer.line(".Llink_signaled:")
+            self.writer.line("    lea eax, [rdx+128]")
+            self.writer.line("    jmp .Llink_done")
+            self.writer.line(".Llink_fork_error:")
+            self.writer.line(".Llink_wait_error:")
+            self.writer.line("    mov eax, 127")
+            self.writer.line("    jmp .Llink_done")
+            self.writer.line(".Llink_child:")
+            self.writer.line("    sub rsp, 48")
+            self.writer.line("    lea rax, [rip+.Llink_cc]")
+            self.writer.line("    mov QWORD PTR [rsp], rax")
+            self.writer.line("    lea rax, [rip+.Llink_no_pie]")
+            self.writer.line("    mov QWORD PTR [rsp+8], rax")
+            self.writer.line("    mov QWORD PTR [rsp+16], r12")
+            self.writer.line("    lea rax, [rip+.Llink_output]")
+            self.writer.line("    mov QWORD PTR [rsp+24], rax")
+            self.writer.line("    mov QWORD PTR [rsp+32], r13")
+            self.writer.line("    mov QWORD PTR [rsp+40], 0")
+            self.writer.line("    lea rdi, [rip+.Llink_cc]")
+            self.writer.line("    mov rsi, rsp")
+            self.writer.line("    mov rdx, QWORD PTR [rip+argon_process_envp]")
+            self.writer.line("    mov eax, 59")
+            self.writer.line("    syscall")
+            self.writer.line("    mov edi, 127")
+            self.writer.line("    mov eax, 60")
+            self.writer.line("    syscall")
+            self.writer.line("    ud2")
+            self.writer.line(".Llink_done:")
+            self.writer.line("    add rsp, 16")
+            self.writer.line("    pop r13")
+            self.writer.line("    pop r12")
+            self.writer.line("    leave")
+            self.writer.line("    ret")
+            self.writer.line(".Llink_cc:")
+            self.writer.line("    .asciz \"/usr/bin/cc\"")
+            self.writer.line(".Llink_no_pie:")
+            self.writer.line("    .asciz \"-no-pie\"")
+            self.writer.line(".Llink_output:")
+            self.writer.line("    .asciz \"-o\"")
+            self.writer.line("")
         }
 
         filesystemRuntime() -> void {
@@ -1302,12 +1517,313 @@ library X86_64 {{
             self.writer.line("    .zero 8")
             self.writer.line("argon_process_argv:")
             self.writer.line("    .zero 8")
+            self.writer.line("argon_process_envp:")
+            self.writer.line("    .zero 8")
             self.writer.line("argon_filesystem_error:")
             self.writer.line("    .zero 8")
             self.writer.line("")
         }
 
         typeLabel(typeName:string) -> string { return ".Largon_type_" + self.mangle(typeName) }
+        objectEqualityLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_equal" }
+        objectHashLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_hash" }
+        objectCopyLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_copy" }
+        arrayEqualityLabel(typeName:string) -> string { return ".Largon_array_equal_" + self.mangle(typeName) }
+        arrayHashLabel(typeName:string) -> string { return ".Largon_array_hash_" + self.mangle(typeName) }
+        arrayCopyLabel(typeName:string) -> string { return ".Largon_array_copy_" + self.mangle(typeName) }
+        arrayDestroyLabel(typeName:string) -> string { return ".Largon_array_destroy_" + self.mangle(typeName) }
+
+        baseType(typeName:string) -> string {
+            if typeName.length > 0 { if typeName[typeName.length - 1] == 63 { return typeName.slice(0, typeName.length - 1) } }
+            return typeName
+        }
+
+        equalityFunction(typeName:string) -> string {
+            local base = self.baseType(typeName)
+            if base == "string" { return "argon_string_equal_context" }
+            if self.isArray(base) { return self.arrayEqualityLabel(base) }
+            return "argon_object_equal"
+        }
+
+        hashFunction(typeName:string) -> string {
+            local base = self.baseType(typeName)
+            if base == "string" { return "argon_string_hash_context" }
+            if self.isArray(base) { return self.arrayHashLabel(base) }
+            return "argon_object_hash"
+        }
+
+        copyFunction(typeName:string) -> string {
+            local base = self.baseType(typeName)
+            if base == "string" { return "argon_string_copy_context" }
+            if self.isArray(base) { return self.arrayCopyLabel(base) }
+            return "argon_object_copy"
+        }
+
+        structuralRuntime() -> void {
+            self.structuralCoreRuntime()
+            local index:i64 = 0
+            while index < self.program.types.length {
+                self.objectEqualityFunction(self.program.types[index])
+                self.objectHashFunction(self.program.types[index])
+                self.objectCopyFunction(self.program.types[index])
+                index = index + 1
+            }
+            local arrays = self.structuralArrayTypes()
+            index = 0
+            while index < arrays.length {
+                self.arrayEqualityFunction(arrays[index])
+                self.arrayHashFunction(arrays[index])
+                self.arrayCopyFunction(arrays[index])
+                index = index + 1
+            }
+        }
+
+        structuralCoreRuntime() -> void {
+            self.writer.line(".globl argon_object_equal")
+            self.writer.line("argon_object_equal:")
+            self.writer.line("    cmp rdi, rsi"); self.writer.line("    je .Lobject_equal_true")
+            self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lobject_equal_false")
+            self.writer.line("    test rsi, rsi"); self.writer.line("    jz .Lobject_equal_false")
+            self.writer.line("    mov rax, QWORD PTR [rdi]"); self.writer.line("    cmp rax, QWORD PTR [rsi]"); self.writer.line("    jne .Lobject_equal_false")
+            self.writer.line("    mov rcx, rdx"); self.writer.line(".Lobject_equal_scan:")
+            self.writer.line("    test rcx, rcx"); self.writer.line("    jz .Lobject_equal_enter")
+            self.writer.line("    cmp QWORD PTR [rcx], rdi"); self.writer.line("    jne .Lobject_equal_next")
+            self.writer.line("    cmp QWORD PTR [rcx+8], rsi"); self.writer.line("    je .Lobject_equal_true")
+            self.writer.line(".Lobject_equal_next:"); self.writer.line("    mov rcx, QWORD PTR [rcx+16]"); self.writer.line("    jmp .Lobject_equal_scan")
+            self.writer.line(".Lobject_equal_enter:"); self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    sub rsp, 32")
+            self.writer.line("    mov QWORD PTR [rsp], rdi"); self.writer.line("    mov QWORD PTR [rsp+8], rsi"); self.writer.line("    mov QWORD PTR [rsp+16], rdx")
+            self.writer.line("    mov rdx, rsp"); self.writer.line("    call QWORD PTR [rax+16]"); self.writer.line("    leave"); self.writer.line("    ret")
+            self.writer.line(".Lobject_equal_true:"); self.writer.line("    mov eax, 1"); self.writer.line("    ret")
+            self.writer.line(".Lobject_equal_false:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
+            self.writer.line(".globl argon_object_hash"); self.writer.line("argon_object_hash:")
+            self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lobject_hash_null"); self.writer.line("    mov rcx, rsi")
+            self.writer.line(".Lobject_hash_scan:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz .Lobject_hash_enter")
+            self.writer.line("    cmp QWORD PTR [rcx], rdi"); self.writer.line("    je .Lobject_hash_cycle")
+            self.writer.line("    mov rcx, QWORD PTR [rcx+8]"); self.writer.line("    jmp .Lobject_hash_scan")
+            self.writer.line(".Lobject_hash_enter:"); self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    sub rsp, 16")
+            self.writer.line("    mov QWORD PTR [rsp], rdi"); self.writer.line("    mov QWORD PTR [rsp+8], rsi"); self.writer.line("    mov rsi, rsp")
+            self.writer.line("    mov rax, QWORD PTR [rdi]"); self.writer.line("    call QWORD PTR [rax+24]"); self.writer.line("    leave"); self.writer.line("    ret")
+            self.writer.line(".Lobject_hash_null:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
+            self.writer.line(".Lobject_hash_cycle:"); self.writer.line("    mov rax, -7046029254386353131"); self.writer.line("    ret")
+            self.writer.line(".globl argon_object_copy"); self.writer.line("argon_object_copy:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lobject_copy_null")
+            self.writer.line("    test rsi, rsi"); self.writer.line("    jnz .Lobject_copy_scan_start"); self.writer.line("    push rdi"); self.writer.line("    mov edi, 8"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rax], 0"); self.writer.line("    mov rsi, rax"); self.writer.line("    pop rdi")
+            self.writer.line(".Lobject_copy_scan_start:"); self.writer.line("    mov rcx, QWORD PTR [rsi]"); self.writer.line(".Lobject_copy_scan:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz .Lobject_copy_enter")
+            self.writer.line("    cmp QWORD PTR [rcx], rdi"); self.writer.line("    je .Lobject_copy_found"); self.writer.line("    mov rcx, QWORD PTR [rcx+16]"); self.writer.line("    jmp .Lobject_copy_scan")
+            self.writer.line(".Lobject_copy_found:"); self.writer.line("    mov rax, QWORD PTR [rcx+8]"); self.writer.line("    ret"); self.writer.line(".Lobject_copy_enter:"); self.writer.line("    mov rax, QWORD PTR [rdi]"); self.writer.line("    jmp QWORD PTR [rax+32]"); self.writer.line(".Lobject_copy_null:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
+            self.writer.line("argon_string_equal_context:"); self.writer.line("    cmp rdi, rsi"); self.writer.line("    je .Lstring_context_true")
+            self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lstring_context_false"); self.writer.line("    test rsi, rsi"); self.writer.line("    jz .Lstring_context_false")
+            self.writer.line("    jmp argon_string_equal"); self.writer.line(".Lstring_context_true:"); self.writer.line("    mov eax, 1"); self.writer.line("    ret")
+            self.writer.line(".Lstring_context_false:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
+            self.writer.line("argon_string_hash_context:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lstring_hash_null")
+            self.writer.line("    mov rsi, QWORD PTR [rdi]"); self.writer.line("    mov rcx, QWORD PTR [rdi+8]"); self.writer.line("    mov rax, 1469598103934665603")
+            self.writer.line(".Lstring_hash_next:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz .Lstring_hash_done")
+            self.writer.line("    movzx rdx, BYTE PTR [rsi]"); self.writer.line("    xor rax, rdx"); self.writer.line("    mov r8, 1099511628211"); self.writer.line("    imul rax, r8")
+            self.writer.line("    inc rsi"); self.writer.line("    dec rcx"); self.writer.line("    jmp .Lstring_hash_next")
+            self.writer.line(".Lstring_hash_done:"); self.writer.line("    ret"); self.writer.line(".Lstring_hash_null:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
+            self.writer.line("argon_string_copy_context:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lstring_copy_null"); self.writer.line("    test rsi, rsi"); self.writer.line("    jnz .Lstring_copy_scan_start")
+            self.writer.line("    push rdi"); self.writer.line("    mov edi, 8"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rax], 0"); self.writer.line("    mov rsi, rax"); self.writer.line("    pop rdi")
+            self.writer.line(".Lstring_copy_scan_start:"); self.writer.line("    mov rcx, QWORD PTR [rsi]"); self.writer.line(".Lstring_copy_scan:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz .Lstring_copy_enter"); self.writer.line("    cmp QWORD PTR [rcx], rdi"); self.writer.line("    je .Lstring_copy_found"); self.writer.line("    mov rcx, QWORD PTR [rcx+16]"); self.writer.line("    jmp .Lstring_copy_scan"); self.writer.line(".Lstring_copy_found:"); self.writer.line("    mov rax, QWORD PTR [rcx+8]"); self.writer.line("    ret")
+            self.writer.line(".Lstring_copy_enter:"); self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    mov r12, rdi"); self.writer.line("    mov r14, rsi"); self.writer.line("    mov edi, 16"); self.writer.line("    call argon_alloc"); self.writer.line("    mov rbx, rax"); self.writer.line("    mov r13, QWORD PTR [r12+8]"); self.writer.line("    mov rdi, r13"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rbx], rax"); self.writer.line("    mov QWORD PTR [rbx+8], r13"); self.writer.line("    mov rdi, rax"); self.writer.line("    mov rsi, QWORD PTR [r12]"); self.writer.line("    mov rcx, r13"); self.writer.line("    rep movsb")
+            self.writer.line("    mov edi, 24"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rax], r12"); self.writer.line("    mov QWORD PTR [rax+8], rbx"); self.writer.line("    mov rcx, QWORD PTR [r14]"); self.writer.line("    mov QWORD PTR [rax+16], rcx"); self.writer.line("    mov QWORD PTR [r14], rax"); self.writer.line("    mov rax, rbx"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    leave"); self.writer.line("    ret"); self.writer.line(".Lstring_copy_null:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
+        }
+
+        objectEqualityFunction(typeNode:Ir.Type) -> void {
+            local fail = self.objectEqualityLabel(typeNode.name) + "_false"
+            local done = fail + "_done"
+            self.writer.line(self.objectEqualityLabel(typeNode.name) + ":")
+            self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15")
+            self.writer.line("    mov r12, rdi"); self.writer.line("    mov r13, rsi"); self.writer.line("    mov r14, rdx")
+            local index:i64 = 0
+            while index < typeNode.fields.length {
+                local field = self.findField(typeNode.fields[index].qualifiedName)!
+                self.compareAddresses("r12+" + field.offset.toString(), "r13+" + field.offset.toString(), field.typeName, fail)
+                index = index + 1
+            }
+            self.writer.line("    mov eax, 1"); self.writer.line("    jmp " + done); self.writer.line(fail + ":"); self.writer.line("    xor eax, eax"); self.writer.line(done + ":")
+            self.writer.line("    pop r15"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    leave"); self.writer.line("    ret")
+        }
+
+        objectHashFunction(typeNode:Ir.Type) -> void {
+            self.writer.line(self.objectHashLabel(typeNode.name) + ":")
+            self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15")
+            self.writer.line("    mov r12, rdi"); self.writer.line("    mov r14, rsi"); self.writer.line("    mov r15, " + self.stableTypeHash(typeNode.name).toString())
+            local index:i64 = 0
+            while index < typeNode.fields.length {
+                local field = self.findField(typeNode.fields[index].qualifiedName)!
+                self.hashAddress("r12+" + field.offset.toString(), field.typeName)
+                self.writer.line("    xor r15, rax"); self.writer.line("    mov rax, 1099511628211"); self.writer.line("    imul r15, rax")
+                index = index + 1
+            }
+            self.writer.line("    mov rax, r15"); self.writer.line("    pop r15"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    leave"); self.writer.line("    ret")
+        }
+
+        objectCopyFunction(typeNode:Ir.Type) -> void {
+            self.writer.line(self.objectCopyLabel(typeNode.name) + ":")
+            self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15"); self.writer.line("    sub rsp, 16")
+            self.writer.line("    mov r12, rdi"); self.writer.line("    mov r14, rsi"); self.writer.line("    mov edi, " + self.typeSize(typeNode.name).toString()); self.writer.line("    call argon_alloc"); self.writer.line("    mov r13, rax"); self.writer.line("    mov rax, QWORD PTR [r12]"); self.writer.line("    mov QWORD PTR [r13], rax"); self.writer.line("    mov QWORD PTR [r13+8], 1")
+            self.writer.line("    mov edi, 24"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rax], r12"); self.writer.line("    mov QWORD PTR [rax+8], r13"); self.writer.line("    mov rcx, QWORD PTR [r14]"); self.writer.line("    mov QWORD PTR [rax+16], rcx"); self.writer.line("    mov QWORD PTR [r14], rax")
+            local index:i64 = 0
+            while index < typeNode.fields.length {
+                local field = self.findField(typeNode.fields[index].qualifiedName)!
+                self.copyAddress("r12+" + field.offset.toString(), field.typeName)
+                self.writer.line("    mov " + self.memorySize(field.typeName) + " PTR [r13+" + field.offset.toString() + "], " + self.registerForSize("rax", field.typeName))
+                index = index + 1
+            }
+            self.writer.line("    mov rax, r13"); self.writer.line("    add rsp, 16"); self.writer.line("    pop r15"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    leave"); self.writer.line("    ret")
+        }
+
+        compareAddresses(left:string, right:string, typeName:string, fail:string) -> void {
+            local base = self.baseType(typeName)
+            if base == "string" || self.isArray(base) || self.findProgramType(base) != null {
+                self.writer.line("    mov rdi, QWORD PTR [" + left + "]"); self.writer.line("    mov rsi, QWORD PTR [" + right + "]")
+                self.writer.line("    mov rdx, r14"); self.writer.line("    call " + self.equalityFunction(base)); self.writer.line("    test eax, eax"); self.writer.line("    jz " + fail)
+                return
+            }
+            self.loadMemory("[" + right + "]", base, "rax"); self.writer.line("    mov rcx, rax"); self.loadMemory("[" + left + "]", base, "rax")
+            self.writer.line("    cmp rax, rcx"); self.writer.line("    jne " + fail)
+        }
+
+        hashAddress(address:string, typeName:string) -> void {
+            local base = self.baseType(typeName)
+            if base == "string" || self.isArray(base) || self.findProgramType(base) != null {
+                self.writer.line("    mov rdi, QWORD PTR [" + address + "]"); self.writer.line("    mov rsi, r14"); self.writer.line("    call " + self.hashFunction(base)); return
+            }
+            self.loadMemory("[" + address + "]", base, "rax")
+        }
+
+        copyAddress(address:string, typeName:string) -> void {
+            local base = self.baseType(typeName)
+            if base == "string" || self.isArray(base) || self.findProgramType(base) != null {
+                self.writer.line("    mov rdi, QWORD PTR [" + address + "]"); self.writer.line("    mov rsi, r14"); self.writer.line("    call " + self.copyFunction(base)); return
+            }
+            self.loadMemory("[" + address + "]", base, "rax")
+        }
+
+        isArray(name:string) -> bool {
+            if name.length <= 7 { return false }
+            return name.slice(0, 6) == "Array<" && name[name.length - 1] == 62
+        }
+
+        containsType(types:Array<string>, name:string) -> bool {
+            local index:i64 = 0
+            while index < types.length { if types[index] == name { return true }; index = index + 1 }
+            return false
+        }
+
+        addArrayType(types:Array<string>, typeName:string) -> void {
+            local base = self.baseType(typeName)
+            if !self.isArray(base) || self.containsType(types, base) { return }
+            types.append(base)
+            self.addArrayType(types, base.slice(6, base.length - 7))
+        }
+
+        structuralArrayTypes() -> Array<string> {
+            local result = new Array<string>(0)
+            local typeIndex:i64 = 0
+            while typeIndex < self.program.types.length {
+                local fieldIndex:i64 = 0
+                while fieldIndex < self.program.types[typeIndex].fields.length {
+                    self.addArrayType(result, self.program.types[typeIndex].fields[fieldIndex].typeName)
+                    fieldIndex = fieldIndex + 1
+                }
+                typeIndex = typeIndex + 1
+            }
+            local functionIndex:i64 = 0
+            while functionIndex < self.program.functions.length {
+                local blockIndex:i64 = 0
+                while blockIndex < self.program.functions[functionIndex].blocks.length {
+                    local instructionIndex:i64 = 0
+                    while instructionIndex < self.program.functions[functionIndex].blocks[blockIndex].instructions.length {
+                        local instruction = self.program.functions[functionIndex].blocks[blockIndex].instructions[instructionIndex]
+                        if instruction.ownerType != null { self.addArrayType(result, instruction.ownerType!) }
+                        instructionIndex = instructionIndex + 1
+                    }
+                    blockIndex = blockIndex + 1
+                }
+                functionIndex = functionIndex + 1
+            }
+            return result
+        }
+
+        arrayEqualityFunction(typeName:string) -> void {
+            local element = typeName.slice(6, typeName.length - 7)
+            local label = self.arrayEqualityLabel(typeName)
+            local fail = label + "_false"
+            local loop = label + "_loop"
+            local done = label + "_done"
+            self.writer.line(label + ":"); self.writer.line("    cmp rdi, rsi"); self.writer.line("    je " + done + "_true")
+            self.writer.line("    test rdi, rdi"); self.writer.line("    jz " + fail); self.writer.line("    test rsi, rsi"); self.writer.line("    jz " + fail)
+            self.writer.line("    mov rax, QWORD PTR [rdi]"); self.writer.line("    cmp rax, QWORD PTR [rsi]"); self.writer.line("    jne " + fail)
+            self.writer.line("    mov rcx, rdx"); self.writer.line(label + "_scan:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz " + label + "_enter")
+            self.writer.line("    cmp QWORD PTR [rcx], rdi"); self.writer.line("    jne " + label + "_next"); self.writer.line("    cmp QWORD PTR [rcx+8], rsi"); self.writer.line("    je " + done + "_true")
+            self.writer.line(label + "_next:"); self.writer.line("    mov rcx, QWORD PTR [rcx+16]"); self.writer.line("    jmp " + label + "_scan")
+            self.writer.line(label + "_enter:"); self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15"); self.writer.line("    sub rsp, 32")
+            self.writer.line("    mov r12, rdi"); self.writer.line("    mov r13, rsi"); self.writer.line("    mov QWORD PTR [rsp], rdi"); self.writer.line("    mov QWORD PTR [rsp+8], rsi"); self.writer.line("    mov QWORD PTR [rsp+16], rdx"); self.writer.line("    mov r14, rsp"); self.writer.line("    xor r15d, r15d")
+            self.writer.line(loop + ":"); self.writer.line("    cmp r15, QWORD PTR [r12]"); self.writer.line("    jae " + done)
+            self.writer.line("    imul rax, r15, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]")
+            self.writer.line("    imul rcx, r15, " + self.sizeOf(element).toString()); self.writer.line("    add rcx, QWORD PTR [r13+16]")
+            self.compareAddresses("rax", "rcx", element, fail + "_frame")
+            self.writer.line("    inc r15"); self.writer.line("    jmp " + loop); self.writer.line(done + ":"); self.writer.line("    mov eax, 1"); self.writer.line("    jmp " + done + "_frame")
+            self.writer.line(fail + "_frame:"); self.writer.line("    xor eax, eax"); self.writer.line(done + "_frame:"); self.writer.line("    add rsp, 32"); self.writer.line("    pop r15"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    leave"); self.writer.line("    ret")
+            self.writer.line(done + "_true:"); self.writer.line("    mov eax, 1"); self.writer.line("    ret"); self.writer.line(fail + ":"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
+        }
+
+        arrayHashFunction(typeName:string) -> void {
+            local element = typeName.slice(6, typeName.length - 7)
+            local label = self.arrayHashLabel(typeName)
+            local loop = label + "_loop"
+            local done = label + "_done"
+            self.writer.line(label + ":"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz " + done + "_null"); self.writer.line("    mov rcx, rsi")
+            self.writer.line(label + "_scan:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz " + label + "_enter"); self.writer.line("    cmp QWORD PTR [rcx], rdi"); self.writer.line("    je " + done + "_cycle"); self.writer.line("    mov rcx, QWORD PTR [rcx+8]"); self.writer.line("    jmp " + label + "_scan")
+            self.writer.line(label + "_enter:"); self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15"); self.writer.line("    sub rsp, 16")
+            self.writer.line("    mov r12, rdi"); self.writer.line("    mov QWORD PTR [rsp], rdi"); self.writer.line("    mov QWORD PTR [rsp+8], rsi"); self.writer.line("    mov r14, rsp"); self.writer.line("    xor r13d, r13d"); self.writer.line("    mov r15, 1469598103934665603")
+            self.writer.line(loop + ":"); self.writer.line("    cmp r13, QWORD PTR [r12]"); self.writer.line("    jae " + done); self.writer.line("    imul rax, r13, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]")
+            self.hashAddress("rax", element); self.writer.line("    xor r15, rax"); self.writer.line("    mov rax, 1099511628211"); self.writer.line("    imul r15, rax"); self.writer.line("    inc r13"); self.writer.line("    jmp " + loop)
+            self.writer.line(done + ":"); self.writer.line("    mov rax, r15"); self.writer.line("    add rsp, 16"); self.writer.line("    pop r15"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    leave"); self.writer.line("    ret")
+            self.writer.line(done + "_null:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret"); self.writer.line(done + "_cycle:"); self.writer.line("    mov rax, -7046029254386353131"); self.writer.line("    ret")
+        }
+
+        arrayCopyFunction(typeName:string) -> void {
+            local element = typeName.slice(6, typeName.length - 7)
+            local label = self.arrayCopyLabel(typeName)
+            local loop = label + "_loop"
+            local done = label + "_done"
+            self.writer.line(label + ":"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz " + done + "_null"); self.writer.line("    test rsi, rsi"); self.writer.line("    jnz " + label + "_scan_start")
+            self.writer.line("    push rdi"); self.writer.line("    mov edi, 8"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rax], 0"); self.writer.line("    mov rsi, rax"); self.writer.line("    pop rdi")
+            self.writer.line(label + "_scan_start:"); self.writer.line("    mov rcx, QWORD PTR [rsi]"); self.writer.line(label + "_scan:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz " + label + "_enter"); self.writer.line("    cmp QWORD PTR [rcx], rdi"); self.writer.line("    je " + label + "_found"); self.writer.line("    mov rcx, QWORD PTR [rcx+16]"); self.writer.line("    jmp " + label + "_scan"); self.writer.line(label + "_found:"); self.writer.line("    mov rax, QWORD PTR [rcx+8]"); self.writer.line("    ret")
+            self.writer.line(label + "_enter:"); self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15"); self.writer.line("    sub rsp, 16"); self.writer.line("    mov r12, rdi"); self.writer.line("    mov r14, rsi")
+            self.writer.line("    mov edi, " + self.sizeOf(element).toString()); self.writer.line("    mov rsi, QWORD PTR [r12]"); self.writer.line("    call argon_array_new"); self.writer.line("    mov r13, rax"); self.writer.line("    mov edi, 24"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rax], r12"); self.writer.line("    mov QWORD PTR [rax+8], r13"); self.writer.line("    mov rcx, QWORD PTR [r14]"); self.writer.line("    mov QWORD PTR [rax+16], rcx"); self.writer.line("    mov QWORD PTR [r14], rax"); self.writer.line("    xor r15d, r15d")
+            self.writer.line(loop + ":"); self.writer.line("    cmp r15, QWORD PTR [r12]"); self.writer.line("    jae " + done); self.writer.line("    imul rax, r15, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]"); self.copyAddress("rax", element); self.writer.line("    mov rdx, rax"); self.writer.line("    imul rax, r15, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r13+16]"); self.writer.line("    mov " + self.memorySize(element) + " PTR [rax], " + self.registerForSize("rdx", element)); self.writer.line("    inc r15"); self.writer.line("    jmp " + loop)
+            self.writer.line(done + ":"); self.writer.line("    mov rax, r13"); self.writer.line("    add rsp, 16"); self.writer.line("    pop r15"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    leave"); self.writer.line("    ret"); self.writer.line(done + "_null:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
+        }
+
+        arrayDestroyFunction(typeName:string) -> void {
+            local element = typeName.slice(6, typeName.length - 7)
+            local label = self.arrayDestroyLabel(typeName)
+            local loop = label + "_loop"
+            local next = label + "_next"
+            local liveDone = label + "_live_done"
+            local done = label + "_done"
+            self.writer.line(label + ":"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz " + done); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    mov r12, rdi"); self.writer.line("    xor r13d, r13d")
+            self.writer.line(loop + ":"); self.writer.line("    cmp r13, QWORD PTR [r12]"); self.writer.line("    jae " + liveDone)
+            if self.isArray(element) {
+                self.writer.line("    imul rax, r13, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]"); self.writer.line("    mov rdi, QWORD PTR [rax]"); self.writer.line("    call " + self.arrayDestroyLabel(element))
+            } else {
+                if self.findProgramType(self.baseType(element)) != null {
+                    self.writer.line("    imul rax, r13, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]"); self.writer.line("    mov rax, QWORD PTR [rax]"); self.writer.line("    test rax, rax"); self.writer.line("    jz " + next); self.writer.line("    mov QWORD PTR [rax+8], 0")
+                }
+            }
+            self.writer.line(next + ":"); self.writer.line("    inc r13"); self.writer.line("    jmp " + loop); self.writer.line(liveDone + ":"); self.writer.line("    mov QWORD PTR [r12+24], 0"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line(done + ":"); self.writer.line("    ret")
+        }
+
+        stableTypeHash(name:string) -> i64 {
+            local hash:i64 = 1469598103934665603
+            local index:i64 = 0
+            while index < name.length { hash = hash * 31 + (name[index] as i64); index = index + 1 }
+            return hash
+        }
+        contractListLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_contracts" }
+        contractTableLabel(typeName:string, contractName:string) -> string { return self.typeLabel(typeName) + "_as_" + self.mangle(contractName) }
 
         typeData() -> void {
             self.writer.line(".section .data")
@@ -1317,10 +1833,39 @@ library X86_64 {{
                 local typeNode = self.program.types[index]
                 self.writer.line(self.typeLabel(typeNode.name) + ":")
                 if typeNode.baseName == null { self.writer.line("    .quad 0") } else { self.writer.line("    .quad " + self.typeLabel(typeNode.baseName!)) }
+                self.writer.line("    .quad " + self.contractListLabel(typeNode.name))
+                self.writer.line("    .quad " + self.objectEqualityLabel(typeNode.name))
+                self.writer.line("    .quad " + self.objectHashLabel(typeNode.name))
+                self.writer.line("    .quad " + self.objectCopyLabel(typeNode.name))
                 local methodIndex:i64 = 0
                 while methodIndex < typeNode.virtualMethods.length {
                     self.writer.line("    .quad " + self.functionSymbol(typeNode.virtualMethods[methodIndex].target))
                     methodIndex = methodIndex + 1
+                }
+                index = index + 1
+            }
+            index = 0
+            while index < self.program.types.length {
+                local typeNode = self.program.types[index]
+                self.writer.line(self.contractListLabel(typeNode.name) + ":")
+                self.writer.line("    .quad " + typeNode.contracts.length.toString())
+                local contractIndex:i64 = 0
+                while contractIndex < typeNode.contracts.length {
+                    local contract = typeNode.contracts[contractIndex]
+                    self.writer.line("    .quad " + self.typeLabel(contract.name))
+                    self.writer.line("    .quad " + self.contractTableLabel(typeNode.name, contract.name))
+                    contractIndex = contractIndex + 1
+                }
+                contractIndex = 0
+                while contractIndex < typeNode.contracts.length {
+                    local contract = typeNode.contracts[contractIndex]
+                    self.writer.line(self.contractTableLabel(typeNode.name, contract.name) + ":")
+                    local methodIndex:i64 = 0
+                    while methodIndex < contract.methods.length {
+                        self.writer.line("    .quad " + self.functionSymbol(contract.methods[methodIndex].target))
+                        methodIndex = methodIndex + 1
+                    }
+                    contractIndex = contractIndex + 1
                 }
                 index = index + 1
             }
@@ -1358,7 +1903,7 @@ library X86_64 {{
         temp(name:string) -> string { return self.slot("temp:" + name) }
         blockLabel(name:string) -> string { return self.currentFunctionSymbol + "__" + name }
 
-        findSlot(key:string) -> Slot? {
+        findSlot(key:string) -> ref Slot? {
             local index:i64 = 0
             while index < self.slots.length { if self.slots[index].key == key { return self.slots[index] }; index = index + 1 }
             return null
@@ -1370,31 +1915,31 @@ library X86_64 {{
             self.literals.append(new Literal(value, ".Largon_string_data_" + suffix, ".Largon_string_" + suffix))
         }
 
-        findLiteral(value:string) -> Literal? {
+        findLiteral(value:string) -> ref Literal? {
             local index:i64 = 0
             while index < self.literals.length { if self.literals[index].value == value { return self.literals[index] }; index = index + 1 }
             return null
         }
 
-        findField(name:string) -> FieldLayout? {
+        findField(name:string) -> ref FieldLayout? {
             local index:i64 = 0
             while index < self.fields.length { if self.fields[index].name == name { return self.fields[index] }; index = index + 1 }
             return null
         }
 
-        findFunction(name:string) -> Ir.Function? {
+        findFunction(name:string) -> ref Ir.Function? {
             local index:i64 = 0
             while index < self.program.functions.length { if self.program.functions[index].name == name { return self.program.functions[index] }; index = index + 1 }
             return null
         }
 
-        findProgramType(name:string) -> Ir.Type? {
+        findProgramType(name:string) -> ref Ir.Type? {
             local index:i64 = 0
             while index < self.program.types.length { if self.program.types[index].name == name { return self.program.types[index] }; index = index + 1 }
             return null
         }
 
-        findAssemblySymbol(name:string) -> FunctionSymbol? {
+        findAssemblySymbol(name:string) -> ref FunctionSymbol? {
             local index:i64 = 0
             while index < self.functionSymbols.length { if self.functionSymbols[index].assemblyName == name { return self.functionSymbols[index] }; index = index + 1 }
             return null

@@ -33,17 +33,17 @@ library Diagnostics {{
     }}
 
     DiagnosticBag {{
-        member items:Array<Diagnostic>
+        member items:Array<ref Diagnostic>
 
         __() -> void {
-            self.items = new Array<Diagnostic>(0)
+            self.items = new Array<ref Diagnostic>(0)
         }
 
         add(diagnostic:Diagnostic) -> void {
             self.items.append(diagnostic)
         }
 
-        first() -> Diagnostic? {
+        first() -> ref Diagnostic? {
             if self.items.length == 0 {
                 return null
             } else {

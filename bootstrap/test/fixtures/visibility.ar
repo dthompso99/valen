@@ -1,0 +1,26 @@
+Vault {{
+    private member secret:i64
+
+    __(secret:i64) -> void { self.secret = secret }
+    private doubled() -> i64 { return self.secret * 2 }
+    public reveal() -> i64 { return self.doubled() }
+}}
+
+VisibleContract {{
+    private internalDefault() -> i64 { return 99 }
+    required() -> i64 { return 7 }
+}}
+
+Implementation implements VisibleContract {{
+    required() -> i64 { return 7 }
+}}
+
+entry {{
+    __() -> i32 {
+        local vault = new Vault(21)
+        if vault.reveal() != 42 { return 1 }
+        local contract:VisibleContract = new Implementation()
+        if contract.required() != 7 { return 2 }
+        return 0
+    }
+}}

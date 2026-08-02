@@ -15,10 +15,10 @@ library Diagnostics {{
     }}
 
     DiagnosticBag {{
-        member diagnostics:Array<Diagnostic>
+        member diagnostics:Array<ref Diagnostic>
 
         __() -> void {
-            self.diagnostics = new Array<Diagnostic>(0)
+            self.diagnostics = new Array<ref Diagnostic>(0)
         }
 
         add(diagnostic:Diagnostic) -> void {

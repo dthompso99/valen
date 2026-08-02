@@ -95,9 +95,9 @@ entry {{
 `;
 
 test('sample programs pass semantic analysis and IR generation', () => {
-    for (const file of ['sample.ar', 'nested.ar']) {
+    for (const file of ['examples/simple/simple.ar', 'examples/nested/nested.ar']) {
         const filePath = path.join(projectRoot, file);
-        const semantic = new SemanticAnalyzer().analyzeFile(filePath);
+        const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
         assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
         const ir = new IrGenerator().generate(semantic);
         assert.ok(ir.entry);
@@ -291,6 +291,16 @@ test('Argon compiler source foundation and tokenizer load and lower', () => {
     assert.doesNotThrow(() => new X86_64Backend().generate(ir));
 });
 
+test('module imports fall back to ARGON_LIBRARY_PATH after importer-relative resolution', () => {
+    const fixtureRoot = path.join(projectRoot, 'bootstrap/test/fixtures/library-path');
+    const semantic = new SemanticAnalyzer().analyzeFile(path.join(fixtureRoot, 'app/main.ar'), {
+        sourceRoot: fixtureRoot,
+        libraryPath: path.join(fixtureRoot, 'lib')
+    });
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    assert.ok([...semantic.modules.values()].some(module => module.path.endsWith('/lib/shared.ar')));
+});
+
 test('Argon symbols support duplicate checks, parent lookup, and shadowing', () => {
     const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/native-symbols.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
@@ -338,6 +348,292 @@ test('subtypes preserve identity, dispatch overrides, and support checked recove
     assert.ok(operations.includes('type_test'));
     assert.ok(operations.includes('checked_cast'));
     assert.doesNotThrow(() => new X86_64Backend().generate(ir));
+});
+
+test('one-word contract references dispatch through concrete object descriptors', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/contract-references.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    const operations = ir.functions.flatMap(fn => fn.blocks.flatMap(block => block.instructions.map(i => i.op)));
+    assert.ok(operations.includes('contract_call'));
+    assert.doesNotThrow(() => new X86_64Backend().generate(ir));
+
+    const hiddenField = new SemanticAnalyzer().analyze(new Parser().parse(
+        'Contract {{ member storage:i64; required() -> i64 { return self.storage } }} Impl implements Contract {{ required() -> i64 { return 1 } }} entry {{ __() -> i32 { local value:Contract = new Impl(); return value.storage as i32 } }}',
+        'contract-field.ar'
+    ));
+    assert.equal(hiddenField.success, false);
+    assert.match(hiddenField.diagnostics[0].message, /does not expose field 'storage'/);
+});
+
+test('contracts cross modules, inherit requirements, and compose operation capabilities', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/contracts/contract-stress.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    const contractCalls = ir.functions.flatMap(fn => fn.blocks.flatMap(block =>
+        block.instructions.filter(instruction => instruction.op === 'contract_call')));
+    assert.ok(contractCalls.length >= 10);
+    assert.doesNotThrow(() => new X86_64Backend().generate(ir));
+});
+
+test('operation state has stable success, failure, cancellation, and waiting semantics', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/operation-state.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    assert.ok(ir.functions.some(fn => fn.displayName === 'Operations.Operation.wait'));
+    assert.ok(ir.functions.some(fn => fn.displayName === 'ManualOperation.cancel'));
+    assert.doesNotThrow(() => new X86_64Backend().generate(ir));
+});
+
+test('members default public while private members stay owner-only and non-virtual', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/visibility.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    const vault = ir.types.find(type => type.displayName === 'Vault');
+    assert.ok(!vault.virtualMethods.some(method => method.name === 'doubled'));
+    assert.doesNotThrow(() => new X86_64Backend().generate(ir));
+
+    const inaccessible = new SemanticAnalyzer().analyze(new Parser().parse(
+        'Secret {{ private hidden() -> i64 { return 1 } }} entry {{ __() -> i32 { local secret = new Secret(); secret.hidden(); return 0 } }}',
+        'private-access.ar'
+    ));
+    assert.equal(inaccessible.success, false);
+    assert.match(inaccessible.diagnostics[0].message, /Private method 'Secret.hidden' is not visible/);
+
+    const override = new SemanticAnalyzer().analyze(new Parser().parse(
+        'Base {{ private hidden() -> i64 { return 1 } }} Child inherits Base {{ hidden() -> i64 { return 2 } }} entry {{ __() -> i32 { return 0 } }}',
+        'private-override.ar'
+    ));
+    assert.equal(override.success, false);
+    assert.match(override.diagnostics[0].message, /cannot replace private method/);
+});
+
+test('methods and constructors resolve overloads by parameter signature', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/overloads.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    assert.ok(ir.functions.some(fn => fn.displayName.includes('Base.add#i64,i64')));
+    assert.ok(ir.functions.some(fn => fn.displayName.includes('Base.add#string,string')));
+    assert.doesNotThrow(() => new X86_64Backend().generate(ir));
+
+    const duplicate = new SemanticAnalyzer().analyze(new Parser().parse(
+        'Duplicate {{ run(value:i64) -> i64 { return value } run(value:i64) -> string { return "bad" } }} entry {{ __() -> i32 { return 0 } }}',
+        'duplicate-overload.ar'
+    ));
+    assert.equal(duplicate.success, false);
+    assert.match(duplicate.diagnostics[0].message, /Duplicate overload/);
+
+    const missing = new SemanticAnalyzer().analyze(new Parser().parse(
+        'Only {{ run(value:string) -> void {} }} entry {{ __() -> i32 { local value = new Only(); value.run(1); return 0 } }}',
+        'missing-overload.ar'
+    ));
+    assert.equal(missing.success, false);
+    assert.match(missing.diagnostics[0].message, /No overload/);
+});
+
+test('trailing default arguments lower at method, constructor, and super call sites', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/default-arguments.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    assert.doesNotThrow(() => new X86_64Backend().generate(ir));
+
+    const invalidOrder = new SemanticAnalyzer().analyze(new Parser().parse(
+        'Bad {{ run(first:i64=0, second:i64) -> void {} }} entry {{ __() -> i32 { return 0 } }}',
+        'invalid-default-order.ar'
+    ));
+    assert.equal(invalidOrder.success, false);
+    assert.match(invalidOrder.diagnostics[0].message, /cannot follow a default parameter/);
+
+    const ambiguous = new SemanticAnalyzer().analyze(new Parser().parse(
+        'Choice {{ run(value:i64) -> i64 { return 1 } run(value:i64, extra:i64=0) -> i64 { return 2 } }} entry {{ __() -> i32 { local choice = new Choice(); return choice.run(1) as i32 } }}',
+        'ambiguous-default.ar'
+    ));
+    assert.equal(ambiguous.success, false);
+    assert.match(ambiguous.diagnostics[0].message, /ambiguous/);
+});
+
+test('structural equality and hashing are cycle-safe and preserve identity operators', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/structural-equality.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    assert.ok(ir.functions.some(fn => fn.blocks.some(block => block.instructions.some(instruction => instruction.op === 'structural_equal'))));
+    assert.ok(ir.functions.some(fn => fn.blocks.some(block => block.instructions.some(instruction => instruction.op === 'structural_hash'))));
+    assert.ok(ir.functions.some(fn => fn.blocks.some(block => block.instructions.some(instruction => instruction.op === 'structural_copy'))));
+    assert.doesNotThrow(() => new X86_64Backend().generate(ir));
+});
+
+test('owning members receive transferred values while copy creates a second owner', () => {
+    const program = new Parser().parse(`
+        Engine {{}}
+        Holder {{
+            member first:Engine?
+            member second:Engine?
+            set(own value:Engine) -> void {
+                self.first = value
+                self.second = copy value
+            }
+        }}
+        entry {{ __() -> void {} }}
+    `, 'ownership-transfer.ar');
+    const valid = new SemanticAnalyzer().analyze(program);
+    assert.equal(valid.success, true, JSON.stringify(valid.diagnostics));
+    const holder = program.objects.find(declaration => declaration.name === 'Holder');
+    const method = holder.members.find(member => member.name === 'set');
+    assert.equal(method.body.statements[0].expression.ownership, 'transfer');
+    assert.equal(method.body.statements[1].expression.ownership, 'transfer');
+});
+
+test('ref members borrow without consuming the assigned owner', () => {
+    const program = new Parser().parse(`
+        Engine {{} }
+        Holder {{
+            member ref engine:Engine?
+            attach(value:Engine) -> void { self.engine = value }
+        }}
+        entry {{ __() -> void {} }}
+    `, 'member-reference.ar');
+    const valid = new SemanticAnalyzer().analyze(program);
+    assert.equal(valid.success, true, JSON.stringify(valid.diagnostics));
+    const holder = program.objects.find(declaration => declaration.name === 'Holder');
+    const field = holder.members.find(member => member.name === 'engine');
+    const assignment = holder.members.find(member => member.name === 'attach').body.statements[0].expression;
+    assert.equal(field.semanticSymbol.ownership, 'member-reference');
+    assert.notEqual(assignment.ownership, 'transfer');
+
+    const invalid = new SemanticAnalyzer().analyze(new Parser().parse(`
+        Holder {{ member ref count:i64 }}
+        entry {{ __() -> void {} }}
+    `, 'invalid-member-reference.ar'));
+    assert.equal(invalid.success, false);
+    assert.match(invalid.diagnostics[0].message, /'ref' requires an object, array, or builder member/);
+});
+
+test('weak members are nullable, non-owning, and retained in IR', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/weak-reference.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const observer = semantic.program.objects.find(declaration => declaration.name === 'Observer');
+    const field = observer.members.find(member => member.name === 'engine');
+    const assignment = observer.members.find(member => member.name === 'watch').body.statements[0].expression;
+    assert.equal(field.semanticSymbol.ownership, 'member-weak');
+    assert.notEqual(assignment.ownership, 'transfer');
+    const ir = new IrGenerator().generate(semantic);
+    assert.equal(ir.types.find(type => type.displayName === 'Observer').fields[0].ownership, 'member-weak');
+    assert.ok(ir.functions.some(fn => fn.blocks.some(block => block.instructions.some(instruction => instruction.op === 'destroy_object'))));
+    const assembly = new X86_64Backend().generate(ir);
+    assert.match(assembly, /cmp QWORD PTR \[rax\+8\], 0/);
+
+    const invalid = new SemanticAnalyzer().analyze(new Parser().parse(`
+        Engine {{}}
+        Observer {{ member weak engine:Engine }}
+        entry {{ __() -> void {} }}
+    `, 'invalid-weak-reference.ar'));
+    assert.equal(invalid.success, false);
+    assert.match(invalid.diagnostics[0].message, /'weak' requires an optional object member/);
+
+    const useAfterDelete = new SemanticAnalyzer().analyze(new Parser().parse(`
+        Engine {{ inspect() -> void {} }}
+        entry {{ __() -> void { local engine = new Engine(); delete engine; engine.inspect() } }}
+    `, 'use-after-delete.ar'));
+    assert.equal(useAfterDelete.success, false);
+    assert.match(useAfterDelete.diagnostics[0].message, /was already deleted/);
+});
+
+test('parameters borrow by default while own parameters consume caller ownership', () => {
+    const valid = new SemanticAnalyzer().analyze(new Parser().parse(`
+        Engine {{}}
+        Sink {{
+            inspect(value:Engine) -> void {}
+            retain(own value:Engine) -> void {}
+        }}
+        entry {{
+            __() -> void {
+                local engine = new Engine()
+                local sink = new Sink()
+                sink.inspect(engine)
+                sink.retain(engine)
+                sink.inspect(engine)
+            }
+        }}
+    `, 'parameter-borrowing.ar'));
+    assert.equal(valid.success, true, JSON.stringify(valid.diagnostics));
+
+    const invalid = new SemanticAnalyzer().analyze(new Parser().parse(`
+        Engine {{}}
+        Sink {{ retain(own value:Engine) -> void {} }}
+        entry {{
+            __() -> void {
+                local engine = new Engine()
+                local sink = new Sink()
+                sink.retain(engine)
+                sink.retain(engine)
+            }
+        }}
+    `, 'parameter-double-consume.ar'));
+    assert.equal(invalid.success, false);
+    assert.match(invalid.diagnostics[0].message, /Cannot pass borrowed reference 'engine'/);
+
+    const lifetime = new SemanticAnalyzer().analyze(new Parser().parse(`
+        Engine {{ inspect() -> void {} }}
+        entry {{
+            __() -> void {
+                local engine = new Engine()
+                local alias = engine
+                alias.inspect()
+                engine = new Engine()
+                alias.inspect()
+            }
+        }}
+    `, 'expired-local-borrow.ar'));
+    assert.equal(lifetime.success, false);
+    assert.match(lifetime.diagnostics[0].message, /outlives the value previously held by 'engine'/);
+});
+
+test('reference returns transfer owners while borrowed returns are explicit', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/return-lifetimes.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    assert.ok(ir.functions.some(fn => fn.blocks.some(block => block.instructions.some(instruction => instruction.op === 'destroy_object'))));
+
+    const invalid = new SemanticAnalyzer().analyze(new Parser().parse(`
+        Engine {{} }
+        Factory {{ leak(value:Engine) -> Engine { return value } }}
+        entry {{ __() -> void {} }}
+    `, 'borrowed-return.ar'));
+    assert.equal(invalid.success, false);
+    assert.match(invalid.diagnostics[0].message, /requires an owned value/);
+
+    const borrowed = new SemanticAnalyzer().analyze(new Parser().parse(`
+        Engine {{} }
+        Factory {{ identity(value:Engine) -> ref Engine { return value } }}
+        entry {{ __() -> void {} }}
+    `, 'explicit-borrowed-return.ar'));
+    assert.equal(borrowed.success, true, JSON.stringify(borrowed.diagnostics));
+});
+
+test('array insertion transfers element ownership through semantic analysis and IR', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/collection-ownership.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    const instructions = ir.functions.flatMap(fn => fn.blocks.flatMap(block => block.instructions));
+    assert.ok(instructions.some(instruction => instruction.op === 'array_append' && instruction.elementOwnership === 'owned'));
+    assert.ok(instructions.some(instruction => instruction.op === 'array_append' && instruction.elementOwnership === 'ref'));
+    assert.ok(instructions.some(instruction => instruction.op === 'array_append' && instruction.elementOwnership === 'weak'));
+    assert.ok(instructions.some(instruction => instruction.op === 'array_store' && instruction.elementOwnership === 'owned'));
+    assert.ok(instructions.some(instruction => instruction.op === 'array_load' && instruction.elementOwnership === 'weak'));
+    const assembly = new X86_64Backend().generate(ir);
+    assert.match(assembly, /call argon_array_append/);
+    assert.match(assembly, /mov QWORD PTR \[rdx\+8\], 0/);
+    assert.match(assembly, /cmp QWORD PTR \[rax\+8\], 0/);
 });
 
 test('UTF-8 strings support length, byte indexing, equality, concatenation, and slicing', () => {

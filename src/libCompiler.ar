@@ -87,7 +87,7 @@ library Compiler {{
             self.errorSpan = null
         }
 
-        tokenize() -> Array<Token> {
+        tokenize() -> ref Array<Token> {
             while !self.atEnd() {
                 if self.error != null {
                     break
@@ -278,12 +278,19 @@ library Compiler {{
         keywordKind(value:string) -> string {
             if value == "return" { return "RETURN" }
             if value == "new" { return "NEW" }
+            if value == "copy" { return "COPY" }
+            if value == "own" { return "OWN" }
+            if value == "ref" { return "REF" }
+            if value == "weak" { return "WEAK" }
+            if value == "delete" { return "DELETE" }
             if value == "import" { return "IMPORT" }
             if value == "from" { return "FROM" }
             if value == "member" { return "MEMBER" }
             if value == "local" { return "LOCAL" }
             if value == "library" { return "LIBRARY" }
             if value == "native" { return "NATIVE" }
+            if value == "public" { return "PUBLIC" }
+            if value == "private" { return "PRIVATE" }
             if value == "inherits" { return "INHERITS" }
             if value == "implements" { return "IMPLEMENTS" }
             if value == "if" { return "IF" }

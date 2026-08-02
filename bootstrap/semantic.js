@@ -31,8 +31,8 @@ export class SemanticAnalyzer {
         for (const declaration of program.libraries) this.declareObject(declaration, null, this.globals, 'Library');
         for (const declaration of program.objects) this.declareMembers(declaration);
         for (const declaration of program.libraries) this.declareMembers(declaration);
-        for (const declaration of program.objects) this.bindRelationships(declaration);
-        for (const declaration of program.objects) this.validateRelationships(declaration);
+        for (const declaration of [...program.objects, ...program.libraries]) this.bindRelationships(declaration);
+        for (const declaration of [...program.objects, ...program.libraries]) this.validateRelationships(declaration);
         for (const declaration of program.objects) this.analyzeObject(declaration);
         for (const declaration of program.libraries) this.analyzeObject(declaration);
 
@@ -52,6 +52,7 @@ export class SemanticAnalyzer {
         this.diagnostics = [];
         this.globals = new Scope(null, 'builtins');
         this.objectSymbols = new Map();
+        this.contractTypes = new Set();
         for (const name of [...integerTypes, VOID, BOOL, STRING, STRING_BUILDER]) {
             this.globals.define(name, {kind: 'BuiltinType', name, type: name}, null, this.diagnostics);
         }
@@ -77,10 +78,10 @@ export class SemanticAnalyzer {
             }
         }
         for (const module of graph.modules.values()) {
-            for (const declaration of module.program.objects) this.bindRelationships(declaration);
+            for (const declaration of [...module.program.objects, ...module.program.libraries]) this.bindRelationships(declaration);
         }
         for (const module of graph.modules.values()) {
-            for (const declaration of module.program.objects) this.validateRelationships(declaration);
+            for (const declaration of [...module.program.objects, ...module.program.libraries]) this.validateRelationships(declaration);
         }
         for (const module of graph.modules.values()) {
             for (const declaration of [...module.program.objects, ...module.program.libraries]) {
@@ -139,9 +140,11 @@ export class SemanticAnalyzer {
             parent,
             fields: new Map(),
             methods: new Map(),
+            methodOverloads: new Map(),
             objects: new Map(),
             base: null,
             contracts: [],
+            visibility: declaration.visibility ?? 'public',
             moduleScope: parent?.moduleScope ?? scope
         };
         if (parent?.objects.has(declaration.name)) {
@@ -174,17 +177,45 @@ export class SemanticAnalyzer {
 
         for (const field of object.fields.values()) {
             field.type = this.resolveTypeReference(field.declaration.fieldType, object);
+            if (field.declaration.reference && !this.isOwnedReferenceType(field.type)) {
+                this.report(field.declaration.span, `'ref' requires an object, array, or builder member`);
+            }
+            const weakBase = this.isOptionalType(field.type) ? this.optionalBaseType(field.type) : field.type;
+            if (field.declaration.weakReference && (!this.isOptionalType(field.type) || !this.findObjectType(weakBase))) {
+                this.report(field.declaration.span, `'weak' requires an optional object member`);
+            }
+            field.ownership = field.declaration.weakReference ? 'member-weak'
+                : field.declaration.reference ? 'member-reference'
+                    : this.isOwnedReferenceType(field.type) ? 'member-owned' : 'value';
             this.annotate(field.declaration, field.type, field);
         }
-        for (const method of object.methods.values()) {
+        for (const method of [...object.methodOverloads.values()].flat()) {
             method.returnType = this.resolveTypeReference(method.declaration.returnType, object);
+            method.returnOwnership = method.declaration.returnReference ? 'borrowed' : 'owned';
+            if (method.declaration.returnReference && !this.isOwnedReferenceType(method.returnType)) {
+                this.report(method.declaration.returnType.span, `'ref' return requires an object, array, or builder type`);
+            }
             method.isNative = method.declaration.isNative;
             method.parameters = method.declaration.parameters.map(parameter => ({
                 kind: 'Parameter',
                 name: parameter.name,
                 type: this.resolveTypeReference(parameter.parameterType, object),
-                declaration: parameter
+                defaultValue: parameter.defaultValue,
+                declaration: parameter,
+                owning: parameter.owning,
+                ownership: parameter.owning ? 'owned' : 'borrowed'
             }));
+            let sawDefault = false;
+            for (const parameter of method.parameters) {
+                if (parameter.owning && !this.isOwnedReferenceType(parameter.type)) {
+                    this.report(parameter.declaration.span, `'own' requires an object, array, or builder parameter`);
+                }
+                if (parameter.owning && parameter.defaultValue) {
+                    this.report(parameter.declaration.span, `Owning parameter '${parameter.name}' cannot have a default value`);
+                }
+                if (parameter.defaultValue) sawDefault = true;
+                else if (sawDefault) this.report(parameter.declaration.span, `Required parameter '${parameter.name}' cannot follow a default parameter`);
+            }
             if (method.name === '__') {
                 const isEntry = object.kind === 'Object' && object.parent === null && object.name === 'entry';
                 if (object.kind === 'Library') {
@@ -197,17 +228,25 @@ export class SemanticAnalyzer {
             }
             this.annotate(method.declaration, method.returnType, method);
         }
-        for (const field of object.fields.values()) {
-            const inherited = this.lookupField(object.base, field.name);
-            if (inherited) this.report(field.declaration.span, `Field '${field.qualifiedName}' hides inherited field '${inherited.qualifiedName}'`);
+        for (const [name, overloads] of object.methodOverloads) {
+            const signatures = new Set();
+            for (const method of overloads) {
+                const signature = method.parameters.map(parameter => parameter.type).join(',');
+                if (signatures.has(signature)) this.report(method.declaration.span, `Duplicate overload '${object.qualifiedName}.${name}(${signature})'`);
+                signatures.add(signature);
+                if (overloads.length > 1) {
+                    method.irName = `${name}#${signature}`;
+                    method.qualifiedName = `${object.qualifiedName}.${method.irName}`;
+                }
+            }
         }
     }
 
     bindRelationships(declaration) {
         const object = this.objectSymbols.get(declaration);
-        if (!object || object.kind !== 'Object') return;
+        if (!object) return;
 
-        if (declaration.inheritedType) {
+        if (object.kind === 'Object' && declaration.inheritedType) {
             const type = this.resolveTypeReference(declaration.inheritedType, object);
             object.base = this.findObjectType(type);
             if (!object.base || object.base.kind !== 'Object') {
@@ -216,13 +255,14 @@ export class SemanticAnalyzer {
             }
         }
 
-        for (const reference of declaration.implementedTypes) {
+        for (const reference of object.kind === 'Object' ? declaration.implementedTypes : []) {
             const type = this.resolveTypeReference(reference, object);
             const contract = this.findObjectType(type);
             if (!contract || contract.kind !== 'Object') {
                 this.report(reference.span, `'${reference.name}' is not an implementable object`);
             } else {
                 object.contracts.push(contract);
+                this.contractTypes.add(contract.type);
             }
         }
 
@@ -233,20 +273,29 @@ export class SemanticAnalyzer {
 
     validateRelationships(declaration) {
         const object = this.objectSymbols.get(declaration);
-        if (!object || object.kind !== 'Object') return;
+        if (!object) return;
 
-        if (object.base && this.inheritanceContains(object.base, object)) {
+        if (object.kind === 'Object' && object.base && this.inheritanceContains(object.base, object)) {
             this.report(declaration.inheritedType.span, `Inheritance cycle involving '${object.qualifiedName}'`);
             object.base = null;
         }
-        for (const method of object.methods.values()) {
+        for (const method of object.kind === 'Object' ? [...object.methodOverloads.values()].flat() : []) {
             if (method.name === '__') continue;
-            const inherited = this.lookupMethod(object.base, method.name);
-            if (inherited && !this.signaturesMatch(method, inherited)) {
+            const privateAncestor = this.lookupMethodBySignature(object.base, method.name, method.parameters, true);
+            if (privateAncestor?.visibility === 'private') {
+                this.report(method.declaration.span, `Method '${method.qualifiedName}' cannot replace private method '${privateAncestor.qualifiedName}'`);
+                continue;
+            }
+            const inherited = this.lookupMethodBySignature(object.base, method.name, method.parameters);
+            if (inherited && !this.signaturesMatch(inherited, method)) {
                 this.report(method.declaration.span, `Override '${method.qualifiedName}' is incompatible with '${inherited.qualifiedName}'`);
             }
         }
-        for (const contract of object.contracts) this.validateContract(object, contract);
+        for (const field of object.kind === 'Object' ? object.fields.values() : []) {
+            const inherited = this.lookupField(object.base, field.name);
+            if (inherited) this.report(field.declaration.span, `Field '${field.qualifiedName}' hides inherited field '${inherited.qualifiedName}'`);
+        }
+        if (object.kind === 'Object') for (const contract of object.contracts) this.validateContract(object, contract);
         for (const member of declaration.members) {
             if (member.kind === 'ObjectDeclaration') this.validateRelationships(member);
         }
@@ -263,7 +312,7 @@ export class SemanticAnalyzer {
 
     validateContract(object, contract) {
         for (const required of this.contractMethods(contract)) {
-            const implementation = this.lookupMethod(object, required.name);
+            const implementation = this.lookupMethodBySignature(object, required.name, required.parameters);
             if (!implementation) {
                 this.report(object.declaration.span, `Object '${object.qualifiedName}' implements '${contract.qualifiedName}' but is missing method '${required.name}'`);
             } else if (!this.signaturesMatch(implementation, required)) {
@@ -277,23 +326,100 @@ export class SemanticAnalyzer {
         if (contract.base) {
             for (const method of this.contractMethods(contract.base)) methods.set(method.name, method);
         }
-        for (const method of contract.methods.values()) {
-            if (method.name !== '__') methods.set(method.name, method);
+        for (const method of [...contract.methodOverloads.values()].flat()) {
+            if (method.name !== '__' && method.visibility !== 'private') methods.set(`${method.name}(${method.parameters.map(parameter => parameter.type).join(',')})`, method);
         }
         return methods.values();
     }
 
     signaturesMatch(left, right) {
         return left.returnType === right.returnType &&
+            left.returnOwnership === right.returnOwnership &&
             left.parameters.length === right.parameters.length &&
-            left.parameters.every((parameter, index) => parameter.type === right.parameters[index].type);
+            left.parameters.every((parameter, index) => parameter.type === right.parameters[index].type &&
+                parameter.owning === right.parameters[index].owning);
     }
 
     lookupMethod(object, name) {
         let current = object;
         while (current) {
             const method = current.methods.get(name);
-            if (method && (current === object || name !== '__')) return method;
+            if (method && method.visibility !== 'private' && (current === object || name !== '__')) return method;
+            current = current.base;
+        }
+        return null;
+    }
+
+    methodCandidates(object, name, {includePrivate = false, constructors = false} = {}) {
+        const candidates = [];
+        const signatures = new Set();
+        let current = object;
+        while (current) {
+            for (const method of current.methodOverloads?.get(name) ?? []) {
+                const signature = method.parameters.map(parameter => parameter.type).join(',');
+                if (!signatures.has(signature) && (includePrivate || method.visibility !== 'private')) candidates.push(method);
+                signatures.add(signature);
+            }
+            if (name === '__' || constructors) break;
+            current = current.base;
+        }
+        return candidates;
+    }
+
+    lookupMethodBySignature(object, name, parameters, includePrivate = false) {
+        return this.methodCandidates(object, name, {includePrivate}).find(method =>
+            method.parameters.length === parameters.length && method.parameters.every((parameter, index) => parameter.type === parameters[index].type)) ?? null;
+    }
+
+    resolveOverload(object, name, argumentTypes, span, {constructors = false, includePrivate = false} = {}) {
+        const candidates = this.methodCandidates(object, name, {constructors, includePrivate})
+            .filter(method => argumentTypes.length <= method.parameters.length &&
+                argumentTypes.length >= this.requiredParameterCount(method) &&
+                argumentTypes.every((type, index) => this.isAssignable(type, method.parameters[index].type)));
+        const exact = candidates.filter(method => argumentTypes.every((type, index) => method.parameters[index].type === type));
+        const matches = exact.length ? exact : candidates;
+        if (matches.length === 1) return matches[0];
+        if (matches.length > 1) {
+            const mostSpecific = matches.filter(candidate => matches.every(other => candidate === other ||
+                candidate.parameters.length === other.parameters.length && candidate.parameters.every((parameter, index) => parameter.type === other.parameters[index].type ||
+                    this.conformsTo(parameter.type, other.parameters[index].type))));
+            if (mostSpecific.length === 1) return mostSpecific[0];
+            this.report(span, `Call to '${name}' is ambiguous for (${argumentTypes.join(', ')})`);
+        }
+        else this.report(span, `No overload of '${name}' accepts (${argumentTypes.join(', ')})`);
+        return null;
+    }
+
+    requiredParameterCount(method) {
+        return method.parameters.findIndex(parameter => parameter.defaultValue) < 0
+            ? method.parameters.length
+            : method.parameters.findIndex(parameter => parameter.defaultValue);
+    }
+
+    applyDefaults(method, expressions, argumentTypes) {
+        while (expressions.length < method.parameters.length) {
+            const parameter = method.parameters[expressions.length];
+            expressions.push(parameter.defaultValue);
+            argumentTypes.push(parameter.type);
+        }
+    }
+
+    isAssignable(actual, expected) {
+        if (actual === expected || actual === UNKNOWN || expected === UNKNOWN) return true;
+        if (integerTypes.has(actual) && integerTypes.has(expected)) return true;
+        if (this.isOptionalType(expected)) {
+            const expectedBase = this.optionalBaseType(expected);
+            const actualBase = this.isOptionalType(actual) ? this.optionalBaseType(actual) : actual;
+            return actual === NULL || actualBase === expectedBase || this.conformsTo(actualBase, expectedBase);
+        }
+        return this.conformsTo(actual, expected);
+    }
+
+    lookupPrivateMethod(object, name) {
+        let current = object;
+        while (current) {
+            const method = current.methods.get(name);
+            if (method?.visibility === 'private') return method;
             current = current.base;
         }
         return null;
@@ -312,20 +438,27 @@ export class SemanticAnalyzer {
     defineMember(object, collection, declaration, kind) {
         if (
             object.fields.has(declaration.name) ||
-            object.methods.has(declaration.name) ||
+            (kind !== 'Method' && object.methods.has(declaration.name)) ||
             object.objects.has(declaration.name)
         ) {
             this.report(declaration.span, `Duplicate member '${declaration.name}' in ${object.qualifiedName}`);
             return;
         }
-        collection.set(declaration.name, {
+        const symbol = {
             kind,
             name: declaration.name,
             qualifiedName: `${object.qualifiedName}.${declaration.name}`,
             declaration,
             owner: object,
+            visibility: declaration.visibility ?? 'public',
             type: UNKNOWN
-        });
+        };
+        if (kind === 'Method') {
+            const overloads = object.methodOverloads.get(declaration.name) ?? [];
+            overloads.push(symbol);
+            object.methodOverloads.set(declaration.name, overloads);
+            if (!collection.has(declaration.name)) collection.set(declaration.name, symbol);
+        } else collection.set(declaration.name, symbol);
     }
 
     analyzeObject(declaration) {
@@ -350,7 +483,7 @@ export class SemanticAnalyzer {
     }
 
     analyzeMethod(declaration, object) {
-        const method = object.methods.get(declaration.name);
+        const method = declaration.semanticSymbol;
         if (!method) return;
         if (declaration.isNative) {
             if (object.kind !== 'Library') {
@@ -371,6 +504,12 @@ export class SemanticAnalyzer {
         for (const parameter of method.parameters) {
             scope.define(parameter.name, parameter, parameter.declaration.span, this.diagnostics);
             this.annotate(parameter.declaration, parameter.type, parameter);
+        }
+
+        for (const parameter of method.parameters) {
+            if (!parameter.defaultValue) continue;
+            const defaultType = this.analyzeExpression(parameter.defaultValue, this.objectScope(object), object);
+            this.requireAssignable(defaultType, parameter.type, parameter.defaultValue.span, parameter.defaultValue);
         }
 
         const previousMethod = this.currentMethod;
@@ -413,6 +552,10 @@ export class SemanticAnalyzer {
                 }
                 const type = declared ?? inferred ?? UNKNOWN;
                 const symbol = {kind: 'Local', name: statement.name, type, declaration: statement};
+                symbol.ownership = this.localOwnership(statement.initializer, type);
+                symbol.declaredOwnership = symbol.ownership;
+                symbol.ownershipVersion = 0;
+                this.bindBorrow(symbol, statement.initializer);
                 scope.define(statement.name, symbol, statement.span, this.diagnostics);
                 this.annotate(statement, type, symbol);
                 return false;
@@ -445,6 +588,19 @@ export class SemanticAnalyzer {
                     ? this.analyzeExpression(statement.expression, scope, object)
                     : VOID;
                 this.requireAssignable(actual, method.returnType, statement.span, statement.expression);
+                if (statement.expression && this.isOwnedReferenceType(method.returnType) && method.returnOwnership === 'owned') {
+                    const source = statement.expression.semanticSymbol;
+                    if (statement.expression.kind === 'NullLiteral' && this.isOptionalType(method.returnType)) {
+                        statement.ownership = 'transfer';
+                    } else if (this.isOwningExpression(statement.expression)) {
+                        statement.ownership = 'transfer';
+                    } else if (source && ['Local', 'Parameter'].includes(source.kind) && source.ownership === 'owned') {
+                        statement.ownership = 'transfer';
+                        source.ownership = 'borrowed';
+                    } else {
+                        this.report(statement.expression.span, `Returning '${method.returnType}' requires an owned value; use 'copy' for a borrowed reference`);
+                    }
+                }
                 return true;
             }
             case 'ExpressionStatement':
@@ -476,6 +632,7 @@ export class SemanticAnalyzer {
             case 'IdentifierExpression':
                 symbol = scope.lookup(expression.name);
                 if (!symbol) this.report(expression.span, `Unknown identifier '${expression.name}'`);
+                else if (!expression.isAssignmentTarget) this.validateBorrow(symbol, expression.span);
                 type = symbol?.type ?? UNKNOWN;
                 break;
             case 'MemberExpression': {
@@ -493,6 +650,8 @@ export class SemanticAnalyzer {
                         type = I64;
                     } else if (expression.member === 'slice') {
                         symbol = {kind: 'StringSlice', name: 'slice', type: STRING};
+                    } else if (expression.member === 'hash') {
+                        symbol = {kind: 'StructuralHash', name: 'hash', type: I64, valueType: STRING};
                         type = STRING;
                     } else {
                         this.report(expression.span, `String has no member '${expression.member}'`);
@@ -513,11 +672,14 @@ export class SemanticAnalyzer {
                 }
                 const elementType = this.arrayElementType(ownerType);
                 if (elementType) {
+                    const elementOwnership = this.arrayElementOwnership(ownerType);
                     if (expression.member === 'length') {
                         symbol = {kind: 'ArrayLength', name: 'length', type: I64};
                         type = I64;
                     } else if (expression.member === 'append') {
-                        symbol = {kind: 'ArrayAppend', name: 'append', type: UNKNOWN, elementType};
+                        symbol = {kind: 'ArrayAppend', name: 'append', type: UNKNOWN, elementType, elementOwnership};
+                    } else if (expression.member === 'hash') {
+                        symbol = {kind: 'StructuralHash', name: 'hash', type: I64, valueType: ownerType};
                     } else {
                         this.report(expression.span, `Array type '${ownerType}' has no member '${expression.member}'`);
                     }
@@ -525,9 +687,30 @@ export class SemanticAnalyzer {
                 }
                 const owner = this.findObjectType(ownerType);
                 if (owner) {
-                    symbol = this.lookupField(owner, expression.member) ??
-                        this.lookupMethod(owner, expression.member) ??
-                        owner.objects.get(expression.member);
+                    symbol = this.lookupField(owner, expression.member) ?? owner.objects.get(expression.member);
+                    if (!symbol) {
+                        const methods = this.methodCandidates(owner, expression.member, {
+                            includePrivate: this.currentMethod?.owner === owner
+                        });
+                        if (methods.length) symbol = {kind: 'OverloadSet', name: expression.member, owner, methods, type: UNKNOWN};
+                        else {
+                            const privateMethod = this.methodCandidates(owner, expression.member, {includePrivate: true})
+                                .find(method => method.visibility === 'private');
+                            if (privateMethod) this.report(expression.span, `Private method '${privateMethod.qualifiedName}' is not visible here`);
+                        }
+                    }
+                    if (!symbol && expression.member === 'hash') symbol = {kind: 'StructuralHash', name: 'hash', type: I64, valueType: ownerType};
+                    if (symbol?.kind === 'Field' && this.contractTypes.has(owner.type)) {
+                        const selfAccess = expression.object.semanticSymbol?.kind === 'Self' && this.currentMethod?.owner === owner;
+                        if (!selfAccess) {
+                            this.report(expression.span, `Contract reference '${owner.qualifiedName}' does not expose field '${expression.member}'`);
+                            symbol = null;
+                        }
+                    }
+                    if (symbol?.visibility === 'private' && this.currentMethod?.owner !== symbol.owner) {
+                        this.report(expression.span, `Private ${symbol.kind.toLowerCase()} '${symbol.qualifiedName}' is not visible here`);
+                        symbol = null;
+                    }
                     if (!symbol) this.report(expression.span, `Type '${ownerType}' has no member '${expression.member}'`);
                     type = symbol?.type ?? symbol?.qualifiedName ?? UNKNOWN;
                 } else if (ownerType.startsWith('module:')) {
@@ -540,6 +723,7 @@ export class SemanticAnalyzer {
             case 'IndexExpression': {
                 const arrayType = this.analyzeExpression(expression.object, scope, object);
                 const elementType = arrayType === STRING ? 'u8' : this.arrayElementType(arrayType);
+                const elementOwnership = arrayType === STRING ? 'value' : this.arrayElementOwnership(arrayType);
                 const indexType = this.analyzeExpression(expression.index, scope, object);
                 this.requireAssignable(indexType, I64, expression.index.span, expression.index);
                 if (!elementType) {
@@ -548,13 +732,15 @@ export class SemanticAnalyzer {
                     symbol = {
                         kind: arrayType === STRING ? 'StringElement' : 'ArrayElement',
                         name: '[]',
-                        type: elementType
+                        type: elementType,
+                        elementOwnership
                     };
                     type = elementType;
                 }
                 break;
             }
             case 'AssignmentExpression': {
+                expression.target.isAssignmentTarget = true;
                 const targetType = this.analyzeExpression(expression.target, scope, object);
                 const targetSymbol = expression.target.semanticSymbol;
                 if (!targetSymbol) {
@@ -564,6 +750,19 @@ export class SemanticAnalyzer {
                 }
                 const valueType = this.analyzeExpression(expression.value, scope, object);
                 this.requireAssignable(valueType, targetType, expression.value.span, expression.value);
+                if (this.isOwnedReferenceType(targetType)) {
+                    if (targetSymbol?.kind === 'Field' && targetSymbol.ownership === 'member-owned') {
+                        expression.ownership = 'transfer';
+                        this.transferOwnership(expression.value);
+                    } else if (targetSymbol?.kind === 'Local') {
+                        targetSymbol.ownershipVersion = (targetSymbol.ownershipVersion ?? 0) + 1;
+                        targetSymbol.ownership = this.isOwningExpression(expression.value) ? 'owned' : 'borrowed';
+                        this.bindBorrow(targetSymbol, expression.value);
+                    } else if (targetSymbol?.kind === 'ArrayElement' && targetSymbol.elementOwnership === 'owned') {
+                        expression.ownership = 'transfer';
+                        this.consumeArrayElement(expression.value);
+                    }
+                }
                 type = targetType;
                 break;
             }
@@ -574,8 +773,8 @@ export class SemanticAnalyzer {
                 const targetBase = this.isOptionalType(targetType) ? this.optionalBaseType(targetType) : targetType;
                 const targetObject = this.findObjectType(targetBase);
                 if (sourceObject && targetObject) {
-                    if (this.isSubtype(sourceObject.type, targetObject.type)) expression.conversionKind = 'reference';
-                    else if (this.isOptionalType(targetType) && this.isSubtype(targetObject.type, sourceObject.type)) expression.conversionKind = 'checked_reference';
+                    if (this.conformsTo(sourceObject.type, targetObject.type)) expression.conversionKind = 'reference';
+                    else if (this.isOptionalType(targetType) && this.conformsTo(targetObject.type, sourceObject.type)) expression.conversionKind = 'checked_reference';
                     else this.report(expression.span, `Downcast from '${sourceType}' to '${targetBase}' must produce an optional value`);
                     type = targetType;
                 } else if (!integerTypes.has(sourceType) || !integerTypes.has(targetType)) {
@@ -603,7 +802,22 @@ export class SemanticAnalyzer {
             }
             case 'UnaryExpression': {
                 const operand = this.analyzeExpression(expression.operand, scope, object);
-                if (expression.operator === '!') {
+                if (expression.operator === 'copy') {
+                    if (!this.isReferenceType(operand)) this.report(expression.operand.span, `copy requires a reference value, got '${operand}'`);
+                    type = operand;
+                } else if (expression.operator === 'delete') {
+                    const base = this.isOptionalType(operand) ? this.optionalBaseType(operand) : operand;
+                    const source = expression.operand.semanticSymbol;
+                    if (this.isOptionalType(operand) || !this.findObjectType(base)) {
+                        this.report(expression.span, `delete requires a non-optional object reference`);
+                    } else if (!source || !['Local', 'Parameter'].includes(source.kind) || source.ownership !== 'owned') {
+                        this.report(expression.span, `delete requires an owned local or parameter`);
+                    } else {
+                        source.ownership = 'destroyed';
+                        source.ownershipVersion = (source.ownershipVersion ?? 0) + 1;
+                    }
+                    type = VOID;
+                } else if (expression.operator === '!') {
                     this.requireAssignable(operand, BOOL, expression.operand.span, expression.operand);
                     type = BOOL;
                 } else if (!integerTypes.has(operand)) {
@@ -633,7 +847,7 @@ export class SemanticAnalyzer {
                     const leftBase = this.isOptionalType(left) ? this.optionalBaseType(left) : left;
                     const rightBase = this.isOptionalType(right) ? this.optionalBaseType(right) : right;
                     const compatible = this.isReferenceType(leftBase) && this.isReferenceType(rightBase) &&
-                            (leftBase === rightBase || this.isSubtype(leftBase, rightBase) || this.isSubtype(rightBase, leftBase)) ||
+                            (leftBase === rightBase || this.conformsTo(leftBase, rightBase) || this.conformsTo(rightBase, leftBase)) ||
                         left === NULL && this.isOptionalType(right) ||
                         right === NULL && this.isOptionalType(left);
                     if (!compatible) {
@@ -654,6 +868,10 @@ export class SemanticAnalyzer {
                 } else if (logical) {
                     this.requireAssignable(left, BOOL, expression.left.span, expression.left);
                     this.requireAssignable(right, BOOL, expression.right.span, expression.right);
+                    type = BOOL;
+                } else if (['==', '!='].includes(expression.operator) && this.isReferenceType(left) && this.isReferenceType(right)) {
+                    const compatible = left === right || this.conformsTo(left, right) || this.conformsTo(right, left);
+                    if (!compatible) this.report(expression.span, `Structural equality requires compatible references, got '${left}' and '${right}'`);
                     type = BOOL;
                 } else if (!integerTypes.has(left) || !integerTypes.has(right)) {
                     this.report(expression.span, `Operator '${expression.operator}' requires integer operands`);
@@ -680,14 +898,14 @@ export class SemanticAnalyzer {
                         type = UNKNOWN;
                         break;
                     }
-                    const method = this.lookupMethod(owner.base, expression.callee.member);
+                    const argumentTypes = expression.arguments.map(argument => this.analyzeExpression(argument, scope, object));
+                    const method = this.resolveOverload(owner.base, expression.callee.member, argumentTypes, expression.span);
                     if (!method || method.name === '__') {
                         this.report(expression.callee.span, `Parent type has no method '${expression.callee.member}'`);
-                        expression.arguments.forEach(argument => this.analyzeExpression(argument, scope, object));
                         type = UNKNOWN;
                         break;
                     }
-                    const argumentTypes = expression.arguments.map(argument => this.analyzeExpression(argument, scope, object));
+                    this.applyDefaults(method, expression.arguments, argumentTypes);
                     this.checkArguments(method, argumentTypes, expression.arguments, expression.span);
                     expression.callee.isSuper = true;
                     this.annotate(expression.callee, method.returnType, method);
@@ -702,10 +920,16 @@ export class SemanticAnalyzer {
                         type = VOID;
                         break;
                     }
-                    const constructor = owner.base.methods.get('__') ?? null;
                     const argumentTypes = expression.arguments.map(argument => this.analyzeExpression(argument, scope, object));
-                    if (constructor) this.checkArguments(constructor, argumentTypes, expression.arguments, expression.span);
-                    else if (argumentTypes.length !== 0) this.report(expression.span, 'Parent has no constructor accepting arguments');
+                    const overloads = owner.base.methodOverloads.get('__') ?? [];
+                    const constructor = overloads.length
+                        ? this.resolveOverload(owner.base, '__', argumentTypes, expression.span, {constructors: true, includePrivate: true})
+                        : null;
+                    if (constructor) {
+                        this.applyDefaults(constructor, expression.arguments, argumentTypes);
+                        this.checkArguments(constructor, argumentTypes, expression.arguments, expression.span);
+                    }
+                    if (!constructor && overloads.length === 0 && argumentTypes.length !== 0) this.report(expression.span, 'Parent has no constructor accepting arguments');
                     symbol = {kind: 'SuperCall', name: 'super', type: VOID, returnType: VOID, owner: owner.base, constructor};
                     this.annotate(expression.callee, VOID, symbol);
                     type = VOID;
@@ -714,7 +938,17 @@ export class SemanticAnalyzer {
                 this.analyzeExpression(expression.callee, scope, object);
                 const callee = expression.callee.semanticSymbol;
                 const argumentTypes = expression.arguments.map(argument => this.analyzeExpression(argument, scope, object));
-                if (callee?.kind === 'Method') {
+                if (callee?.kind === 'OverloadSet') {
+                    const method = this.resolveOverload(callee.owner, callee.name, argumentTypes, expression.span, {
+                        includePrivate: this.currentMethod?.owner === callee.owner
+                    });
+                    if (method) {
+                        this.applyDefaults(method, expression.arguments, argumentTypes);
+                        this.checkArguments(method, argumentTypes, expression.arguments, expression.span);
+                        this.annotate(expression.callee, method.returnType, method);
+                        type = method.returnType;
+                    } else type = UNKNOWN;
+                } else if (callee?.kind === 'Method') {
                     this.checkArguments(callee, argumentTypes, expression.arguments, expression.span);
                     type = callee.returnType;
                 } else if (callee?.kind === 'ExternalMember') {
@@ -724,6 +958,9 @@ export class SemanticAnalyzer {
                         this.report(expression.span, `Array.append expects 1 argument, got ${argumentTypes.length}`);
                     } else {
                         this.requireAssignable(argumentTypes[0], callee.elementType, expression.arguments[0].span, expression.arguments[0]);
+                        if (callee.elementOwnership === 'owned' && this.isOwnedReferenceType(callee.elementType)) {
+                            this.consumeArrayElement(expression.arguments[0]);
+                        }
                     }
                     type = VOID;
                 } else if (callee?.kind === 'StringSlice') {
@@ -753,6 +990,9 @@ export class SemanticAnalyzer {
                 } else if (callee?.kind === 'StringBuilderBuild') {
                     if (argumentTypes.length !== 0) this.report(expression.span, 'StringBuilder.build expects no arguments');
                     type = STRING;
+                } else if (callee?.kind === 'StructuralHash') {
+                    if (argumentTypes.length !== 0) this.report(expression.span, 'hash expects no arguments');
+                    type = I64;
                 } else {
                     this.report(expression.callee.span, 'Expression is not callable');
                 }
@@ -772,23 +1012,38 @@ export class SemanticAnalyzer {
                         this.report(expression.span, 'Array construction requires exactly one element type');
                         break;
                     }
-                    const elementType = this.resolveTypeReference(expression.typeArguments[0], object);
+                    const elementReference = expression.typeArguments[0];
+                    const elementType = this.resolveTypeReference(elementReference, object, true);
+                    const elementOwnership = elementReference.ownership ?? 'owned';
+                    this.validateArrayElementPolicy(elementType, elementOwnership, elementReference);
                     if (expression.arguments.length !== 1) {
                         this.report(expression.span, `Array construction expects an initial length, got ${expression.arguments.length} arguments`);
                     } else {
                         const lengthType = this.analyzeExpression(expression.arguments[0], scope, object);
                         this.requireAssignable(lengthType, I64, expression.arguments[0].span, expression.arguments[0]);
                     }
-                    type = `Array<${elementType}>`;
-                    symbol = {kind: 'ArrayType', name: 'Array', type, elementType};
+                    type = `Array<${elementOwnership === 'owned' ? '' : `${elementOwnership} `}${elementType}>`;
+                    symbol = {kind: 'ArrayType', name: 'Array', type, elementType, elementOwnership};
                     break;
                 }
                 const constructed = this.resolveConstructedType(expression.callee, scope, object);
                 const argumentTypes = expression.arguments.map(argument => this.analyzeExpression(argument, scope, object));
                 if (constructed) {
-                    const constructor = constructed.methods.get('__');
-                    if (constructor) this.checkArguments(constructor, argumentTypes, expression.arguments, expression.span);
-                    else if (argumentTypes.length) this.report(expression.span, `Type '${constructed.type}' has no constructor`);
+                    const overloads = constructed.methodOverloads.get('__') ?? [];
+                    const constructor = overloads.length
+                        ? this.resolveOverload(constructed, '__', argumentTypes, expression.span, {
+                            constructors: true,
+                            includePrivate: this.currentMethod?.owner === constructed
+                        })
+                        : null;
+                    if (constructor) {
+                        this.applyDefaults(constructor, expression.arguments, argumentTypes);
+                        this.checkArguments(constructor, argumentTypes, expression.arguments, expression.span);
+                    }
+                    if (constructor?.visibility === 'private' && this.currentMethod?.owner !== constructed) {
+                        this.report(expression.span, `Private constructor '${constructor.qualifiedName}' is not visible here`);
+                    } else if (!constructor && overloads.length === 0 && argumentTypes.length) this.report(expression.span, `Type '${constructed.type}' has no constructor`);
+                    expression.constructor = constructor;
                     type = constructed.type;
                     symbol = constructed;
                 }
@@ -828,7 +1083,7 @@ export class SemanticAnalyzer {
         return null;
     }
 
-    resolveTypeReference(reference, currentObject) {
+    resolveTypeReference(reference, currentObject, arrayElement = false) {
         let type;
         let resolvedSymbol = null;
         if (reference.name === 'Array') {
@@ -836,10 +1091,13 @@ export class SemanticAnalyzer {
                 this.report(reference.span, `Array type requires exactly one type argument`);
                 return this.annotate(reference, UNKNOWN, null);
             }
-            const elementType = this.resolveTypeReference(reference.typeArguments[0], currentObject);
-            type = `Array<${elementType}>`;
+            const elementReference = reference.typeArguments[0];
+            const elementType = this.resolveTypeReference(elementReference, currentObject, true);
+            const elementOwnership = elementReference.ownership ?? 'owned';
+            this.validateArrayElementPolicy(elementType, elementOwnership, elementReference);
+            type = `Array<${elementOwnership === 'owned' ? '' : `${elementOwnership} `}${elementType}>`;
             resolvedSymbol = {
-                kind: 'ArrayType', name: 'Array', type: `Array<${elementType}>`, elementType
+                kind: 'ArrayType', name: 'Array', type, elementType, elementOwnership
             };
         } else if (reference.typeArguments.length > 0) {
             this.report(reference.span, `Type '${reference.name}' does not accept type arguments`);
@@ -890,6 +1148,9 @@ export class SemanticAnalyzer {
             }
             type = `${type}?`;
         }
+        if (!arrayElement && reference.ownership !== 'owned') {
+            this.report(reference.span, `'${reference.ownership}' is only valid on an Array element type`);
+        }
         return this.annotate(reference, type, resolvedSymbol);
     }
 
@@ -905,11 +1166,84 @@ export class SemanticAnalyzer {
     }
 
     arrayElementType(type) {
-        return type?.startsWith('Array<') && type.endsWith('>') ? type.slice(6, -1) : null;
+        const element = type?.startsWith('Array<') && type.endsWith('>') ? type.slice(6, -1) : null;
+        return element?.startsWith('ref ') ? element.slice(4) : element?.startsWith('weak ') ? element.slice(5) : element;
+    }
+
+    arrayElementOwnership(type) {
+        if (!type?.startsWith('Array<') || !type.endsWith('>')) return null;
+        const element = type.slice(6, -1);
+        return element.startsWith('ref ') ? 'ref' : element.startsWith('weak ') ? 'weak' : 'owned';
+    }
+
+    validateArrayElementPolicy(type, ownership, reference) {
+        if (ownership === 'owned') return;
+        if (!this.isReferenceType(type)) this.report(reference.span, `'${ownership}' array elements require a reference type`);
+        if (ownership === 'weak' && !this.isOptionalType(type)) {
+            this.report(reference.span, `Weak array elements must be optional; use 'weak ${type}?'`);
+        }
+    }
+
+    consumeArrayElement(expression) {
+        if (this.isOwningExpression(expression) || expression?.kind === 'CallExpression') return;
+        const source = expression?.semanticSymbol;
+        if (source?.kind === 'Local' || source?.kind === 'Parameter') {
+            if (source.ownership !== 'owned') {
+                this.report(expression.span, `Cannot insert borrowed reference '${source.name}' into an owning array; use 'copy ${source.name}'`);
+                return;
+            }
+            source.ownership = 'borrowed';
+            expression.ownership = 'consume';
+            return;
+        }
+        this.report(expression.span, `Owning array insertion requires an owned value; use 'copy' to create one`);
     }
 
     isReferenceType(type) {
-        return type === STRING || type === STRING_BUILDER || this.arrayElementType(type) !== null || this.findObjectType(type) !== null;
+        const base = this.isOptionalType(type) ? this.optionalBaseType(type) : type;
+        return base === STRING || base === STRING_BUILDER || this.arrayElementType(base) !== null || this.findObjectType(base) !== null;
+    }
+
+    isOwningExpression(expression) {
+        return expression?.kind === 'NewExpression' ||
+            expression?.kind === 'UnaryExpression' && expression.operator === 'copy' ||
+            expression?.kind === 'CallExpression' && expression.callee?.semanticSymbol?.returnOwnership === 'owned';
+    }
+
+    localOwnership(initializer, type) {
+        if (!this.isOwnedReferenceType(type)) return 'value';
+        return this.isOwningExpression(initializer) ? 'owned' : 'borrowed';
+    }
+
+    bindBorrow(target, expression) {
+        target.borrowedFrom = null;
+        const source = expression?.semanticSymbol;
+        if (!source || !['Local', 'Parameter'].includes(source.kind) || this.isOwningExpression(expression)) return;
+        target.borrowedFrom = source.borrowedFrom ?? source;
+        target.borrowedVersion = target.borrowedFrom.ownershipVersion ?? 0;
+    }
+
+    validateBorrow(symbol, span) {
+        if (symbol.ownership === 'destroyed') {
+            this.report(span, `Reference '${symbol.name}' was already deleted`);
+            return;
+        }
+        if (!symbol.borrowedFrom) return;
+        if ((symbol.borrowedFrom.ownershipVersion ?? 0) !== symbol.borrowedVersion) {
+            this.report(span, `Borrowed reference '${symbol.name}' outlives the value previously held by '${symbol.borrowedFrom.name}'`);
+        }
+    }
+
+    isOwnedReferenceType(type) {
+        const base = this.isOptionalType(type) ? this.optionalBaseType(type) : type;
+        return base === STRING_BUILDER || this.arrayElementType(base) !== null || this.findObjectType(base) !== null;
+    }
+
+    transferOwnership(expression) {
+        const source = expression?.semanticSymbol;
+        if (!source || !['Local', 'Parameter'].includes(source.kind)) return;
+        source.ownership = 'borrowed';
+        expression.ownership = 'consume';
     }
 
     isOptionalType(type) {
@@ -927,14 +1261,30 @@ export class SemanticAnalyzer {
         }
         for (let i = 0; i < actualTypes.length; i++) {
             this.requireAssignable(actualTypes[i], method.parameters[i].type, expressions[i].span, expressions[i]);
+            if (method.parameters[i].owning) this.consumeOwnership(expressions[i], method.parameters[i]);
         }
+    }
+
+    consumeOwnership(expression, parameter) {
+        if (this.isOwningExpression(expression) || expression?.kind === 'CallExpression') return;
+        const source = expression?.semanticSymbol;
+        if (source?.kind === 'Local' || source?.kind === 'Parameter') {
+            if (source.ownership !== 'owned') {
+                this.report(expression.span, `Cannot pass borrowed reference '${source.name}' to owning parameter '${parameter.name}'; use 'copy ${source.name}'`);
+                return;
+            }
+            source.ownership = 'borrowed';
+            expression.ownership = 'consume';
+            return;
+        }
+        this.report(expression.span, `Owning parameter '${parameter.name}' requires an owned value; use 'copy' to create one`);
     }
 
     requireAssignable(actual, expected, span, expression = null) {
         if (this.isOptionalType(expected)) {
             const expectedBase = this.optionalBaseType(expected);
             const actualBase = this.isOptionalType(actual) ? this.optionalBaseType(actual) : actual;
-            if (actual === NULL || actual === expected || actualBase === expectedBase || this.isSubtype(actualBase, expectedBase)) return;
+            if (actual === NULL || actual === expected || actualBase === expectedBase || this.conformsTo(actualBase, expectedBase)) return;
         }
         const integerLiteral = expression?.kind === 'IntegerLiteral'
             ? expression
@@ -955,7 +1305,7 @@ export class SemanticAnalyzer {
             }
             return;
         }
-        if (actual !== UNKNOWN && expected !== UNKNOWN && actual !== expected && !this.isSubtype(actual, expected)) {
+        if (actual !== UNKNOWN && expected !== UNKNOWN && actual !== expected && !this.conformsTo(actual, expected)) {
             this.report(span, `Cannot use value of type '${actual}' where '${expected}' is required`);
         }
     }
@@ -965,6 +1315,17 @@ export class SemanticAnalyzer {
         while (object?.base) {
             object = object.base;
             if (object.type === expected) return true;
+        }
+        return false;
+    }
+
+    conformsTo(actual, expected) {
+        if (this.isSubtype(actual, expected)) return true;
+        let object = this.findObjectType(actual);
+        const contract = this.findObjectType(expected);
+        while (object && contract) {
+            if (object.contracts.some(candidate => this.inheritanceContains(candidate, contract))) return true;
+            object = object.base;
         }
         return false;
     }
@@ -1032,9 +1393,9 @@ class ObjectScope extends Scope {
         let object = this.object;
         while (object) {
             const field = object.fields.get(name);
-            if (field) return field;
+            if (field && (object === this.object || field.visibility !== 'private')) return field;
             const method = object.methods.get(name);
-            if (method && (object === this.object || name !== '__')) return method;
+            if (method && (object === this.object || method.visibility !== 'private') && (object === this.object || name !== '__')) return method;
             object = object.base;
         }
         return null;

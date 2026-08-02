@@ -7,13 +7,21 @@ library Symbols {{
         member qualifiedName:string
         member typeName:string?
         member returnType:string?
+        member returnOwnership:string
         member span:Compiler.SourceSpan
         member owner:Symbol?
         member memberScope:Scope?
-        member parameters:Array<Symbol>
+        member parameters:Array<ref Symbol>
+        member defaultCount:i64
         member isNative:bool
+        member visibility:string
+        member ownership:string
+        member declaredOwnership:string
+        member borrowedFrom:Symbol?
+        member ownershipVersion:i64
+        member borrowedVersion:i64
         member base:Symbol?
-        member contracts:Array<Symbol>
+        member contracts:Array<ref Symbol>
 
         __(kind:string, name:string, qualifiedName:string, span:Compiler.SourceSpan) -> void {
             self.kind = kind
@@ -21,34 +29,61 @@ library Symbols {{
             self.qualifiedName = qualifiedName
             self.typeName = null
             self.returnType = null
+            self.returnOwnership = "owned"
             self.span = span
             self.owner = null
             self.memberScope = null
-            self.parameters = new Array<Symbol>(0)
+            self.parameters = new Array<ref Symbol>(0)
+            self.defaultCount = 0
             self.isNative = false
+            self.visibility = "public"
+            self.ownership = "value"
+            self.declaredOwnership = "value"
+            self.borrowedFrom = null
+            self.ownershipVersion = 0
+            self.borrowedVersion = 0
             self.base = null
-            self.contracts = new Array<Symbol>(0)
+            self.contracts = new Array<ref Symbol>(0)
         }
     }}
 
     Scope {{
         member name:string
         member parent:Scope?
-        member symbols:Array<Symbol>
+        member symbols:Array<ref Symbol>
 
         __(name:string, parent:Scope?) -> void {
             self.name = name
             self.parent = parent
-            self.symbols = new Array<Symbol>(0)
+            self.symbols = new Array<ref Symbol>(0)
         }
 
         define(symbol:Symbol) -> bool {
-            if self.lookupLocal(symbol.name) != null { return false }
+            local index:i64 = 0
+            while index < self.symbols.length {
+                local existing = self.symbols[index]
+                if existing.name == symbol.name {
+                    if existing.kind != "Method" || symbol.kind != "Method" { return false }
+                    if self.sameParameters(existing, symbol) { return false }
+                }
+                index = index + 1
+            }
             self.symbols.append(symbol)
             return true
         }
 
-        lookupLocal(name:string) -> Symbol? {
+        sameParameters(left:Symbol, right:Symbol) -> bool {
+            if left.parameters.length != right.parameters.length { return false }
+            local index:i64 = 0
+            while index < left.parameters.length {
+                if left.parameters[index].typeName == null || right.parameters[index].typeName == null { return false }
+                if left.parameters[index].typeName! != right.parameters[index].typeName! { return false }
+                index = index + 1
+            }
+            return true
+        }
+
+        lookupLocal(name:string) -> ref Symbol? {
             local index:i64 = 0
             while index < self.symbols.length {
                 local symbol = self.symbols[index]
@@ -58,7 +93,7 @@ library Symbols {{
             return null
         }
 
-        lookup(name:string) -> Symbol? {
+        lookup(name:string) -> ref Symbol? {
             local current:Scope? = self
             while current != null {
                 local found = current!.lookupLocal(name)

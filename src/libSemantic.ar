@@ -30,7 +30,7 @@ library Semantics {{
     Analyzer {{
         member graph:ModuleLoading.ModuleGraph
         member globals:Symbols.Scope
-        member modules:Array<ModuleScope>
+        member modules:Array<ref ModuleScope>
         member diagnostics:Diagnostics.DiagnosticBag
         member currentOwner:Symbols.Symbol?
         member currentMethod:Symbols.Symbol?
@@ -38,7 +38,7 @@ library Semantics {{
         __(graph:ModuleLoading.ModuleGraph) -> void {
             self.graph = graph
             self.globals = new Symbols.Scope("global", null)
-            self.modules = new Array<ModuleScope>(0)
+            self.modules = new Array<ref ModuleScope>(0)
             self.diagnostics = graph.diagnostics
             self.currentOwner = null
             self.currentMethod = null
@@ -120,6 +120,7 @@ library Semantics {{
             symbol.typeName = qualified
             symbol.owner = owner
             symbol.memberScope = new Symbols.Scope(qualified, owner.memberScope)
+            symbol.visibility = memberNode.visibility
             memberNode.symbol = symbol
             if !owner.memberScope!.define(symbol) { self.error(memberNode.span, "Duplicate member '" + memberNode.name + "'") }
             local index:i64 = 0
@@ -174,15 +175,43 @@ library Semantics {{
                     local symbol = new Symbols.Symbol(memberNode.kind, memberNode.name, owner.qualifiedName + "." + memberNode.name, memberNode.span)
                     symbol.owner = owner
                     symbol.isNative = memberNode.isNative
+                    symbol.visibility = memberNode.visibility
                     if memberNode.kind == "Field" {
                         symbol.typeName = self.bindType(memberNode.declaredType!, owner.memberScope!)
+                        if memberNode.weakReference {
+                            local weakType = symbol.typeName!
+                            if self.isOptional(weakType) { weakType = weakType.slice(0, weakType.length - 1) }
+                            if !self.isOptional(symbol.typeName!) || self.findCanonical(weakType) == null { self.error(memberNode.span, "'weak' requires an optional object member") }
+                            symbol.ownership = "member-weak"
+                        } else { if memberNode.reference {
+                            if !self.isOwnedReference(symbol.typeName!) { self.error(memberNode.span, "'ref' requires an object, array, or builder member") }
+                            symbol.ownership = "member-reference"
+                        } else {
+                            if self.isOwnedReference(symbol.typeName!) { symbol.ownership = "member-owned" }
+                        }}
                     } else {
                         symbol.returnType = self.bindType(memberNode.returnType!, owner.memberScope!)
+                        if memberNode.returnReference { symbol.returnOwnership = "borrowed" }
+                        if memberNode.returnReference && !self.isOwnedReference(symbol.returnType!) { self.error(memberNode.returnType!.span, "'ref' return requires an object, array, or builder type") }
                         local parameterIndex:i64 = 0
+                        local sawDefault:bool = false
                         while parameterIndex < memberNode.parameters.length {
                             local parameter = memberNode.parameters[parameterIndex]
+                            if parameter.defaultValue != null {
+                                sawDefault = true
+                                symbol.defaultCount = symbol.defaultCount + 1
+                            } else {
+                                if sawDefault { self.error(parameter.span, "Required parameter '" + parameter.name + "' cannot follow a default parameter") }
+                            }
                             local parameterSymbol = new Symbols.Symbol("Parameter", parameter.name, symbol.qualifiedName + "." + parameter.name, parameter.span)
                             parameterSymbol.typeName = self.bindType(parameter.parameterType, owner.memberScope!)
+                            if parameter.owning {
+                                if !self.isOwnedReference(parameterSymbol.typeName!) { self.error(parameter.span, "'own' requires an object, array, or builder parameter") }
+                                if parameter.defaultValue != null { self.error(parameter.span, "Owning parameter '" + parameter.name + "' cannot have a default value") }
+                                parameterSymbol.ownership = "owned"
+                            } else {
+                                if self.isOwnedReference(parameterSymbol.typeName!) { parameterSymbol.ownership = "borrowed" }
+                            }
                             parameterSymbol.owner = symbol
                             parameter.symbol = parameterSymbol
                             symbol.parameters.append(parameterSymbol)
@@ -190,6 +219,13 @@ library Semantics {{
                         }
                     }
                     memberNode.symbol = symbol
+                    local existing = owner.memberScope!.lookupLocal(symbol.name)
+                    if symbol.kind == "Method" && existing != null {
+                        if existing!.kind == "Method" {
+                            existing!.qualifiedName = owner.qualifiedName + "." + self.signatureName(existing!)
+                            symbol.qualifiedName = owner.qualifiedName + "." + self.signatureName(symbol)
+                        }
+                    }
                     if !owner.memberScope!.define(symbol) { self.error(memberNode.span, "Duplicate member '" + memberNode.name + "'") }
                 }
                 index = index + 1
@@ -287,9 +323,18 @@ library Semantics {{
             while memberIndex < object.memberScope!.symbols.length {
                 local method = object.memberScope!.symbols[memberIndex]
                 if method.kind == "Method" && method.name != "__" {
-                    local inherited = self.lookupMethod(object.base, method.name)
+                    local privateAncestor = self.lookupMethodSignature(object.base, method, true)
+                    if privateAncestor != null {
+                        if privateAncestor!.visibility == "private" {
+                            self.error(method.span, "Method '" + method.qualifiedName + "' cannot replace private method '" + privateAncestor!.qualifiedName + "'")
+                            memberIndex = memberIndex + 1
+                            continue
+                        }
+                    }
+                    local inherited = self.lookupMethodSignature(object.base, method, false)
                     if inherited != null {
-                        if !self.signaturesMatch(method, inherited!) { self.error(method.span, "Incompatible override '" + method.qualifiedName + "'") }
+                if method.returnType! != inherited!.returnType! { self.error(method.span, "Incompatible override '" + method.qualifiedName + "': returns '" + method.returnType! + "', inherited method returns '" + inherited!.returnType! + "'") }
+                        if !self.signaturesMatch(method, inherited!) { self.error(method.span, "Incompatible ownership contract in override '" + method.qualifiedName + "'") }
                     }
                 }
                 if method.kind == "Field" {
@@ -310,12 +355,12 @@ library Semantics {{
             local index:i64 = 0
             while index < contract.memberScope!.symbols.length {
                 local required = contract.memberScope!.symbols[index]
-                if required.kind == "Method" && required.name != "__" {
-                    local actual = self.lookupMethod(object, required.name)
+                if required.kind == "Method" && required.name != "__" && required.visibility != "private" {
+                    local actual = self.lookupMethodSignature(object, required, false)
                     if actual == null {
                         self.error(object.span, "Object '" + object.qualifiedName + "' is missing method '" + required.name + "'")
                     } else {
-                        if !self.signaturesMatch(actual!, required) { self.error(actual!.span, "Method '" + actual!.qualifiedName + "' does not satisfy '" + required.qualifiedName + "'") }
+                        if !self.signaturesMatch(actual!, required) { self.error(actual!.span, "Method '" + actual!.qualifiedName + "' does not satisfy '" + required.qualifiedName + "': returns '" + actual!.returnType! + "', contract requires '" + required.returnType! + "'") }
                     }
                 }
                 index = index + 1
@@ -323,14 +368,29 @@ library Semantics {{
         }
 
         signaturesMatch(left:Symbols.Symbol, right:Symbols.Symbol) -> bool {
-            if left.returnType != right.returnType { return false }
+            if left.returnType == null || right.returnType == null { return false }
+            if left.returnType! != right.returnType! { return false }
+            if left.returnOwnership != right.returnOwnership { return false }
             if left.parameters.length != right.parameters.length { return false }
             local index:i64 = 0
             while index < left.parameters.length {
-                if left.parameters[index].typeName != right.parameters[index].typeName { return false }
+                if left.parameters[index].typeName == null || right.parameters[index].typeName == null { return false }
+                if left.parameters[index].typeName! != right.parameters[index].typeName! { return false }
+                if left.parameters[index].ownership != right.parameters[index].ownership { return false }
                 index = index + 1
             }
             return true
+        }
+
+        signatureName(method:Symbols.Symbol) -> string {
+            local name = method.name + "#"
+            local index:i64 = 0
+            while index < method.parameters.length {
+                if index > 0 { name = name + "," }
+                name = name + method.parameters[index].typeName!
+                index = index + 1
+            }
+            return name
         }
 
         inheritanceContains(start:Symbols.Symbol?, target:Symbols.Symbol) -> bool {
@@ -342,15 +402,31 @@ library Semantics {{
             return false
         }
 
-        lookupMethod(owner:Symbols.Symbol?, name:string) -> Symbols.Symbol? {
+        conformsTo(actual:Symbols.Symbol?, expected:Symbols.Symbol) -> bool {
+            local current = actual
+            while current != null {
+                if self.inheritanceContains(current, expected) { return true }
+                local index:i64 = 0
+                while index < current!.contracts.length {
+                    if self.inheritanceContains(current!.contracts[index], expected) { return true }
+                    index = index + 1
+                }
+                current = current!.base
+            }
+            return false
+        }
+
+        lookupMethod(owner:Symbols.Symbol?, name:string) -> ref Symbols.Symbol? {
             local current = owner
             local first:bool = true
             while current != null {
-                local found = current!.memberScope!.lookupLocal(name)
-                if found != null {
-                    if found!.kind == "Method" {
+                local index:i64 = 0
+                while index < current!.memberScope!.symbols.length {
+                    local found = current!.memberScope!.symbols[index]
+                    if found.kind == "Method" && found.name == name && found.visibility != "private" {
                         if first || name != "__" { return found }
                     }
+                    index = index + 1
                 }
                 first = false
                 current = current!.base
@@ -358,15 +434,207 @@ library Semantics {{
             return null
         }
 
-        lookupMember(owner:Symbols.Symbol?, name:string) -> Symbols.Symbol? {
+        lookupMethodSignature(owner:Symbols.Symbol?, signature:Symbols.Symbol, includePrivate:bool) -> ref Symbols.Symbol? {
+            local current = owner
+            while current != null {
+                local index:i64 = 0
+                while index < current!.memberScope!.symbols.length {
+                    local method = current!.memberScope!.symbols[index]
+                    if method.kind == "Method" && method.name == signature.name {
+                        if (includePrivate || method.visibility != "private") {
+                            if method.parameters.length == signature.parameters.length {
+                                local matches:bool = true
+                                local parameterIndex:i64 = 0
+                                while parameterIndex < method.parameters.length {
+                                    if method.parameters[parameterIndex].typeName! != signature.parameters[parameterIndex].typeName! { matches = false }
+                                    parameterIndex = parameterIndex + 1
+                                }
+                                if matches { return method }
+                            }
+                        }
+                    }
+                    index = index + 1
+                }
+                current = current!.base
+            }
+            return null
+        }
+
+        resolveOverload(owner:Symbols.Symbol, name:string, arguments:Array<string>, span:Compiler.SourceSpan, constructor:bool, includePrivate:bool) -> ref Symbols.Symbol? {
+            local exact:Symbols.Symbol? = null
+            local compatible:Symbols.Symbol? = null
+            local exactCount:i64 = 0
+            local compatibleCount:i64 = 0
+            local compatibleMethods = new Array<ref Symbols.Symbol>(0)
+            local declared:i64 = 0
+            local signatures = new Array<string>(0)
+            local current:Symbols.Symbol? = owner
+            while current != null {
+                local index:i64 = 0
+                while index < current!.memberScope!.symbols.length {
+                    local method = current!.memberScope!.symbols[index]
+                    if method.kind == "Method" && method.name == name {
+                        declared = declared + 1
+                        local signature = self.signatureName(method)
+                        if !self.containsString(signatures, signature) {
+                            signatures.append(signature)
+                            if includePrivate || method.visibility != "private" {
+                                if arguments.length <= method.parameters.length && arguments.length >= method.parameters.length - method.defaultCount {
+                                    local matches:bool = true
+                                    local exactMatch:bool = true
+                                    local parameterIndex:i64 = 0
+                                    while parameterIndex < arguments.length {
+                                        local expected = method.parameters[parameterIndex].typeName!
+                                        if expected != arguments[parameterIndex] { exactMatch = false }
+                                        if !self.compatible(expected, arguments[parameterIndex]) { matches = false }
+                                        parameterIndex = parameterIndex + 1
+                                    }
+                                    if matches {
+                                        compatible = method
+                                        compatibleCount = compatibleCount + 1
+                                        compatibleMethods.append(method)
+                                        if exactMatch { exact = method; exactCount = exactCount + 1 }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    index = index + 1
+                }
+                if constructor { current = null } else { current = current!.base }
+            }
+            if exactCount == 1 { return exact }
+            if exactCount > 1 { self.error(span, "Call to '" + name + "' is ambiguous"); return null }
+            if compatibleCount > 1 {
+                local winner:Symbols.Symbol? = null
+                local winnerCount:i64 = 0
+                local candidateIndex:i64 = 0
+                while candidateIndex < compatibleMethods.length {
+                    local candidate = compatibleMethods[candidateIndex]
+                    local dominates:bool = true
+                    local otherIndex:i64 = 0
+                    while otherIndex < compatibleMethods.length {
+                        if otherIndex != candidateIndex {
+                            if !self.moreSpecific(candidate, compatibleMethods[otherIndex]) { dominates = false }
+                        }
+                        otherIndex = otherIndex + 1
+                    }
+                    if dominates { winner = candidate; winnerCount = winnerCount + 1 }
+                    candidateIndex = candidateIndex + 1
+                }
+                if winnerCount == 1 { return winner }
+                self.error(span, "Call to '" + name + "' is ambiguous")
+                return null
+            }
+            if compatibleCount == 1 { return compatible }
+            if !(constructor && declared == 0 && arguments.length == 0) { self.error(span, "No overload of '" + name + "' accepts these arguments") }
+            return null
+        }
+
+        containsString(values:Array<string>, value:string) -> bool {
+            local index:i64 = 0
+            while index < values.length { if values[index] == value { return true }; index = index + 1 }
+            return false
+        }
+
+        applyDefaults(method:Symbols.Symbol, arguments:Array<Ast.Expression>, argumentTypes:Array<string>) -> void {
+            local node = self.methodNode(method)
+            if node == null { return }
+            while arguments.length < method.parameters.length {
+                local defaultValue = node!.parameters[arguments.length].defaultValue
+                if defaultValue == null { return }
+                arguments.append(copy defaultValue!)
+                argumentTypes.append(method.parameters[argumentTypes.length].typeName!)
+            }
+        }
+
+        methodNode(method:Symbols.Symbol) -> ref Ast.MemberDeclaration? {
+            local moduleIndex:i64 = 0
+            while moduleIndex < self.modules.length {
+                local declarations = self.modules[moduleIndex].module.program.declarations
+                local declarationIndex:i64 = 0
+                while declarationIndex < declarations.length {
+                    local found = self.methodNodeIn(declarations[declarationIndex].members, method)
+                    if found != null { return found }
+                    declarationIndex = declarationIndex + 1
+                }
+                moduleIndex = moduleIndex + 1
+            }
+            return null
+        }
+
+        methodNodeIn(members:Array<Ast.MemberDeclaration>, method:Symbols.Symbol) -> ref Ast.MemberDeclaration? {
+            local index:i64 = 0
+            while index < members.length {
+                local node = members[index]
+                if node.symbol != null { if node.symbol! === method { return node } }
+                if node.kind == "Object" {
+                    local nested = self.methodNodeIn(node.members, method)
+                    if nested != null { return nested }
+                }
+                index = index + 1
+            }
+            return null
+        }
+
+        moreSpecific(candidate:Symbols.Symbol, other:Symbols.Symbol) -> bool {
+            if candidate.parameters.length != other.parameters.length { return false }
+            local index:i64 = 0
+            while index < candidate.parameters.length {
+                local candidateType = candidate.parameters[index].typeName!
+                local otherType = other.parameters[index].typeName!
+                if candidateType != otherType {
+                    local candidateObject = self.findCanonical(candidateType)
+                    local otherObject = self.findCanonical(otherType)
+                    if candidateObject == null || otherObject == null { return false }
+                    if !self.conformsTo(candidateObject, otherObject!) { return false }
+                }
+                index = index + 1
+            }
+            return true
+        }
+
+        compatible(expected:string, actual:string) -> bool {
+            if expected == actual { return true }
+            if self.isInteger(expected) && self.isInteger(actual) { return true }
+            local expectedType = self.findCanonical(expected)
+            local actualType = self.findCanonical(actual)
+            if expectedType != null && actualType != null { if self.conformsTo(actualType, expectedType!) { return true } }
+            if actual == "null" && self.isOptional(expected) { return true }
+            if self.isOptional(expected) {
+                local expectedBase = expected.slice(0, expected.length - 1)
+                local actualBase = actual
+                if self.isOptional(actualBase) { actualBase = actualBase.slice(0, actualBase.length - 1) }
+                if expectedBase == actualBase { return true }
+            }
+            return false
+        }
+
+        lookupPrivateMethod(owner:Symbols.Symbol?, name:string) -> ref Symbols.Symbol? {
+            local current = owner
+            while current != null {
+                local found = current!.memberScope!.lookupLocal(name)
+                if found != null {
+                    if found!.kind == "Method" && found!.visibility == "private" { return found }
+                }
+                current = current!.base
+            }
+            return null
+        }
+
+        lookupMember(owner:Symbols.Symbol?, name:string) -> ref Symbols.Symbol? {
             local current = owner
             local first:bool = true
             while current != null {
                 local found = current!.memberScope!.lookupLocal(name)
                 if found != null {
-                    if found!.kind == "Field" { return found }
+                    if found!.kind == "Field" {
+                        if first || found!.visibility != "private" { return found }
+                    }
                     if found!.kind == "Method" {
-                        if first || name != "__" { return found }
+                        if first || found!.visibility != "private" {
+                            if first || name != "__" { return found }
+                        }
                     }
                 }
                 first = false
@@ -413,6 +681,14 @@ library Semantics {{
         }
 
         analyzeMethod(method:Ast.MemberDeclaration, owner:Symbols.Symbol, moduleScope:Symbols.Scope) -> void {
+            local defaultIndex:i64 = 0
+            while defaultIndex < method.parameters.length {
+                if method.parameters[defaultIndex].defaultValue != null {
+                    local actualDefault = self.analyzeExpression(method.parameters[defaultIndex].defaultValue!, owner.memberScope!, moduleScope)
+                    self.requireCompatible(method.symbol!.parameters[defaultIndex].typeName!, actualDefault, method.parameters[defaultIndex].defaultValue!.span)
+                }
+                defaultIndex = defaultIndex + 1
+            }
             local scope = new Symbols.Scope(method.symbol!.qualifiedName, owner.memberScope)
             local selfSymbol = new Symbols.Symbol("Local", "self", method.symbol!.qualifiedName + ".self", method.span)
             selfSymbol.typeName = owner.qualifiedName
@@ -451,6 +727,12 @@ library Semantics {{
                 if valueType != null { self.requireCompatible(localType!, valueType!, statement.span) }
                 local symbol = new Symbols.Symbol("Local", statement.name!, statement.name!, statement.span)
                 symbol.typeName = localType
+                if self.isOwnedReference(localType!) {
+                    symbol.ownership = "borrowed"
+                    if self.isOwningExpression(statement.expression) { symbol.ownership = "owned" }
+                }
+                symbol.declaredOwnership = symbol.ownership
+                self.bindBorrow(symbol, statement.expression)
                 statement.symbol = symbol
                 if !scope.define(symbol) { self.error(statement.span, "Duplicate local '" + statement.name! + "'") }
                 return
@@ -461,6 +743,20 @@ library Semantics {{
                 } else {
                     local actual = self.analyzeExpression(statement.expression!, scope, moduleScope)
                     self.requireCompatible(returnType, actual, statement.span)
+                    if self.isOwnedReference(returnType) && self.currentMethod!.returnOwnership == "owned" {
+                        if statement.expression!.kind == "Null" && self.isOptional(returnType) {
+                            statement.ownership = "transfer"
+                        } else { if self.isOwningExpression(statement.expression) {
+                            statement.ownership = "transfer"
+                        } else {
+                            if statement.expression!.symbol != null && (statement.expression!.symbol!.kind == "Local" || statement.expression!.symbol!.kind == "Parameter") && statement.expression!.symbol!.ownership == "owned" {
+                                statement.ownership = "transfer"
+                                statement.expression!.symbol!.ownership = "borrowed"
+                            } else {
+                                self.error(statement.expression!.span, "Returning '" + returnType + "' requires an owned value; use 'copy' for a borrowed reference")
+                            }
+                        }}
+                    }
                 }
                 return
             }
@@ -490,6 +786,7 @@ library Semantics {{
                 local symbol = scope.lookup(expression.name!)
                 if symbol == null { symbol = self.lookupMember(self.currentOwner, expression.name!) }
                 if symbol == null { self.error(expression.span, "Unknown name '" + expression.name! + "'"); return self.typed(expression, "error") }
+                if expression.ownership != "assignment-target" { self.validateBorrow(symbol!, expression.span) }
                 expression.symbol = symbol
                 if symbol!.typeName != null { return self.typed(expression, symbol!.typeName!) }
                 if symbol!.returnType != null { return self.typed(expression, symbol!.returnType!) }
@@ -507,6 +804,26 @@ library Semantics {{
                 local foundMember = owner!.memberScope!.lookupLocal(expression.name!)
                 if foundMember == null { foundMember = self.lookupMember(owner, expression.name!) }
                 if foundMember == null { return self.builtinMember(expression, leftType) }
+                if foundMember!.visibility == "private" {
+                    if self.currentOwner == null || self.currentOwner! !== foundMember!.owner! {
+                        local accessible = self.lookupMethod(owner, expression.name!)
+                        if accessible == null {
+                            self.error(expression.span, "Private " + foundMember!.kind + " '" + foundMember!.qualifiedName + "' is not visible here")
+                            return self.typed(expression, "error")
+                        }
+                        foundMember = accessible
+                    }
+                }
+                if foundMember!.kind == "Field" && self.isUsedContract(owner!) {
+                    local selfAccess:bool = false
+                    if expression.left!.kind == "Identifier" {
+                        if expression.left!.name! == "self" && self.currentOwner === owner! { selfAccess = true }
+                    }
+                    if !selfAccess {
+                        self.error(expression.span, "Contract reference '" + owner!.qualifiedName + "' does not expose field '" + expression.name! + "'")
+                        return self.typed(expression, "error")
+                    }
+                }
                 expression.symbol = foundMember
                 if foundMember!.typeName != null { return self.typed(expression, foundMember!.typeName!) }
                 return self.typed(expression, foundMember!.returnType!)
@@ -521,16 +838,53 @@ library Semantics {{
                     if expression.left!.name! == "super" { return self.analyzeSuperCall(expression, scope, moduleScope) }
                 }
                 self.analyzeExpression(expression.left!, scope, moduleScope)
+                if expression.left!.kind == "Member" {
+                    if expression.left!.name! == "hash" && expression.left!.symbol == null {
+                        if expression.arguments.length != 0 { self.error(expression.span, "hash() expects no arguments") }
+                        expression.symbol = expression.left!.symbol
+                        return self.typed(expression, "i64")
+                    }
+                }
                 local callable = expression.left!.symbol
+                local argumentTypes = new Array<string>(0)
                 local index:i64 = 0
                 while index < expression.arguments.length {
                     local argumentType = self.analyzeExpression(expression.arguments[index], scope, moduleScope)
-                    if callable != null {
-                        if index < callable!.parameters.length { self.requireCompatible(callable!.parameters[index].typeName!, argumentType, expression.arguments[index].span) }
-                    }
+                    argumentTypes.append(argumentType)
                     index = index + 1
                 }
+                if callable == null && expression.left!.kind == "Member" {
+                    local receiverType = expression.left!.left!.inferredType!
+                    if expression.left!.name! == "append" && self.isArray(receiverType) {
+                        if expression.arguments.length != 1 { self.error(expression.span, "Array.append expects 1 argument") } else {
+                            local elementType = self.arrayElementType(receiverType)
+                            self.requireCompatible(elementType, argumentTypes[0], expression.arguments[0].span)
+                            if self.arrayElementOwnership(receiverType) == "owned" && self.isOwnedReference(elementType) {
+                                self.consumeArrayElement(expression.arguments[0])
+                            }
+                        }
+                        return self.typed(expression, "void")
+                    }
+                }
                 if callable != null {
+                    if callable!.kind == "Method" && callable!.owner != null {
+                        local resolved = self.resolveOverload(callable!.owner!, callable!.name, argumentTypes, expression.span, false, self.currentOwner === callable!.owner!)
+                        if resolved != null {
+                            callable = resolved
+                            expression.left!.symbol = resolved
+                            self.applyDefaults(resolved!, expression.arguments, argumentTypes)
+                        }
+                    }
+                }
+                if callable != null {
+                    index = 0
+                    while index < expression.arguments.length {
+                        if index < callable!.parameters.length {
+                            self.requireCompatible(callable!.parameters[index].typeName!, argumentTypes[index], expression.arguments[index].span)
+                            if callable!.parameters[index].ownership == "owned" { self.consumeOwnership(expression.arguments[index], callable!.parameters[index]) }
+                        }
+                        index = index + 1
+                    }
                     if expression.arguments.length != callable!.parameters.length { self.error(expression.span, "Expected " + callable!.parameters.length.toString() + " arguments but received " + expression.arguments.length.toString()) }
                     expression.symbol = callable
                     return self.typed(expression, callable!.returnType!)
@@ -539,7 +893,14 @@ library Semantics {{
             }
             if expression.kind == "New" {
                 local name = self.expressionName(expression.left!)
-                if expression.typeArguments.length > 0 { name = name + "<" + self.bindType(expression.typeArguments[0], scope) + ">" }
+                if expression.typeArguments.length > 0 {
+                    local element = expression.typeArguments[0]
+                    local elementType = self.bindType(element, scope)
+                    self.validateArrayElementPolicy(elementType, element.ownership, element)
+                    local qualifier = ""
+                    if element.ownership != "owned" { qualifier = element.ownership + " " }
+                    name = name + "<" + qualifier + elementType + ">"
+                }
                 local target = self.findType(name, scope)
                 if target == null {
                     if !self.isArray(name) { self.error(expression.span, "Unknown type '" + name + "'") }
@@ -547,27 +908,81 @@ library Semantics {{
                     expression.symbol = target
                     if !self.isArray(name) { name = target!.qualifiedName }
                 }
+                local argumentTypes = new Array<string>(0)
                 local index:i64 = 0
-                while index < expression.arguments.length { self.analyzeExpression(expression.arguments[index], scope, moduleScope); index = index + 1 }
+                while index < expression.arguments.length { argumentTypes.append(self.analyzeExpression(expression.arguments[index], scope, moduleScope)); index = index + 1 }
+                if target != null {
+                    local constructor = self.resolveOverload(target!, "__", argumentTypes, expression.span, true, self.currentOwner === target!)
+                    if constructor != null {
+                        self.applyDefaults(constructor!, expression.arguments, argumentTypes)
+                        self.checkOwnershipArguments(constructor!, expression.arguments)
+                        expression.text = constructor!.qualifiedName
+                    }
+                }
                 return self.typed(expression, name)
             }
             if expression.kind == "Index" {
                 local container = self.analyzeExpression(expression.left!, scope, moduleScope)
                 local indexType = self.analyzeExpression(expression.right!, scope, moduleScope)
                 if !self.isInteger(indexType) { self.error(expression.right!.span, "Array index must be an integer") }
-                if self.isArray(container) { return self.typed(expression, container.slice(6, container.length - 7)) }
+                if self.isArray(container) {
+                    expression.text = self.arrayElementOwnership(container)
+                    return self.typed(expression, self.arrayElementType(container))
+                }
                 if container == "string" { return self.typed(expression, "u8") }
                 self.error(expression.span, "Type '" + container + "' cannot be indexed")
                 return self.typed(expression, "error")
             }
             if expression.kind == "Assignment" {
+                expression.left!.ownership = "assignment-target"
                 local target = self.analyzeExpression(expression.left!, scope, moduleScope)
                 local value = self.analyzeExpression(expression.right!, scope, moduleScope)
                 self.requireCompatible(target, value, expression.span)
+                if self.isOwnedReference(target) {
+                    if expression.left!.kind == "Index" {
+                        if expression.left!.text != null {
+                            if expression.left!.text! == "owned" {
+                                expression.ownership = "transfer"
+                                self.consumeArrayElement(expression.right!)
+                            }
+                        }
+                    }
+                    if expression.left!.symbol != null {
+                        if expression.left!.symbol!.kind == "Field" && expression.left!.symbol!.ownership == "member-owned" {
+                            expression.ownership = "transfer"
+                            self.transferOwnership(expression.right!)
+                        }
+                        if expression.left!.symbol!.kind == "Local" {
+                            expression.left!.symbol!.ownershipVersion = expression.left!.symbol!.ownershipVersion + 1
+                            expression.left!.symbol!.ownership = "borrowed"
+                            if self.isOwningExpression(expression.right!) { expression.left!.symbol!.ownership = "owned" }
+                            self.bindBorrow(expression.left!.symbol!, expression.right)
+                        }
+                    }
+                }
                 return self.typed(expression, target)
             }
             if expression.kind == "Unary" {
                 local operand = self.analyzeExpression(expression.left!, scope, moduleScope)
+                if expression.operator! == "copy" {
+                    if !self.isReference(operand) { self.error(expression.span, "copy requires a reference value") }
+                    return self.typed(expression, operand)
+                }
+                if expression.operator! == "delete" {
+                    local deletedType = operand
+                    if self.isOptional(deletedType) { deletedType = deletedType.slice(0, deletedType.length - 1) }
+                    if self.isOptional(operand) || self.findCanonical(deletedType) == null {
+                        self.error(expression.span, "delete requires a non-optional object reference")
+                    } else {
+                        if expression.left!.symbol == null || (expression.left!.symbol!.kind != "Local" && expression.left!.symbol!.kind != "Parameter") || expression.left!.symbol!.ownership != "owned" {
+                            self.error(expression.span, "delete requires an owned local or parameter")
+                        } else {
+                            expression.left!.symbol!.ownership = "destroyed"
+                            expression.left!.symbol!.ownershipVersion = expression.left!.symbol!.ownershipVersion + 1
+                        }
+                    }
+                    return self.typed(expression, "void")
+                }
                 if expression.operator! == "!" { self.requireCompatible("bool", operand, expression.span); return self.typed(expression, "bool") }
                 if !self.isInteger(operand) { self.error(expression.span, "Unary '-' requires an integer") }
                 return self.typed(expression, operand)
@@ -583,10 +998,10 @@ library Semantics {{
                 local sourceObject = self.findCanonical(sourceBase)
                 local targetObject = self.findCanonical(targetBase)
                 if sourceObject != null && targetObject != null {
-                    if self.inheritanceContains(sourceObject, targetObject!) {
+                    if self.conformsTo(sourceObject, targetObject!) {
                         expression.operator = "reference"
                     } else {
-                        if self.isOptional(target) && self.inheritanceContains(targetObject, sourceObject!) {
+                        if self.isOptional(target) && self.conformsTo(targetObject, sourceObject!) {
                             expression.operator = "checked_reference"
                             expression.text = targetBase
                         } else {
@@ -612,12 +1027,17 @@ library Semantics {{
             if self.currentMethod == null || self.currentMethod!.name != "__" || base == null {
                 self.error(expression.left!.span, "'super()' is only valid in a child constructor")
             }
+            local argumentTypes = new Array<string>(0)
+            local argumentIndex:i64 = 0
+            while argumentIndex < expression.arguments.length { argumentTypes.append(self.analyzeExpression(expression.arguments[argumentIndex], scope, moduleScope)); argumentIndex = argumentIndex + 1 }
             local constructor:Symbols.Symbol? = null
-            if base != null { constructor = base!.memberScope!.lookupLocal("__") }
+            if base != null { constructor = self.resolveOverload(base!, "__", argumentTypes, expression.span, true, true) }
             local superSymbol = new Symbols.Symbol("Super", "super", "", expression.left!.span)
             superSymbol.returnType = "void"
             superSymbol.owner = base
             if constructor != null {
+                self.applyDefaults(constructor!, expression.arguments, argumentTypes)
+                self.checkOwnershipArguments(constructor!, expression.arguments)
                 superSymbol.qualifiedName = constructor!.qualifiedName
                 local parameterIndex:i64 = 0
                 while parameterIndex < constructor!.parameters.length {
@@ -628,11 +1048,7 @@ library Semantics {{
             expression.left!.symbol = superSymbol
             expression.symbol = superSymbol
             local index:i64 = 0
-            while index < expression.arguments.length {
-                local argumentType = self.analyzeExpression(expression.arguments[index], scope, moduleScope)
-                if index < superSymbol.parameters.length { self.requireCompatible(superSymbol.parameters[index].typeName!, argumentType, expression.arguments[index].span) }
-                index = index + 1
-            }
+            while index < expression.arguments.length { if index < superSymbol.parameters.length { self.requireCompatible(superSymbol.parameters[index].typeName!, argumentTypes[index], expression.arguments[index].span) }; index = index + 1 }
             if expression.arguments.length != superSymbol.parameters.length { self.error(expression.span, "Parent constructor expects " + superSymbol.parameters.length.toString() + " arguments") }
             return self.typed(expression, "void")
         }
@@ -644,18 +1060,22 @@ library Semantics {{
                 self.error(expression.left!.span, "'super.method()' is only valid in a child method")
                 return self.typed(expression, "error")
             }
-            local method = self.lookupMethod(base, expression.left!.name!)
+            local argumentTypes = new Array<string>(0)
+            local argumentIndex:i64 = 0
+            while argumentIndex < expression.arguments.length { argumentTypes.append(self.analyzeExpression(expression.arguments[argumentIndex], scope, moduleScope)); argumentIndex = argumentIndex + 1 }
+            local method = self.resolveOverload(base!, expression.left!.name!, argumentTypes, expression.span, false, false)
             if method == null || expression.left!.name! == "__" {
                 self.error(expression.left!.span, "Parent type has no method '" + expression.left!.name! + "'")
                 return self.typed(expression, "error")
             }
+            self.applyDefaults(method!, expression.arguments, argumentTypes)
+            self.checkOwnershipArguments(method!, expression.arguments)
             expression.left!.symbol = method
             expression.left!.text = "super"
             expression.symbol = method
             local index:i64 = 0
             while index < expression.arguments.length {
-                local actual = self.analyzeExpression(expression.arguments[index], scope, moduleScope)
-                if index < method!.parameters.length { self.requireCompatible(method!.parameters[index].typeName!, actual, expression.arguments[index].span) }
+                if index < method!.parameters.length { self.requireCompatible(method!.parameters[index].typeName!, argumentTypes[index], expression.arguments[index].span) }
                 index = index + 1
             }
             if expression.arguments.length != method!.parameters.length { self.error(expression.span, "Parent method expects " + method!.parameters.length.toString() + " arguments") }
@@ -674,7 +1094,15 @@ library Semantics {{
                 return self.typed(expression, "bool")
             }
             if operator == "&&" || operator == "||" { self.requireCompatible("bool", left, expression.left!.span); self.requireCompatible("bool", right, expression.right!.span); return self.typed(expression, "bool") }
-            if operator == "==" || operator == "!=" || operator == "===" || operator == "!==" || operator == "<" || operator == "<=" || operator == ">" || operator == ">=" { return self.typed(expression, "bool") }
+            if operator == "==" || operator == "!=" {
+                if self.isReference(left) || self.isReference(right) {
+                    local compatible = self.isReference(left) && (self.isReference(right) || right == "null")
+                    if !compatible { compatible = self.isReference(right) && left == "null" }
+                    if !compatible { self.error(expression.span, "Structural equality requires compatible reference operands") }
+                }
+                return self.typed(expression, "bool")
+            }
+            if operator == "===" || operator == "!==" || operator == "<" || operator == "<=" || operator == ">" || operator == ">=" { return self.typed(expression, "bool") }
             if operator == "+" {
                 if left == "string" && right == "string" { return self.typed(expression, "string") }
             }
@@ -692,6 +1120,7 @@ library Semantics {{
             if name == "build" { return self.typed(expression, "string") }
             if name == "slice" { return self.typed(expression, "string") }
             if name == "toString" { return self.typed(expression, "string") }
+            if name == "hash" && self.isReference(ownerType) { return self.typed(expression, "i64") }
             self.error(expression.span, "Type '" + ownerType + "' has no member '" + name + "'")
             return self.typed(expression, "error")
         }
@@ -705,12 +1134,19 @@ library Semantics {{
                 reference.symbol = symbol
                 name = symbol!.qualifiedName
             }
-            if reference.arguments.length > 0 { name = name + "<" + self.bindType(reference.arguments[0], scope) + ">" }
+            if reference.arguments.length > 0 {
+                local element = reference.arguments[0]
+                local elementType = self.bindType(element, scope)
+                self.validateArrayElementPolicy(elementType, element.ownership, element)
+                local qualifier = ""
+                if element.ownership != "owned" { qualifier = element.ownership + " " }
+                name = name + "<" + qualifier + elementType + ">"
+            }
             if reference.optional { name = name + "?" }
             return name
         }
 
-        findType(name:string, scope:Symbols.Scope) -> Symbols.Symbol? {
+        findType(name:string, scope:Symbols.Scope) -> ref Symbols.Symbol? {
             local direct = scope.lookup(name)
             if direct != null { return direct }
             local dot:i64 = -1
@@ -733,7 +1169,7 @@ library Semantics {{
             return self.findCanonical(name)
         }
 
-        findCanonical(name:string) -> Symbols.Symbol? {
+        findCanonical(name:string) -> ref Symbols.Symbol? {
             local moduleIndex:i64 = 0
             while moduleIndex < self.modules.length {
                 local symbols = self.modules[moduleIndex].scope.symbols
@@ -748,7 +1184,7 @@ library Semantics {{
             return null
         }
 
-        findCanonicalMember(symbol:Symbols.Symbol, name:string) -> Symbols.Symbol? {
+        findCanonicalMember(symbol:Symbols.Symbol, name:string) -> ref Symbols.Symbol? {
             if symbol.qualifiedName == name { return symbol }
             if symbol.memberScope == null { return null }
             local index:i64 = 0
@@ -758,6 +1194,38 @@ library Semantics {{
                 index = index + 1
             }
             return null
+        }
+
+        isUsedContract(target:Symbols.Symbol) -> bool {
+            local moduleIndex:i64 = 0
+            while moduleIndex < self.modules.length {
+                local index:i64 = 0
+                while index < self.modules[moduleIndex].scope.symbols.length {
+                    if self.symbolUsesContract(self.modules[moduleIndex].scope.symbols[index], target) { return true }
+                    index = index + 1
+                }
+                moduleIndex = moduleIndex + 1
+            }
+            return false
+        }
+
+        symbolUsesContract(symbol:Symbols.Symbol, target:Symbols.Symbol) -> bool {
+            local index:i64 = 0
+            while index < symbol.contracts.length {
+                if self.inheritanceContains(symbol.contracts[index], target) { return true }
+                index = index + 1
+            }
+            if symbol.memberScope != null {
+                index = 0
+                while index < symbol.memberScope!.symbols.length {
+                    local child = symbol.memberScope!.symbols[index]
+                    if child.kind == "Object" {
+                        if self.symbolUsesContract(child, target) { return true }
+                    }
+                    index = index + 1
+                }
+            }
+            return false
         }
 
         expressionName(expression:Ast.Expression) -> string {
@@ -771,7 +1239,7 @@ library Semantics {{
             local expectedType = self.findCanonical(expected)
             local actualType = self.findCanonical(actual)
             if expectedType != null && actualType != null {
-                if self.inheritanceContains(actualType, expectedType!) { return }
+                if self.conformsTo(actualType, expectedType!) { return }
             }
             if actual == "null" {
                 if self.isOptional(expected) { return }
@@ -784,7 +1252,7 @@ library Semantics {{
                 local optionalExpectedType = self.findCanonical(expectedBase)
                 local optionalActualType = self.findCanonical(actualBase)
                 if optionalExpectedType != null && optionalActualType != null {
-                    if self.inheritanceContains(optionalActualType, optionalExpectedType!) { return }
+                    if self.conformsTo(optionalActualType, optionalExpectedType!) { return }
                 }
             }
             if self.isInteger(expected) && self.isInteger(actual) { return }
@@ -798,13 +1266,126 @@ library Semantics {{
             return name[name.length - 1] == 62
         }
 
+        arrayElementOwnership(name:string) -> string {
+            if !self.isArray(name) { return "value" }
+            local element = name.slice(6, name.length - 7)
+            if element.length > 4 { if element.slice(0, 4) == "ref " { return "ref" } }
+            if element.length > 5 { if element.slice(0, 5) == "weak " { return "weak" } }
+            return "owned"
+        }
+
+        arrayElementType(name:string) -> string {
+            local element = name.slice(6, name.length - 7)
+            if element.length > 4 { if element.slice(0, 4) == "ref " { return element.slice(4, element.length - 4) } }
+            if element.length > 5 { if element.slice(0, 5) == "weak " { return element.slice(5, element.length - 5) } }
+            return element
+        }
+
+        validateArrayElementPolicy(typeName:string, ownership:string, reference:Ast.TypeReference) -> void {
+            if ownership == "owned" { return }
+            if !self.isReference(typeName) { self.error(reference.span, "'" + ownership + "' array elements require a reference type") }
+            if ownership == "weak" && !self.isOptional(typeName) { self.error(reference.span, "Weak array elements must be optional") }
+        }
+
+        consumeArrayElement(expression:Ast.Expression) -> void {
+            if self.isOwningExpression(expression) || expression.kind == "Call" { return }
+            if expression.symbol != null {
+                local source = expression.symbol!
+                if source.kind == "Local" || source.kind == "Parameter" {
+                    if source.ownership != "owned" {
+                        self.error(expression.span, "Cannot insert borrowed reference '" + source.name + "' into an owning array; use 'copy " + source.name + "'")
+                        return
+                    }
+                    source.ownership = "borrowed"
+                    expression.ownership = "consume"
+                    return
+                }
+            }
+            self.error(expression.span, "Owning array insertion requires an owned value; use 'copy' to create one")
+        }
+
         isOptional(name:string) -> bool {
             if name.length == 0 { return false }
             return name[name.length - 1] == 63
         }
-        isInteger(name:string) -> bool { return name == "u8" || name == "i32" || name == "i64" }
+        isReference(name:string) -> bool {
+            local base = name
+            if self.isOptional(base) { base = base.slice(0, base.length - 1) }
+            return base == "string" || self.isArray(base) || self.findCanonical(base) != null
+        }
+        isOwnedReference(name:string) -> bool {
+            local base = name
+            if self.isOptional(base) { base = base.slice(0, base.length - 1) }
+            return base == "StringBuilder" || self.isArray(base) || self.findCanonical(base) != null
+        }
+        isOwningExpression(expression:Ast.Expression?) -> bool {
+            if expression == null { return false }
+            if expression!.kind == "New" { return true }
+            if expression!.kind == "Unary" { return expression!.operator! == "copy" }
+            if expression!.kind == "Call" {
+                if expression!.left == null || expression!.left!.symbol == null { return false }
+                return expression!.left!.symbol!.returnOwnership == "owned"
+            }
+            return false
+        }
 
-        scopeFor(module:ModuleLoading.Module) -> Symbols.Scope {
+        transferOwnership(expression:Ast.Expression) -> void {
+            if expression.symbol == null { return }
+            local source = expression.symbol!
+            if source.kind != "Local" && source.kind != "Parameter" { return }
+            source.ownership = "borrowed"
+            expression.ownership = "consume"
+        }
+
+        bindBorrow(target:Symbols.Symbol, expression:Ast.Expression?) -> void {
+            target.borrowedFrom = null
+            if expression == null { return }
+            if self.isOwningExpression(expression) { return }
+            if expression!.symbol == null { return }
+            local source = expression!.symbol!
+            if source.kind != "Local" && source.kind != "Parameter" { return }
+            if source.borrowedFrom != null { target.borrowedFrom = source.borrowedFrom } else { target.borrowedFrom = source }
+            target.borrowedVersion = target.borrowedFrom!.ownershipVersion
+        }
+
+        validateBorrow(symbol:Symbols.Symbol, span:Compiler.SourceSpan) -> void {
+            if symbol.ownership == "destroyed" { self.error(span, "Reference '" + symbol.name + "' was already deleted"); return }
+            if symbol.borrowedFrom == null { return }
+            if symbol.borrowedFrom!.ownershipVersion != symbol.borrowedVersion {
+                self.error(span, "Borrowed reference '" + symbol.name + "' outlives the value previously held by '" + symbol.borrowedFrom!.name + "'")
+            }
+        }
+
+        checkOwnershipArguments(method:Symbols.Symbol, arguments:Array<Ast.Expression>) -> void {
+            local index:i64 = 0
+            while index < arguments.length {
+                if index < method.parameters.length {
+                    if method.parameters[index].ownership == "owned" { self.consumeOwnership(arguments[index], method.parameters[index]) }
+                }
+                index = index + 1
+            }
+        }
+
+        consumeOwnership(expression:Ast.Expression, parameter:Symbols.Symbol) -> void {
+            if self.isOwningExpression(expression) { return }
+            if expression.kind == "Call" { return }
+            if expression.symbol != null {
+                local source = expression.symbol!
+                if source.kind == "Local" || source.kind == "Parameter" {
+                    if source.ownership != "owned" {
+                        self.error(expression.span, "Cannot pass borrowed reference '" + source.name + "' to owning parameter '" + parameter.name + "'; use 'copy " + source.name + "'")
+                        return
+                    }
+                    source.ownership = "borrowed"
+                    expression.ownership = "consume"
+                    return
+                }
+            }
+            self.error(expression.span, "Owning parameter '" + parameter.name + "' requires an owned value; use 'copy' to create one")
+        }
+        isInteger(name:string) -> bool { return name == "u8" || name == "i8" || name == "u16" || name == "i16" || name == "u32" || name == "i32" || name == "u64" || name == "i64" }
+
+        scopeFor(module:ModuleLoading.Module) -> ref Symbols.Scope {
             local index:i64 = 0
             while index < self.modules.length { if self.modules[index].module.path == module.path { return self.modules[index].scope }; index = index + 1 }
             return self.globals

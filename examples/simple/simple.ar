@@ -1,4 +1,4 @@
-import System from '/libSystem.ar'
+import System from 'libSystem.ar'
 
 // double slash indicates the line is a comment, and can be stripped by the lexer
 

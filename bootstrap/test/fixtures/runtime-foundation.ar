@@ -1,4 +1,4 @@
-import System from '/libSystem.ar'
+import System from '/lib/libSystem.ar'
 
 entry {{
     __() -> i32 {
@@ -6,7 +6,7 @@ entry {{
         if cwd == null || cwd!.length == 0 {
             return 1
         }
-        if System.resolvePath("/project", "/project/src/compiler.ar", "/libSystem.ar") != "/project/libSystem.ar" {
+        if System.resolvePath("/project", "/project/src/compiler.ar", "/lib/libSystem.ar") != "/project/lib/libSystem.ar" {
             return 2
         }
         if System.resolvePath("/project", "/project/src/compiler.ar", "parser.ar") != "/project/src/parser.ar" {

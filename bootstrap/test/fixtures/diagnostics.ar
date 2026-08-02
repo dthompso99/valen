@@ -1,4 +1,4 @@
-import Diagnostics from '/libDiagnostics.ar'
+import Diagnostics from '/lib/libDiagnostics.ar'
 
 entry {{
     __() -> i64 {

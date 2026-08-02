@@ -56,11 +56,13 @@ library ModuleLoading {{
 
     ModuleLoader {{
         member sourceRoot:string
+        member libraryPath:string?
         member modules:Array<Module>
         member diagnostics:Diagnostics.DiagnosticBag
 
-        __(sourceRoot:string) -> void {
+        __(sourceRoot:string, libraryPath:string?=null) -> void {
             self.sourceRoot = sourceRoot
+            self.libraryPath = libraryPath
             self.modules = new Array<Module>(0)
             self.diagnostics = new Diagnostics.DiagnosticBag()
         }
@@ -76,7 +78,7 @@ library ModuleLoading {{
             return new ModuleGraph(entry, self.modules, self.diagnostics)
         }
 
-        loadModule(path:string, importSpan:Compiler.SourceSpan?) -> Module? {
+        loadModule(path:string, importSpan:Compiler.SourceSpan?) -> ref Module? {
             local existing = self.find(path)
             if existing != null {
                 if existing!.loading { self.report(path, "Circular import involving '" + path + "'", importSpan) }
@@ -104,7 +106,7 @@ library ModuleLoading {{
             local index:i64 = 0
             while index < program.imports.length {
                 local declaration = program.imports[index]
-                local importedPath = System.resolvePath(self.sourceRoot, path, declaration.path)
+                local importedPath = self.resolveImport(path, declaration.path)
                 local imported = self.loadModule(importedPath, declaration.span)
                 if imported != null {
                     if loaded.hasImport(declaration.name) {
@@ -119,7 +121,31 @@ library ModuleLoading {{
             return loaded
         }
 
-        find(path:string) -> Module? {
+        resolveImport(importer:string, specifier:string) -> string {
+            local localPath = System.resolvePath(self.sourceRoot, importer, specifier)
+            if specifier.length > 0 { if specifier[0] == 47 { return localPath } }
+            if Compiler.loadSource(localPath) != null { return localPath }
+            if self.libraryPath != null {
+                local paths = self.libraryPath!
+                local start:i64 = 0
+                local index:i64 = 0
+                while index <= paths.length {
+                    local separator:bool = false
+                    if index == paths.length { separator = true } else { if paths[index] == 58 { separator = true } }
+                    if separator {
+                        if index > start {
+                            local candidate = paths.slice(start, index - start) + "/" + specifier
+                            if Compiler.loadSource(candidate) != null { return candidate }
+                        }
+                        start = index + 1
+                    }
+                    index = index + 1
+                }
+            }
+            return localPath
+        }
+
+        find(path:string) -> ref Module? {
             local index:i64 = 0
             while index < self.modules.length {
                 if self.modules[index].path == path { return self.modules[index] }

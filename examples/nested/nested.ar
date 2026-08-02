@@ -1,4 +1,4 @@
-import System from '/libSystem.ar'
+import System from 'libSystem.ar'
 
 entry {{
     __() -> i64 {
@@ -11,7 +11,7 @@ Engine {{
     member version:i64
     __() -> void {
         self.version = 1
-        local worker = new self.Worker()
+        local worker = new Worker()
         worker.run()
     }
 

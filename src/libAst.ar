@@ -57,8 +57,12 @@ library Ast {{
         member initializer:Expression?
         member parameters:Array<Parameter>
         member returnType:TypeReference?
+        member returnReference:bool
         member body:Block?
         member isNative:bool
+        member visibility:string
+        member reference:bool
+        member weakReference:bool
         member inheritedType:TypeReference?
         member implementedTypes:Array<TypeReference>
         member members:Array<MemberDeclaration>
@@ -72,8 +76,12 @@ library Ast {{
             self.initializer = null
             self.parameters = new Array<Parameter>(0)
             self.returnType = null
+            self.returnReference = false
             self.body = null
             self.isNative = false
+            self.visibility = "public"
+            self.reference = false
+            self.weakReference = false
             self.inheritedType = null
             self.implementedTypes = new Array<TypeReference>(0)
             self.members = new Array<MemberDeclaration>(0)
@@ -85,14 +93,18 @@ library Ast {{
     Parameter {{
         member name:string
         member parameterType:TypeReference
+        member defaultValue:Expression?
         member span:Compiler.SourceSpan
         member symbol:Symbols.Symbol?
+        member owning:bool
 
-        __(name:string, parameterType:TypeReference, span:Compiler.SourceSpan) -> void {
+        __(name:string, parameterType:TypeReference, defaultValue:Expression?, span:Compiler.SourceSpan, owning:bool=false) -> void {
             self.name = name
             self.parameterType = parameterType
+            self.defaultValue = defaultValue
             self.span = span
             self.symbol = null
+            self.owning = owning
         }
     }}
 
@@ -100,13 +112,15 @@ library Ast {{
         member name:string
         member arguments:Array<TypeReference>
         member optional:bool
+        member ownership:string
         member span:Compiler.SourceSpan
         member symbol:Symbols.Symbol?
 
-        __(name:string, arguments:Array<TypeReference>, optional:bool, span:Compiler.SourceSpan) -> void {
+        __(name:string, arguments:Array<TypeReference>, optional:bool, span:Compiler.SourceSpan, ownership:string="owned") -> void {
             self.name = name
             self.arguments = arguments
             self.optional = optional
+            self.ownership = ownership
             self.span = span
             self.symbol = null
         }
@@ -134,6 +148,7 @@ library Ast {{
         member alternate:Block?
         member span:Compiler.SourceSpan
         member symbol:Symbols.Symbol?
+        member ownership:string
 
         __(kind:string, span:Compiler.SourceSpan) -> void {
             self.kind = kind
@@ -145,6 +160,7 @@ library Ast {{
             self.alternate = null
             self.span = span
             self.symbol = null
+            self.ownership = "none"
         }
     }}
 
@@ -160,6 +176,7 @@ library Ast {{
         member span:Compiler.SourceSpan
         member symbol:Symbols.Symbol?
         member inferredType:string?
+        member ownership:string
 
         __(kind:string, span:Compiler.SourceSpan) -> void {
             self.kind = kind
@@ -173,6 +190,7 @@ library Ast {{
             self.span = span
             self.symbol = null
             self.inferredType = null
+            self.ownership = "none"
         }
     }}
 }}

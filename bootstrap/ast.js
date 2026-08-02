@@ -19,6 +19,7 @@ export class LibraryDeclaration extends AstNode {
         super('LibraryDeclaration', span);
         this.name = name;
         this.members = members;
+        this.visibility = 'public';
     }
 }
 
@@ -37,6 +38,7 @@ export class ObjectDeclaration extends AstNode {
         this.inheritedType = inheritedType;
         this.implementedTypes = implementedTypes;
         this.members = members;
+        this.visibility = 'public';
     }
 }
 
@@ -48,6 +50,8 @@ export class MethodDeclaration extends AstNode {
         this.returnType = returnType;
         this.body = body;
         this.isNative = isNative;
+        this.visibility = 'public';
+        this.returnReference = false;
     }
 }
 
@@ -57,23 +61,29 @@ export class FieldDeclaration extends AstNode {
         this.name = name;
         this.fieldType = fieldType;
         this.initializer = initializer;
+        this.visibility = 'public';
+        this.reference = false;
+        this.weakReference = false;
     }
 }
 
 export class ParameterDeclaration extends AstNode {
-    constructor(name, parameterType, span) {
+    constructor(name, parameterType, defaultValue, span, owning = false) {
         super('ParameterDeclaration', span);
         this.name = name;
         this.parameterType = parameterType;
+        this.defaultValue = defaultValue;
+        this.owning = owning;
     }
 }
 
 export class TypeReference extends AstNode {
-    constructor(name, typeArguments, optional, span) {
+    constructor(name, typeArguments, optional, span, ownership = 'owned') {
         super('TypeReference', span);
         this.name = name;
         this.typeArguments = typeArguments;
         this.optional = optional;
+        this.ownership = ownership;
     }
 }
 

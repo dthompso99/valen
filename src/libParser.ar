@@ -74,6 +74,8 @@ library Parsing {{
         }
 
         parseMember(inLibrary:bool) -> Ast.MemberDeclaration {
+            local visibility = "public"
+            if self.match("PRIVATE") { visibility = "private" } else { if self.match("PUBLIC") { visibility = "public" } }
             local nestedObject:bool = false
             if self.check("IDENTIFIER") {
                 if self.peek(1).kind == "INHERITS" || self.peek(1).kind == "IMPLEMENTS" { nestedObject = true }
@@ -87,16 +89,23 @@ library Parsing {{
                 nested.members = declaration.members
                 nested.inheritedType = declaration.inheritedType
                 nested.implementedTypes = declaration.implementedTypes
+                nested.visibility = visibility
                 return nested
             }
             if self.match("MEMBER") {
                 local start = self.previous()
+                local reference = self.match("REF")
+                local isWeak:bool = false
+                if !reference { isWeak = self.match("WEAK") }
                 local name = self.consume("IDENTIFIER", "Expected a field name")
                 self.consume("COLON", "Expected ':' after field name")
                 local field = new Ast.MemberDeclaration("Field", name.lexeme, self.span(start.span, name.span))
                 field.declaredType = self.parseTypeReference()
                 if self.match("EQUAL") { field.initializer = self.parseExpression() }
                 field.span = self.span(start.span, self.previous().span)
+                field.visibility = visibility
+                field.reference = reference
+                field.weakReference = isWeak
                 return field
             }
             local isNative = self.match("NATIVE")
@@ -105,30 +114,42 @@ library Parsing {{
             local name = self.consume("IDENTIFIER", "Expected a method name")
             local method = new Ast.MemberDeclaration("Method", name.lexeme, self.span(start.span, name.span))
             method.isNative = isNative
+            method.visibility = visibility
             self.consume("LEFT_PAREN", "Expected '(' after method name")
             if !self.check("RIGHT_PAREN") {
                 local more:bool = true
                 while more {
+                    local owning = self.match("OWN")
+                    local parameterStart = self.peek(0).span
+                    if owning { parameterStart = self.previous().span }
                     local parameterName = self.consume("IDENTIFIER", "Expected a parameter name")
                     self.consume("COLON", "Expected ':' after parameter name")
                     local parameterType = self.parseTypeReference()
+                    local defaultValue:Ast.Expression? = null
+                    if self.match("EQUAL") { defaultValue = self.parseExpression() }
                     method.parameters.append(new Ast.Parameter(
                         parameterName.lexeme,
                         parameterType,
-                        self.span(parameterName.span, self.previous().span)
+                        defaultValue,
+                        self.span(parameterStart, self.previous().span),
+                        owning
                     ))
                     more = self.match("COMMA")
                 }
             }
             self.consume("RIGHT_PAREN", "Expected ')' after parameters")
             self.consume("ARROW", "Expected '->' after parameters")
+            local returnReference = self.match("REF")
             method.returnType = self.parseTypeReference()
+            method.returnReference = returnReference
             if !isNative { method.body = self.parseBlock() }
             method.span = self.span(start.span, self.previous().span)
             return method
         }
 
         parseTypeReference() -> Ast.TypeReference {
+            local ownership = "owned"
+            if self.match("REF") { ownership = "ref" } else { if self.match("WEAK") { ownership = "weak" } }
             local start = self.consume("IDENTIFIER", "Expected a type name")
             local name = start.lexeme
             while self.match("DOT") {
@@ -145,7 +166,7 @@ library Parsing {{
                 self.consume("GREATER", "Expected '>' after type arguments")
             }
             local optional = self.match("QUESTION")
-            return new Ast.TypeReference(name, arguments, optional, self.span(start.span, self.previous().span))
+            return new Ast.TypeReference(name, arguments, optional, self.span(start.span, self.previous().span), ownership)
         }
 
         parseBlock() -> Ast.Block {
@@ -218,9 +239,9 @@ library Parsing {{
             return statement
         }
 
-        parseExpression() -> Ast.Expression { return self.parseAssignment() }
+        parseExpression() -> ref Ast.Expression { return self.parseAssignment() }
 
-        parseAssignment() -> Ast.Expression {
+        parseAssignment() -> ref Ast.Expression {
             local target = self.parseBinary(1)
             if !self.match("EQUAL") { return target }
             local expression = new Ast.Expression("Assignment", self.span(target.span, self.peek(0).span))
@@ -230,7 +251,7 @@ library Parsing {{
             return expression
         }
 
-        parseBinary(minimum:i64) -> Ast.Expression {
+        parseBinary(minimum:i64) -> ref Ast.Expression {
             local left = self.parseUnary()
             while self.precedence(self.peek(0).kind) >= minimum {
                 local operator = self.advanceToken()
@@ -244,8 +265,8 @@ library Parsing {{
             return left
         }
 
-        parseUnary() -> Ast.Expression {
-            if self.match("BANG") || self.match("MINUS") {
+        parseUnary() -> ref Ast.Expression {
+            if self.match("BANG") || self.match("MINUS") || self.match("COPY") || self.match("DELETE") {
                 local operator = self.previous()
                 local operand = self.parseUnary()
                 local expression = new Ast.Expression("Unary", self.span(operator.span, operand.span))
@@ -289,7 +310,7 @@ library Parsing {{
             return expression
         }
 
-        parsePostfix() -> Ast.Expression {
+        parsePostfix() -> ref Ast.Expression {
             local expression = self.parsePrimary()
             local scanning:bool = true
             while scanning {
@@ -347,7 +368,7 @@ library Parsing {{
             self.consume("RIGHT_PAREN", "Expected ')' after arguments")
         }
 
-        parsePrimary() -> Ast.Expression {
+        parsePrimary() -> ref Ast.Expression {
             local token = self.advanceToken()
             local kind:string? = null
             if token.kind == "NULL" { kind = "Null" }
@@ -410,22 +431,22 @@ library Parsing {{
             return true
         }
         check(kind:string) -> bool { return self.peek(0).kind == kind }
-        consume(kind:string, message:string) -> Compiler.Token {
+        consume(kind:string, message:string) -> ref Compiler.Token {
             if self.check(kind) { return self.advanceToken() }
             self.fail(message)
             return self.peek(0)
         }
-        advanceToken() -> Compiler.Token {
+        advanceToken() -> ref Compiler.Token {
             local token = self.peek(0)
             if token.kind != "EOF" { self.current = self.current + 1 }
             return token
         }
-        peek(distance:i64) -> Compiler.Token {
+        peek(distance:i64) -> ref Compiler.Token {
             local index = self.current + distance
             if index >= self.tokens.length { index = self.tokens.length - 1 }
             return self.tokens[index]
         }
-        previous() -> Compiler.Token { return self.tokens[self.current - 1] }
+        previous() -> ref Compiler.Token { return self.tokens[self.current - 1] }
         span(first:Compiler.SourceSpan, last:Compiler.SourceSpan) -> Compiler.SourceSpan {
             return new Compiler.SourceSpan(first.source, first.start, last.end, first.line, first.column)
         }

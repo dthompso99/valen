@@ -48,7 +48,7 @@ entry {{
             System.writeError("argon: could not determine current directory\n")
             return 74
         }
-        local loader = new ModuleLoading.ModuleLoader(cwd!)
+        local loader = new ModuleLoading.ModuleLoader(cwd!, System.environmentVariable("ARGON_LIBRARY_PATH"))
         local graph = loader.load(sourcePath!)
         if graph.diagnostics.hasErrors() {
             Diagnostics.write(graph.diagnostics)
@@ -66,10 +66,11 @@ entry {{
         local backend = new X86_64.Backend(ir)
         local assembly = backend.generate()
         if outputPath != null {
-            local output = System.openWrite(outputPath!)
+            local assemblyPath = outputPath! + ".s"
+            local output = System.openWrite(assemblyPath)
             if output == null {
                 System.writeError("argon: could not open '")
-                System.writeError(outputPath!)
+                System.writeError(assemblyPath)
                 System.writeError("' for writing; OS error ")
                 System.writeError(System.lastError().toString())
                 System.writeError("\n")
@@ -83,6 +84,13 @@ entry {{
                 System.writeError("\n")
                 return 74
             }
+            local linkResult = System.link(assemblyPath, outputPath!)
+            if linkResult != 0 {
+                System.writeError("argon: linker exited with status ")
+                System.writeError(linkResult.toString())
+                System.writeError("\n")
+                return 69
+            }
             return 0
         }
         System.write(assembly)
@@ -92,7 +100,7 @@ entry {{
     writeUsage() -> void {
         System.write("usage:\n")
         System.write("  argon <source-file>\n")
-        System.write("  argon <source-file> -o <assembly-output>\n")
+        System.write("  argon <source-file> -o <executable>\n")
         System.write("  argon --check <source-file>\n")
     }
 }}

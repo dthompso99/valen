@@ -3,8 +3,9 @@ import path from 'path';
 import {Parser} from './parser.js';
 
 export class ModuleLoader {
-    constructor({sourceRoot} = {}) {
+    constructor({sourceRoot, libraryPath = process.env.ARGON_LIBRARY_PATH} = {}) {
         this.sourceRoot = sourceRoot ? path.resolve(sourceRoot) : null;
+        this.libraryPaths = (libraryPath ?? '').split(path.delimiter).filter(Boolean).map(entry => path.resolve(entry));
         this.modules = new Map();
         this.loading = [];
         this.diagnostics = [];
@@ -59,10 +60,18 @@ export class ModuleLoader {
     }
 
     resolveImport(importerPath, specifier) {
+        let localPath;
         if (specifier.startsWith('/')) {
-            return path.resolve(this.sourceRoot, `.${specifier}`);
+            localPath = path.resolve(this.sourceRoot, `.${specifier}`);
+        } else {
+            localPath = path.resolve(path.dirname(importerPath), specifier);
         }
-        return path.resolve(path.dirname(importerPath), specifier);
+        if (fs.existsSync(localPath) || specifier.startsWith('/')) return localPath;
+        for (const libraryPath of this.libraryPaths) {
+            const candidate = path.resolve(libraryPath, specifier);
+            if (fs.existsSync(candidate)) return candidate;
+        }
+        return localPath;
     }
 
     canonicalize(filePath) {

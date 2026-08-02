@@ -1,0 +1,60 @@
+import Operations from 'operations.ar'
+
+BaseTask implements Operations.Operation {{
+    member state:i64 = 0
+
+    complete() -> bool { return self.state == 1 }
+    failed() -> bool { return self.state == 2 }
+    cancel() -> void { self.state = 2 }
+    wait() -> i64 {
+        self.state = 1
+        return 42
+    }
+}}
+
+Download inherits BaseTask implements Operations.ProgressOperation, Operations.Named {{
+    progress() -> i64 { return 75 }
+    label() -> string { return "download" }
+}}
+
+Scheduler {{
+    start() -> Operations.Operation { return new Download() }
+    inspect(operation:Operations.ProgressOperation) -> i64 { return operation.progress() }
+}}
+
+entry {{
+    __() -> i32 {
+        local download = new Download()
+        local operation:Operations.Operation = download
+        local progress:Operations.ProgressOperation = download
+        local named:Operations.Named = download
+
+        if operation.complete() { return 1 }
+        if progress.progress() != 75 { return 2 }
+        if named.label() != "download" { return 3 }
+        if operation !== progress { return 4 }
+        if !(operation is Download) { return 5 }
+        if !(operation is Operations.Operation) { return 6 }
+        if !(operation is Operations.ProgressOperation) { return 7 }
+
+        local recovered:Download? = operation as Download?
+        if recovered == null { return 8 }
+        if operation.wait() != 42 { return 9 }
+        if !operation.complete() { return 10 }
+
+        local scheduler = new Scheduler()
+        local scheduled:Operations.Operation = scheduler.start()
+        if scheduled.wait() != 42 { return 11 }
+        if scheduler.inspect(download) != 75 { return 12 }
+
+        local operations = new Array<Operations.Operation>(0)
+        operations.append(download)
+        operations.append(scheduled)
+        if operations[0].wait() != 42 { return 13 }
+
+        local cancelled:Operations.Operation = new Download()
+        cancelled.cancel()
+        if !cancelled.failed() { return 14 }
+        return 0
+    }
+}}

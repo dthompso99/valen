@@ -14,20 +14,24 @@ The bootstrap compiler proves the language can compile native programs. This roa
 - [x] Use ordinary objects as contracts rather than adding a separate interface declaration category
 - [x] Define `implements` syntax: `Thing implements Printable, Disposable {{ ... }}`
 - [x] Validate that every required contract method is implemented with a compatible signature
-- [ ] Define contract-typed reference representation and dispatch
-- [ ] Define `public`, `private`, and module-level visibility
-- [ ] Add method and constructor overload resolution
-- [ ] Add default arguments without making call resolution ambiguous
-- [ ] Specify object identity, deep structural equality, cycles, and hashing separately
+- [x] Define one-word contract-typed references and runtime descriptor dispatch while preserving object identity
+- [x] Define default-public and owner-only `private` member visibility; private methods are non-virtual and cannot be overridden
+- [x] Add method and constructor overload resolution
+- [x] Add trailing default arguments with ambiguity diagnostics
+- [x] Specify and implement identity separately from cycle-safe structural equality and hashing
 
 ## 2. Ownership, references, and lifetime
 
-- [ ] Specify owning member references and ownership transfer
-- [ ] Specify local and parameter borrowing rules
-- [ ] Define non-owning and weak-reference escape hatches
-- [ ] Define returned-reference and locally-created-object lifetimes
-- [ ] Define ownership behavior for arrays and other collections
-- [ ] Add explicit `delete` and deterministic disposal semantics
+- [x] Specify owning member references and ownership transfer
+- [x] Specify local and parameter borrowing rules
+- [x] Add explicit non-owning `member ref name:Type` references without ownership transfer
+- [x] Add nullable, non-owning `member weak name:Type?` references and preserve them in IR
+- [x] Invalidate weak object references after logical destruction
+- [x] Make reference returns owning by default, add explicit `-> ref Type`, and destroy untransferred object locals at scope exit
+- [x] Make ordinary array insertion and replacement transfer ownership after element ownership is expressible
+- [x] Preserve cycle-safe deep copying for ordinary owning arrays
+- [x] Add `Array<ref T>` and `Array<weak T?>` policies before destroying replaced elements or recursively destroying arrays at scope exit
+- [x] Add explicit `delete` with deterministic logical destruction (physical reclamation deferred)
 - [ ] Define native/external-resource ownership
 - [ ] Detect unconditional field-initializer cycles
 - [ ] Add precise root tracking and tracing garbage collection
@@ -47,8 +51,15 @@ The bootstrap compiler proves the language can compile native programs. This roa
 ## 4. Control flow and iteration
 
 - [x] Define all method calls as synchronous; unfinished work must be represented explicitly by a returned object
-- [ ] Define the standard contract for an unfinished operation, including completion, failure, cancellation, and explicit waiting
-- [ ] Add native concurrency facilities capable of backing operation objects without changing ordinary call semantics
+- [x] Define the standard operation state, stable result objects, cooperative cancellation, optional progress, and explicit waiting
+- [ ] Define a `Work` contract with a synchronous `run()` entry point
+- [ ] Define an `Executor` contract whose `submit(work)` returns an operation object
+- [ ] Implement `InlineExecutor` as the deterministic reference execution policy
+- [ ] Specify ownership transfer and retained references for submitted work and operation results
+- [ ] Implement a native single-worker `ThreadExecutor`
+- [ ] Add native mutex, condition, and atomic synchronization objects
+- [ ] Add a thread-pool executor after single-worker correctness is established
+- [ ] Add event-loop executors for nonblocking file and network I/O
 - [ ] Implement short-circuit lowering for `&&` and `||`
 - [ ] Add iterators and `for` loops
 - [ ] Add `else if` shorthand
@@ -64,7 +75,7 @@ The bootstrap compiler proves the language can compile native programs. This roa
 - [ ] Add Unicode code-point and grapheme-aware string operations
 - [ ] Add string interpolation and richer formatting
 - [ ] Add bulk-copy builder optimizations and `Array<u8>` conversion APIs
-- [ ] Define collection equality and hashing rules
+- [x] Define array equality and hashing as ordered structural traversal
 
 ## 6. Modules, diagnostics, and tooling
 

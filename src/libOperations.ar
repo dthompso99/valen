@@ -1,0 +1,48 @@
+library Operations {{
+    OperationResult {{
+        succeeded() -> bool { return false }
+        failed() -> bool { return false }
+        cancelled() -> bool { return false }
+        code() -> i64 { return 0 }
+        detail() -> string? { return null }
+    }}
+
+    Succeeded inherits OperationResult {{
+        succeeded() -> bool { return true }
+    }}
+
+    Failed inherits OperationResult {{
+        member failureCode:i64
+        member failureDetail:string?
+
+        __(code:i64, detail:string?) -> void {
+            self.failureCode = code
+            self.failureDetail = detail
+        }
+
+        failed() -> bool { return true }
+        code() -> i64 { return self.failureCode }
+        detail() -> string? { return self.failureDetail }
+    }}
+
+    Cancelled inherits OperationResult {{
+        member cancellationDetail:string?
+
+        __(detail:string?) -> void { self.cancellationDetail = detail }
+
+        cancelled() -> bool { return true }
+        detail() -> string? { return self.cancellationDetail }
+    }}
+
+    Operation {{
+        complete() -> bool { return false }
+        cancel() -> bool { return false }
+        result() -> ref OperationResult? { return null }
+        wait() -> ref OperationResult { return new OperationResult() }
+    }}
+
+    ProgressOperation inherits Operation {{
+        completedUnits() -> i64 { return 0 }
+        totalUnits() -> i64 { return 0 }
+    }}
+}}

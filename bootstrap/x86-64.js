@@ -10,13 +10,13 @@ export class X86_64Backend {
         this.runtimeLabel = 0;
 
         for (const type of program.types) {
-            let offset = 8;
+            let offset = 16;
             let alignment = 1;
             for (const field of type.fields) {
                 const size = this.sizeOf(field.type);
                 const fieldAlignment = Math.min(size, 8);
                 offset = this.align(offset, fieldAlignment);
-                this.fieldOffsets.set(field.symbol, {offset, type: field.type});
+                this.fieldOffsets.set(field.symbol, {offset, type: field.type, ownership: field.ownership});
                 offset += size;
                 alignment = Math.max(alignment, fieldAlignment);
             }
@@ -48,6 +48,8 @@ export class X86_64Backend {
             'argon_System_close',
             'argon_System_lastError',
             'argon_System_currentDirectory',
+            'argon_System_environmentVariable',
+            'argon_System_link',
             'argon_System_memoryCopy',
             'argon_System_memoryCompare'
         ]);
@@ -59,7 +61,7 @@ export class X86_64Backend {
         }
 
         const runtimeSymbols = new Set(program.externals.map(external => external.runtimeSymbol));
-        this.needsProcessArguments = runtimeSymbols.has('argon_System_arguments');
+        this.needsProcessArguments = runtimeSymbols.has('argon_System_arguments') || runtimeSymbols.has('argon_System_link') || runtimeSymbols.has('argon_System_environmentVariable');
         this.needsFilesystemState = [
             'argon_System_openRead', 'argon_System_openWrite', 'argon_System_read',
             'argon_System_writeFile', 'argon_System_close', 'argon_System_lastError',
@@ -69,6 +71,7 @@ export class X86_64Backend {
         const lines = ['.intel_syntax noprefix', '.text'];
         for (const fn of program.functions) lines.push(...this.generateFunction(fn));
         lines.push(...this.generateMain());
+        lines.push(...this.structuralRuntime());
 
         if (runtimeSymbols.has('argon_System_print')) lines.push(...this.printI64Runtime());
         if (this.needsProcessArguments) lines.push(...this.argumentsRuntime());
@@ -82,6 +85,8 @@ export class X86_64Backend {
         if (runtimeSymbols.has('argon_System_close')) lines.push(...this.fileCloseRuntime());
         if (runtimeSymbols.has('argon_System_lastError')) lines.push(...this.lastErrorRuntime());
         if (runtimeSymbols.has('argon_System_currentDirectory')) lines.push(...this.currentDirectoryRuntime());
+        if (runtimeSymbols.has('argon_System_environmentVariable')) lines.push(...this.environmentVariableRuntime());
+        if (runtimeSymbols.has('argon_System_link')) lines.push(...this.linkRuntime());
         if (runtimeSymbols.has('argon_System_memoryCopy')) lines.push(...this.memoryCopyRuntime());
         if (runtimeSymbols.has('argon_System_memoryCompare')) lines.push(...this.memoryCompareRuntime());
         lines.push(...this.runtimeErrorRuntime());
@@ -123,6 +128,9 @@ export class X86_64Backend {
             '    mov rbp, rsp'
         ];
         if (frameSize) lines.push(`    sub rsp, ${frameSize}`);
+        for (let offset = 8; offset <= frameSize; offset += 8) {
+            lines.push(`    mov QWORD PTR [rbp-${offset}], 0`);
+        }
 
         fn.parameters.forEach((parameter, index) => {
             if (index < argumentRegisters.length) {
@@ -174,6 +182,12 @@ export class X86_64Backend {
                 const field = this.requireField(instruction.field);
                 lines.push(...this.load(instruction.object, 'rax'));
                 lines.push(...this.loadMemory('[rax+' + field.offset + ']', field.type, 'rax'));
+                if (field.ownership === 'member-weak') {
+                    const live = `.Lweak_live_${this.runtimeLabel++}`;
+                    const done = `.Lweak_done_${this.runtimeLabel++}`;
+                    lines.push('    test rax, rax', `    jz ${done}`, '    cmp QWORD PTR [rax+8], 0', `    jne ${live}`,
+                        '    xor eax, eax', `    jmp ${done}`, `${live}:`, `${done}:`);
+                }
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
                 break;
             }
@@ -198,7 +212,17 @@ export class X86_64Backend {
             case 'allocate':
                 lines.push(`    mov rdi, ${this.typeSizes.get(instruction.objectType) ?? 8}`, '    call argon_alloc');
                 lines.push(`    lea rcx, [rip+${this.typeLabel(instruction.objectType)}]`, '    mov QWORD PTR [rax], rcx');
+                lines.push('    mov QWORD PTR [rax+8], 1');
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
+                break;
+            case 'destroy_object':
+                {
+                    const done = `.Ldestroy_null_${this.runtimeLabel++}`;
+                    lines.push(...this.load(instruction.value, 'rax'), '    test rax, rax', `    je ${done}`, '    mov QWORD PTR [rax+8], 0', `${done}:`);
+                }
+                break;
+            case 'destroy_array':
+                lines.push(...this.load(instruction.value, 'rdi'), `    call ${this.arrayDestroyLabel(instruction.arrayType)}`);
                 break;
             case 'array_new':
                 lines.push(`    mov rdi, ${this.sizeOf(instruction.elementType)}`);
@@ -214,12 +238,22 @@ export class X86_64Backend {
                 lines.push(...this.load(instruction.index, 'rsi'));
                 lines.push(`    mov rdx, ${this.sizeOf(instruction.elementType)}`, '    call argon_array_address');
                 lines.push(...this.loadMemory('[rax]', instruction.elementType, 'rax'));
+                if (instruction.elementOwnership === 'weak') {
+                    const live = `.Lweak_array_live_${this.runtimeLabel++}`;
+                    const done = `.Lweak_array_done_${this.runtimeLabel++}`;
+                    lines.push('    test rax, rax', `    je ${done}`, '    cmp QWORD PTR [rax+8], 0', `    jne ${live}`, '    xor eax, eax', `    jmp ${done}`, `${live}:`, `${done}:`);
+                }
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
                 break;
             case 'array_store':
                 lines.push(...this.load(instruction.array, 'rdi'));
                 lines.push(...this.load(instruction.index, 'rsi'));
                 lines.push(`    mov rdx, ${this.sizeOf(instruction.elementType)}`, '    call argon_array_address');
+                const storedBaseType = instruction.elementType?.endsWith('?') ? instruction.elementType.slice(0, -1) : instruction.elementType;
+                if (instruction.elementOwnership === 'owned' && this.typeSizes.has(storedBaseType)) {
+                    const empty = `.Larray_replace_empty_${this.runtimeLabel++}`;
+                    lines.push('    mov rdx, QWORD PTR [rax]', '    test rdx, rdx', `    je ${empty}`, '    mov QWORD PTR [rdx+8], 0', `${empty}:`);
+                }
                 lines.push(...this.load(instruction.value, 'rcx'));
                 lines.push(`    mov ${this.memorySize(instruction.elementType)} PTR [rax], ${this.registerForSize('rcx', instruction.elementType)}`);
                 break;
@@ -247,6 +281,20 @@ export class X86_64Backend {
                 lines.push('    call argon_string_equal');
                 if (instruction.negate) lines.push('    xor eax, 1');
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
+                break;
+            case 'structural_equal':
+                lines.push(...this.load(instruction.left, 'rdi'), ...this.load(instruction.right, 'rsi'), '    xor edx, edx');
+                lines.push(`    call ${this.equalityFunction(instruction.valueType)}`);
+                if (instruction.negate) lines.push('    xor eax, 1');
+                lines.push(`    mov ${this.temp(instruction.result)}, rax`);
+                break;
+            case 'structural_hash':
+                lines.push(...this.load(instruction.value, 'rdi'), '    xor esi, esi', `    call ${this.hashFunction(instruction.valueType)}`,
+                    `    mov ${this.temp(instruction.result)}, rax`);
+                break;
+            case 'structural_copy':
+                lines.push(...this.load(instruction.value, 'rdi'), '    xor esi, esi', `    call ${this.copyFunction(instruction.valueType)}`,
+                    `    mov ${this.temp(instruction.result)}, rax`);
                 break;
             case 'string_slice':
                 lines.push(...this.load(instruction.string, 'rdi'));
@@ -285,15 +333,23 @@ export class X86_64Backend {
             case 'virtual_call':
                 lines.push(...this.call(instruction, true));
                 break;
+            case 'contract_call':
+                lines.push(...this.contractCall(instruction));
+                break;
             case 'type_test':
             case 'checked_cast': {
                 const id = this.runtimeLabel++;
                 const loop = `.Ltype_test_${id}`;
                 const match = `.Ltype_match_${id}`;
                 const done = `.Ltype_done_${id}`;
+                const scan = `.Ltype_contract_${id}`;
+                const next = `.Ltype_next_${id}`;
                 lines.push(...this.load(instruction.value, 'rcx'), '    xor eax, eax', '    test rcx, rcx', `    jz ${done}`,
                     '    mov rdx, QWORD PTR [rcx]', `    lea r8, [rip+${this.typeLabel(instruction.targetType)}]`, `${loop}:`,
-                    '    test rdx, rdx', `    jz ${done}`, '    cmp rdx, r8', `    je ${match}`, '    mov rdx, QWORD PTR [rdx]', `    jmp ${loop}`,
+                    '    test rdx, rdx', `    jz ${done}`, '    cmp rdx, r8', `    je ${match}`,
+                    '    mov r9, QWORD PTR [rdx+8]', '    mov r10, QWORD PTR [r9]', '    add r9, 8', `${scan}:`,
+                    '    test r10, r10', `    jz ${next}`, '    cmp QWORD PTR [r9], r8', `    je ${match}`, '    add r9, 16', '    dec r10', `    jmp ${scan}`,
+                    `${next}:`, '    mov rdx, QWORD PTR [rdx]', `    jmp ${loop}`,
                     `${match}:`, instruction.op === 'type_test' ? '    mov eax, 1' : '    mov rax, rcx', `${done}:`,
                     `    mov ${this.temp(instruction.result)}, rax`);
                 break;
@@ -363,12 +419,35 @@ export class X86_64Backend {
             lines.push(...this.load(stackArguments[index], 'rax'), '    push rax');
         }
         if (dynamic) {
-            lines.push('    mov rax, QWORD PTR [rdi]', `    call QWORD PTR [rax+${8 + instruction.slot * 8}]`);
+            lines.push('    mov rax, QWORD PTR [rdi]', `    call QWORD PTR [rax+${40 + instruction.slot * 8}]`);
         } else {
             const target = this.functionSymbols.get(instruction.target);
             if (!target) throw new Error(`No function symbol for ${instruction.target}`);
             lines.push(`    call ${target}`);
         }
+        const stackBytes = stackArguments.length * 8 + padding;
+        if (stackBytes) lines.push(`    add rsp, ${stackBytes}`);
+        if (instruction.result) lines.push(`    mov ${this.temp(instruction.result)}, rax`);
+        return lines;
+    }
+
+    contractCall(instruction) {
+        const lines = [];
+        instruction.arguments.slice(0, argumentRegisters.length)
+            .forEach((argument, index) => lines.push(...this.load(argument, argumentRegisters[index])));
+        const stackArguments = instruction.arguments.slice(argumentRegisters.length);
+        const padding = stackArguments.length % 2 === 1 ? 8 : 0;
+        if (padding) lines.push('    sub rsp, 8');
+        for (let index = stackArguments.length - 1; index >= 0; index--) {
+            lines.push(...this.load(stackArguments[index], 'rax'), '    push rax');
+        }
+        const id = this.runtimeLabel++;
+        const loop = `.Lcontract_call_${id}`;
+        const found = `.Lcontract_found_${id}`;
+        lines.push('    mov rax, QWORD PTR [rdi]', '    mov rdx, QWORD PTR [rax+8]', '    mov rcx, QWORD PTR [rdx]', '    add rdx, 8',
+            `    lea r8, [rip+${this.typeLabel(instruction.contractType)}]`, `${loop}:`, '    test rcx, rcx', `    jz .Lcontract_dispatch_error`,
+            '    cmp QWORD PTR [rdx], r8', `    je ${found}`, '    add rdx, 16', '    dec rcx', `    jmp ${loop}`, `${found}:`,
+            '    mov rax, QWORD PTR [rdx+8]', `    call QWORD PTR [rax+${instruction.slot * 8}]`);
         const stackBytes = stackArguments.length * 8 + padding;
         if (stackBytes) lines.push(`    add rsp, ${stackBytes}`);
         if (instruction.result) lines.push(`    mov ${this.temp(instruction.result)}, rax`);
@@ -388,7 +467,9 @@ export class X86_64Backend {
             '    mov rbp, rsp',
             ...(this.needsProcessArguments ? [
                 '    mov QWORD PTR [rip+argon_process_argc], rdi',
-                '    mov QWORD PTR [rip+argon_process_argv], rsi'
+                '    mov QWORD PTR [rip+argon_process_argv], rsi',
+                '    lea rax, [rsi+rdi*8+8]',
+                '    mov QWORD PTR [rip+argon_process_envp], rax'
             ] : []),
             '    sub rsp, 16',
             `    mov rdi, ${this.typeSizes.get(entryType) ?? 8}`,
@@ -413,15 +494,291 @@ export class X86_64Backend {
         return `.Largon_type_${this.mangle(typeName)}`;
     }
 
+    objectEqualityLabel(typeName) { return `${this.typeLabel(typeName)}_equal`; }
+    objectHashLabel(typeName) { return `${this.typeLabel(typeName)}_hash`; }
+    objectCopyLabel(typeName) { return `${this.typeLabel(typeName)}_copy`; }
+    arrayEqualityLabel(typeName) { return `.Largon_array_equal_${this.mangle(typeName)}`; }
+    arrayHashLabel(typeName) { return `.Largon_array_hash_${this.mangle(typeName)}`; }
+    arrayCopyLabel(typeName) { return `.Largon_array_copy_${this.mangle(typeName)}`; }
+    arrayDestroyLabel(typeName) { return `.Largon_array_destroy_${this.mangle(typeName)}`; }
+
+    equalityFunction(typeName) {
+        const type = typeName?.endsWith('?') ? typeName.slice(0, -1) : typeName;
+        if (type === 'string') return 'argon_string_equal_context';
+        if (type?.startsWith('Array<')) return this.arrayEqualityLabel(type);
+        return 'argon_object_equal';
+    }
+
+    hashFunction(typeName) {
+        const type = typeName?.endsWith('?') ? typeName.slice(0, -1) : typeName;
+        if (type === 'string') return 'argon_string_hash_context';
+        if (type?.startsWith('Array<')) return this.arrayHashLabel(type);
+        return 'argon_object_hash';
+    }
+
+    copyFunction(typeName) {
+        const type = typeName?.endsWith('?') ? typeName.slice(0, -1) : typeName;
+        if (type === 'string') return 'argon_string_copy_context';
+        if (type?.startsWith('Array<')) return this.arrayCopyLabel(type);
+        return 'argon_object_copy';
+    }
+
+    structuralRuntime() {
+        const lines = [...this.structuralCoreRuntime()];
+        for (const type of this.program.types) {
+            lines.push(...this.objectEqualityFunction(type), ...this.objectHashFunction(type), ...this.objectCopyFunction(type));
+        }
+        for (const type of this.structuralArrayTypes()) {
+            lines.push(...this.arrayEqualityFunction(type), ...this.arrayHashFunction(type), ...this.arrayCopyFunction(type));
+        }
+        return lines;
+    }
+
+    structuralArrayTypes() {
+        const types = new Set();
+        const add = type => {
+            const base = type?.endsWith('?') ? type.slice(0, -1) : type;
+            if (!base?.startsWith('Array<')) return;
+            if (types.has(base)) return;
+            types.add(base);
+            add(base.slice(6, -1));
+        };
+        for (const type of this.program.types) for (const field of type.fields) add(field.type);
+        for (const fn of this.program.functions) for (const block of fn.blocks) for (const instruction of block.instructions) {
+            add(instruction.valueType);
+            add(instruction.arrayType);
+            add(instruction.objectType);
+        }
+        return types;
+    }
+
+    structuralCoreRuntime() {
+        return [
+            '.globl argon_object_equal', 'argon_object_equal:',
+            '    cmp rdi, rsi', '    je .Lobject_equal_true', '    test rdi, rdi', '    jz .Lobject_equal_false',
+            '    test rsi, rsi', '    jz .Lobject_equal_false', '    mov rax, QWORD PTR [rdi]',
+            '    cmp rax, QWORD PTR [rsi]', '    jne .Lobject_equal_false', '    mov rcx, rdx',
+            '.Lobject_equal_scan:', '    test rcx, rcx', '    jz .Lobject_equal_enter',
+            '    cmp QWORD PTR [rcx], rdi', '    jne .Lobject_equal_next', '    cmp QWORD PTR [rcx+8], rsi',
+            '    je .Lobject_equal_true', '.Lobject_equal_next:', '    mov rcx, QWORD PTR [rcx+16]', '    jmp .Lobject_equal_scan',
+            '.Lobject_equal_enter:', '    push rbp', '    mov rbp, rsp', '    sub rsp, 32',
+            '    mov QWORD PTR [rsp], rdi', '    mov QWORD PTR [rsp+8], rsi', '    mov QWORD PTR [rsp+16], rdx',
+            '    mov rdx, rsp', '    call QWORD PTR [rax+16]', '    leave', '    ret',
+            '.Lobject_equal_true:', '    mov eax, 1', '    ret', '.Lobject_equal_false:', '    xor eax, eax', '    ret', '',
+            '.globl argon_object_hash', 'argon_object_hash:',
+            '    test rdi, rdi', '    jz .Lobject_hash_null', '    mov rcx, rsi',
+            '.Lobject_hash_scan:', '    test rcx, rcx', '    jz .Lobject_hash_enter', '    cmp QWORD PTR [rcx], rdi',
+            '    je .Lobject_hash_cycle', '    mov rcx, QWORD PTR [rcx+8]', '    jmp .Lobject_hash_scan',
+            '.Lobject_hash_enter:', '    push rbp', '    mov rbp, rsp', '    sub rsp, 16',
+            '    mov QWORD PTR [rsp], rdi', '    mov QWORD PTR [rsp+8], rsi', '    mov rsi, rsp',
+            '    mov rax, QWORD PTR [rdi]', '    call QWORD PTR [rax+24]', '    leave', '    ret',
+            '.Lobject_hash_null:', '    xor eax, eax', '    ret', '.Lobject_hash_cycle:',
+            '    mov rax, -7046029254386353131', '    ret', '',
+            '.globl argon_object_copy', 'argon_object_copy:', '    test rdi, rdi', '    jz .Lobject_copy_null', '    test rsi, rsi',
+            '    jnz .Lobject_copy_scan_start', '    push rdi', '    mov edi, 8', '    call argon_alloc', '    mov QWORD PTR [rax], 0',
+            '    mov rsi, rax', '    pop rdi', '.Lobject_copy_scan_start:', '    mov rcx, QWORD PTR [rsi]',
+            '.Lobject_copy_scan:', '    test rcx, rcx', '    jz .Lobject_copy_enter', '    cmp QWORD PTR [rcx], rdi',
+            '    je .Lobject_copy_found', '    mov rcx, QWORD PTR [rcx+16]', '    jmp .Lobject_copy_scan',
+            '.Lobject_copy_found:', '    mov rax, QWORD PTR [rcx+8]', '    ret', '.Lobject_copy_enter:',
+            '    mov rax, QWORD PTR [rdi]', '    jmp QWORD PTR [rax+32]', '.Lobject_copy_null:', '    xor eax, eax', '    ret', '',
+            'argon_string_equal_context:', '    cmp rdi, rsi', '    je .Lstring_context_true', '    test rdi, rdi',
+            '    jz .Lstring_context_false', '    test rsi, rsi', '    jz .Lstring_context_false',
+            '    jmp argon_string_equal', '.Lstring_context_true:', '    mov eax, 1', '    ret',
+            '.Lstring_context_false:', '    xor eax, eax', '    ret', '',
+            'argon_string_hash_context:', '    test rdi, rdi', '    jz .Lstring_hash_null',
+            '    mov rsi, QWORD PTR [rdi]', '    mov rcx, QWORD PTR [rdi+8]', '    mov rax, 1469598103934665603',
+            '.Lstring_hash_next:', '    test rcx, rcx', '    jz .Lstring_hash_done', '    movzx rdx, BYTE PTR [rsi]',
+            '    xor rax, rdx', '    mov r8, 1099511628211', '    imul rax, r8', '    inc rsi', '    dec rcx',
+            '    jmp .Lstring_hash_next', '.Lstring_hash_done:', '    ret', '.Lstring_hash_null:', '    xor eax, eax', '    ret', '',
+            'argon_string_copy_context:', '    test rdi, rdi', '    jz .Lstring_copy_null', '    test rsi, rsi',
+            '    jnz .Lstring_copy_scan_start', '    push rdi', '    mov edi, 8', '    call argon_alloc', '    mov QWORD PTR [rax], 0',
+            '    mov rsi, rax', '    pop rdi', '.Lstring_copy_scan_start:', '    mov rcx, QWORD PTR [rsi]', '.Lstring_copy_scan:',
+            '    test rcx, rcx', '    jz .Lstring_copy_enter', '    cmp QWORD PTR [rcx], rdi', '    je .Lstring_copy_found',
+            '    mov rcx, QWORD PTR [rcx+16]', '    jmp .Lstring_copy_scan', '.Lstring_copy_found:', '    mov rax, QWORD PTR [rcx+8]',
+            '    ret', '.Lstring_copy_enter:', '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    push r13',
+            '    push r14', '    mov r12, rdi', '    mov r14, rsi', '    mov edi, 16',
+            '    call argon_alloc', '    mov rbx, rax', '    mov r13, QWORD PTR [r12+8]', '    mov rdi, r13', '    call argon_alloc',
+            '    mov QWORD PTR [rbx], rax', '    mov QWORD PTR [rbx+8], r13', '    mov rdi, rax', '    mov rsi, QWORD PTR [r12]',
+            '    mov rcx, r13', '    rep movsb', '    mov edi, 24', '    call argon_alloc', '    mov QWORD PTR [rax], r12',
+            '    mov QWORD PTR [rax+8], rbx', '    mov rcx, QWORD PTR [r14]', '    mov QWORD PTR [rax+16], rcx',
+            '    mov QWORD PTR [r14], rax', '    mov rax, rbx', '    pop r14', '    pop r13', '    pop r12', '    pop rbx',
+            '    leave', '    ret', '.Lstring_copy_null:', '    xor eax, eax', '    ret', ''
+        ];
+    }
+
+    objectEqualityFunction(type) {
+        const fail = `${this.objectEqualityLabel(type.name)}_false`;
+        const lines = [this.objectEqualityLabel(type.name) + ':', '    push rbp', '    mov rbp, rsp',
+            '    push r12', '    push r13', '    push r14', '    push r15', '    mov r12, rdi', '    mov r13, rsi', '    mov r14, rdx'];
+        for (const field of type.fields) lines.push(...this.compareAddresses(
+            `r12+${this.fieldOffsets.get(field.symbol).offset}`, `r13+${this.fieldOffsets.get(field.symbol).offset}`, field.type, fail));
+        lines.push('    mov eax, 1', `    jmp ${fail}_done`, `${fail}:`, '    xor eax, eax', `${fail}_done:`,
+            '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    leave', '    ret', '');
+        return lines;
+    }
+
+    objectHashFunction(type) {
+        const lines = [this.objectHashLabel(type.name) + ':', '    push rbp', '    mov rbp, rsp', '    push r12',
+            '    push r13', '    push r14', '    push r15', '    mov r12, rdi', '    mov r14, rsi',
+            `    mov r15, ${this.stableTypeHash(type.name)}`];
+        for (const field of type.fields) {
+            const offset = this.fieldOffsets.get(field.symbol).offset;
+            lines.push(...this.hashAddress(`r12+${offset}`, field.type), '    xor r15, rax',
+                '    mov rax, 1099511628211', '    imul r15, rax');
+        }
+        lines.push('    mov rax, r15', '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    leave', '    ret', '');
+        return lines;
+    }
+
+    objectCopyFunction(type) {
+        const lines = [this.objectCopyLabel(type.name) + ':', '    push rbp', '    mov rbp, rsp', '    push r12', '    push r13',
+            '    push r14', '    push r15', '    sub rsp, 16', '    mov r12, rdi', '    mov r14, rsi',
+            `    mov edi, ${this.typeSizes.get(type.name) ?? 8}`, '    call argon_alloc', '    mov r13, rax',
+            '    mov rax, QWORD PTR [r12]', '    mov QWORD PTR [r13], rax', '    mov QWORD PTR [r13+8], 1', '    mov edi, 24', '    call argon_alloc',
+            '    mov QWORD PTR [rax], r12', '    mov QWORD PTR [rax+8], r13', '    mov rcx, QWORD PTR [r14]',
+            '    mov QWORD PTR [rax+16], rcx', '    mov QWORD PTR [r14], rax'];
+        for (const field of type.fields) {
+            const offset = this.fieldOffsets.get(field.symbol).offset;
+            lines.push(...this.copyAddress(`r12+${offset}`, field.type),
+                `    mov ${this.memorySize(field.type)} PTR [r13+${offset}], ${this.registerForSize('rax', field.type)}`);
+        }
+        lines.push('    mov rax, r13', '    add rsp, 16', '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    leave', '    ret', '');
+        return lines;
+    }
+
+    compareAddresses(left, right, type, fail) {
+        const base = type.endsWith('?') ? type.slice(0, -1) : type;
+        if (base === 'string' || base.startsWith('Array<') || this.program.types.some(item => item.name === base)) {
+            return [`    mov rdi, QWORD PTR [${left}]`, `    mov rsi, QWORD PTR [${right}]`, '    mov rdx, r14',
+                `    call ${this.equalityFunction(base)}`, '    test eax, eax', `    jz ${fail}`];
+        }
+        const size = this.sizeOf(base);
+        return [...this.loadMemory(`[${right}]`, base, 'rax'), '    mov rcx, rax',
+            ...this.loadMemory(`[${left}]`, base, 'rax'), '    cmp rax, rcx', `    jne ${fail}`];
+    }
+
+    hashAddress(address, type) {
+        const base = type.endsWith('?') ? type.slice(0, -1) : type;
+        if (base === 'string' || base.startsWith('Array<') || this.program.types.some(item => item.name === base)) {
+            return [`    mov rdi, QWORD PTR [${address}]`, '    mov rsi, r14', `    call ${this.hashFunction(base)}`];
+        }
+        return this.loadMemory(`[${address}]`, base, 'rax');
+    }
+
+    copyAddress(address, type) {
+        const base = type.endsWith('?') ? type.slice(0, -1) : type;
+        if (base === 'string' || base.startsWith('Array<') || this.program.types.some(item => item.name === base)) {
+            return [`    mov rdi, QWORD PTR [${address}]`, '    mov rsi, r14', `    call ${this.copyFunction(base)}`];
+        }
+        return this.loadMemory(`[${address}]`, base, 'rax');
+    }
+
+    arrayEqualityFunction(type) {
+        const element = type.slice(6, -1), label = this.arrayEqualityLabel(type), fail = `${label}_false`, loop = `${label}_loop`, done = `${label}_done`;
+        const size = this.sizeOf(element);
+        const lines = [label + ':', '    cmp rdi, rsi', `    je ${done}_true`, '    test rdi, rdi', `    jz ${fail}`,
+            '    test rsi, rsi', `    jz ${fail}`, '    mov rax, QWORD PTR [rdi]', '    cmp rax, QWORD PTR [rsi]', `    jne ${fail}`,
+            '    mov rcx, rdx', `${label}_scan:`, '    test rcx, rcx', `    jz ${label}_enter`,
+            '    cmp QWORD PTR [rcx], rdi', `    jne ${label}_next`, '    cmp QWORD PTR [rcx+8], rsi', `    je ${done}_true`,
+            `${label}_next:`, '    mov rcx, QWORD PTR [rcx+16]', `    jmp ${label}_scan`, `${label}_enter:`,
+            '    push rbp', '    mov rbp, rsp', '    push r12', '    push r13', '    push r14', '    push r15', '    sub rsp, 32',
+            '    mov r12, rdi', '    mov r13, rsi', '    mov r14, rdx', '    mov QWORD PTR [rsp], rdi',
+            '    mov QWORD PTR [rsp+8], rsi', '    mov QWORD PTR [rsp+16], rdx', '    mov r14, rsp', '    xor r15d, r15d', `${loop}:`,
+            '    cmp r15, QWORD PTR [r12]', `    jae ${done}`, `    imul rax, r15, ${size}`, '    add rax, QWORD PTR [r12+16]',
+            `    imul rcx, r15, ${size}`, '    add rcx, QWORD PTR [r13+16]'];
+        lines.push(...this.compareAddresses('rax', 'rcx', element, fail + '_frame'), '    inc r15', `    jmp ${loop}`, `${done}:`,
+            '    mov eax, 1', `    jmp ${done}_frame`, `${fail}_frame:`, '    xor eax, eax', `${done}_frame:`, '    add rsp, 32',
+            '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    leave', '    ret', `${done}_true:`, '    mov eax, 1', '    ret',
+            `${fail}:`, '    xor eax, eax', '    ret', '');
+        return lines;
+    }
+
+    arrayHashFunction(type) {
+        const element = type.slice(6, -1), label = this.arrayHashLabel(type), loop = `${label}_loop`, done = `${label}_done`;
+        const size = this.sizeOf(element);
+        const lines = [label + ':', '    test rdi, rdi', `    jz ${done}_null`, '    mov rcx, rsi', `${label}_scan:`,
+            '    test rcx, rcx', `    jz ${label}_enter`, '    cmp QWORD PTR [rcx], rdi', `    je ${done}_cycle`,
+            '    mov rcx, QWORD PTR [rcx+8]', `    jmp ${label}_scan`, `${label}_enter:`, '    push rbp', '    mov rbp, rsp',
+            '    push r12', '    push r13', '    push r14', '    push r15', '    sub rsp, 16', '    mov r12, rdi', '    mov r14, rsi',
+            '    mov QWORD PTR [rsp], rdi', '    mov QWORD PTR [rsp+8], rsi', '    mov r14, rsp', '    xor r13d, r13d',
+            '    mov r15, 1469598103934665603', `${loop}:`, '    cmp r13, QWORD PTR [r12]', `    jae ${done}`,
+            `    imul rax, r13, ${size}`, '    add rax, QWORD PTR [r12+16]'];
+        lines.push(...this.hashAddress('rax', element), '    xor r15, rax', '    mov rax, 1099511628211', '    imul r15, rax',
+            '    inc r13', `    jmp ${loop}`, `${done}:`, '    mov rax, r15', '    add rsp, 16', '    pop r15', '    pop r14',
+            '    pop r13', '    pop r12', '    leave', '    ret', `${done}_null:`, '    xor eax, eax', '    ret',
+            `${done}_cycle:`, '    mov rax, -7046029254386353131', '    ret', '');
+        return lines;
+    }
+
+    arrayCopyFunction(type) {
+        const element = type.slice(6, -1), label = this.arrayCopyLabel(type), loop = `${label}_loop`, done = `${label}_done`;
+        const size = this.sizeOf(element);
+        const lines = [label + ':', '    test rdi, rdi', `    jz ${done}_null`, '    test rsi, rsi', `    jnz ${label}_scan_start`,
+            '    push rdi', '    mov edi, 8', '    call argon_alloc', '    mov QWORD PTR [rax], 0', '    mov rsi, rax', '    pop rdi',
+            `${label}_scan_start:`, '    mov rcx, QWORD PTR [rsi]', `${label}_scan:`, '    test rcx, rcx', `    jz ${label}_enter`,
+            '    cmp QWORD PTR [rcx], rdi', `    je ${label}_found`, '    mov rcx, QWORD PTR [rcx+16]', `    jmp ${label}_scan`,
+            `${label}_found:`, '    mov rax, QWORD PTR [rcx+8]', '    ret', `${label}_enter:`, '    push rbp', '    mov rbp, rsp',
+            '    push r12', '    push r13', '    push r14', '    push r15', '    sub rsp, 16', '    mov r12, rdi', '    mov r14, rsi',
+            `    mov edi, ${size}`, '    mov rsi, QWORD PTR [r12]', '    call argon_array_new', '    mov r13, rax',
+            '    mov edi, 24', '    call argon_alloc', '    mov QWORD PTR [rax], r12', '    mov QWORD PTR [rax+8], r13',
+            '    mov rcx, QWORD PTR [r14]', '    mov QWORD PTR [rax+16], rcx', '    mov QWORD PTR [r14], rax', '    xor r15d, r15d',
+            `${loop}:`, '    cmp r15, QWORD PTR [r12]', `    jae ${done}`, `    imul rax, r15, ${size}`,
+            '    add rax, QWORD PTR [r12+16]'];
+        lines.push(...this.copyAddress('rax', element), '    mov rdx, rax', `    imul rax, r15, ${size}`,
+            '    add rax, QWORD PTR [r13+16]', `    mov ${this.memorySize(element)} PTR [rax], ${this.registerForSize('rdx', element)}`,
+            '    inc r15', `    jmp ${loop}`, `${done}:`, '    mov rax, r13', '    add rsp, 16', '    pop r15', '    pop r14',
+            '    pop r13', '    pop r12', '    leave', '    ret', `${done}_null:`, '    xor eax, eax', '    ret', '');
+        return lines;
+    }
+
+    arrayDestroyFunction(type) {
+        const element = type.slice(6, -1), label = this.arrayDestroyLabel(type), loop = `${label}_loop`, done = `${label}_done`;
+        const size = this.sizeOf(element);
+        const lines = [label + ':', '    test rdi, rdi', `    jz ${done}`, '    push r12', '    push r13', '    mov r12, rdi',
+            '    xor r13d, r13d', `${loop}:`, '    cmp r13, QWORD PTR [r12]', `    jae ${done}_live`];
+        if (element.startsWith('Array<')) {
+            lines.push(`    imul rax, r13, ${size}`, '    add rax, QWORD PTR [r12+16]', '    mov rdi, QWORD PTR [rax]',
+                `    call ${this.arrayDestroyLabel(element)}`);
+        } else if (this.program.types.some(item => item.name === (element.endsWith('?') ? element.slice(0, -1) : element))) {
+            lines.push(`    imul rax, r13, ${size}`, '    add rax, QWORD PTR [r12+16]', '    mov rax, QWORD PTR [rax]',
+                '    test rax, rax', `    jz ${loop}_next`, '    mov QWORD PTR [rax+8], 0', `${loop}_next:`);
+        }
+        lines.push('    inc r13', `    jmp ${loop}`, `${done}_live:`, '    mov QWORD PTR [r12+24], 0', '    pop r13', '    pop r12', `${done}:`, '    ret', '');
+        return lines;
+    }
+
+    stableTypeHash(name) {
+        let hash = 1469598103934665603n;
+        for (const byte of new TextEncoder().encode(name)) hash = BigInt.asIntN(64, (hash ^ BigInt(byte)) * 1099511628211n);
+        return hash.toString();
+    }
+
     typeData() {
         const lines = ['.section .data', '.align 8'];
         for (const type of this.program.types) {
-            lines.push(`${this.typeLabel(type.name)}:`, type.base ? `    .quad ${this.typeLabel(type.base)}` : '    .quad 0');
+            lines.push(`${this.typeLabel(type.name)}:`, type.base ? `    .quad ${this.typeLabel(type.base)}` : '    .quad 0',
+                `    .quad ${this.contractListLabel(type.name)}`,
+                `    .quad ${this.objectEqualityLabel(type.name)}`,
+                `    .quad ${this.objectHashLabel(type.name)}`,
+                `    .quad ${this.objectCopyLabel(type.name)}`);
             for (const method of type.virtualMethods ?? []) lines.push(`    .quad ${this.functionSymbols.get(method.target)}`);
+        }
+        for (const type of this.program.types) {
+            lines.push(`${this.contractListLabel(type.name)}:`, `    .quad ${(type.contracts ?? []).length}`);
+            for (const contract of type.contracts ?? []) {
+                lines.push(`    .quad ${this.typeLabel(contract.name)}`, `    .quad ${this.contractTableLabel(type.name, contract.name)}`);
+            }
+            for (const contract of type.contracts ?? []) {
+                lines.push(`${this.contractTableLabel(type.name, contract.name)}:`);
+                for (const method of contract.methods) lines.push(`    .quad ${this.functionSymbols.get(method.target)}`);
+            }
         }
         lines.push('.text');
         return lines;
     }
+
+    contractListLabel(typeName) { return `${this.typeLabel(typeName)}_contracts`; }
+    contractTableLabel(typeName, contractName) { return `${this.typeLabel(typeName)}_as_${this.mangle(contractName)}`; }
 
     printI64Runtime() {
         return [
@@ -514,6 +871,35 @@ export class X86_64Backend {
             '    leave',
             '    ret',
             ''
+        ];
+    }
+
+    environmentVariableRuntime() {
+        return [
+            '.globl argon_System_environmentVariable',
+            'argon_System_environmentVariable:',
+            '    push rbp', '    mov rbp, rsp', '    push r12', '    push r13',
+            '    mov r8, QWORD PTR [rdi]', '    mov r9, QWORD PTR [rdi+8]',
+            '    mov r10, QWORD PTR [rip+argon_process_envp]',
+            '.Lenvironment_next:',
+            '    mov rdx, QWORD PTR [r10]', '    test rdx, rdx', '    je .Lenvironment_missing',
+            '    xor ecx, ecx',
+            '.Lenvironment_compare:',
+            '    cmp rcx, r9', '    je .Lenvironment_name_end',
+            '    mov al, BYTE PTR [rdx+rcx]', '    cmp al, BYTE PTR [r8+rcx]', '    jne .Lenvironment_advance',
+            '    inc rcx', '    jmp .Lenvironment_compare',
+            '.Lenvironment_name_end:',
+            '    cmp BYTE PTR [rdx+rcx], 61', '    jne .Lenvironment_advance',
+            '    lea r12, [rdx+rcx+1]', '    xor r13d, r13d',
+            '.Lenvironment_value_length:',
+            '    cmp BYTE PTR [r12+r13], 0', '    je .Lenvironment_wrap', '    inc r13', '    jmp .Lenvironment_value_length',
+            '.Lenvironment_wrap:',
+            '    mov edi, 16', '    call argon_alloc', '    mov QWORD PTR [rax], r12', '    mov QWORD PTR [rax+8], r13',
+            '    pop r13', '    pop r12', '    leave', '    ret',
+            '.Lenvironment_advance:',
+            '    add r10, 8', '    jmp .Lenvironment_next',
+            '.Lenvironment_missing:',
+            '    xor eax, eax', '    pop r13', '    pop r12', '    leave', '    ret', ''
         ];
     }
 
@@ -834,6 +1220,80 @@ export class X86_64Backend {
         ];
     }
 
+    linkRuntime() {
+        return [
+            '.globl argon_System_link',
+            'argon_System_link:',
+            '    push rbp',
+            '    mov rbp, rsp',
+            '    push r12',
+            '    push r13',
+            '    sub rsp, 16',
+            '    mov r12, QWORD PTR [rdi]',
+            '    mov r13, QWORD PTR [rsi]',
+            '    mov eax, 57',
+            '    syscall',
+            '    test rax, rax',
+            '    js .Llink_fork_error',
+            '    jz .Llink_child',
+            '    mov rdi, rax',
+            '    lea rsi, [rbp-24]',
+            '    xor edx, edx',
+            '    xor r10d, r10d',
+            '    mov eax, 61',
+            '    syscall',
+            '    test rax, rax',
+            '    js .Llink_wait_error',
+            '    mov eax, DWORD PTR [rbp-24]',
+            '    mov edx, eax',
+            '    and edx, 127',
+            '    jnz .Llink_signaled',
+            '    shr eax, 8',
+            '    and eax, 255',
+            '    jmp .Llink_done',
+            '.Llink_signaled:',
+            '    lea eax, [rdx+128]',
+            '    jmp .Llink_done',
+            '.Llink_fork_error:',
+            '.Llink_wait_error:',
+            '    mov eax, 127',
+            '    jmp .Llink_done',
+            '.Llink_child:',
+            '    sub rsp, 48',
+            '    lea rax, [rip+.Llink_cc]',
+            '    mov QWORD PTR [rsp], rax',
+            '    lea rax, [rip+.Llink_no_pie]',
+            '    mov QWORD PTR [rsp+8], rax',
+            '    mov QWORD PTR [rsp+16], r12',
+            '    lea rax, [rip+.Llink_output]',
+            '    mov QWORD PTR [rsp+24], rax',
+            '    mov QWORD PTR [rsp+32], r13',
+            '    mov QWORD PTR [rsp+40], 0',
+            '    lea rdi, [rip+.Llink_cc]',
+            '    mov rsi, rsp',
+            '    mov rdx, QWORD PTR [rip+argon_process_envp]',
+            '    mov eax, 59',
+            '    syscall',
+            '    mov edi, 127',
+            '    mov eax, 60',
+            '    syscall',
+            '    ud2',
+            '.Llink_done:',
+            '    add rsp, 16',
+            '    pop r13',
+            '    pop r12',
+            '    leave',
+            '    ret',
+            '.Llink_cc:',
+            '    .asciz "/usr/bin/cc"',
+            '.Llink_no_pie:',
+            '    .asciz "-no-pie"',
+            '.Llink_output:',
+            '    .asciz "-o"',
+            ''
+        ];
+    }
+
     processData() {
         return [
             '.section .bss',
@@ -841,6 +1301,8 @@ export class X86_64Backend {
             'argon_process_argc:',
             '    .zero 8',
             'argon_process_argv:',
+            '    .zero 8',
+            'argon_process_envp:',
             '    .zero 8',
             ''
         ];
@@ -860,6 +1322,9 @@ export class X86_64Backend {
         return [
             '.Ldivision_by_zero_error:',
             '    mov edi, 73',
+            '    jmp .Lruntime_error',
+            '.Lcontract_dispatch_error:',
+            '    mov edi, 75',
             '    jmp .Lruntime_error',
             '.Lruntime_error:',
             '    mov eax, 60',
@@ -1310,7 +1775,9 @@ export class X86_64Backend {
 
     registerForSize(register, type) {
         const registers = {
-            rcx: {1: 'cl', 2: 'cx', 4: 'ecx', 8: 'rcx'}
+            rax: {1: 'al', 2: 'ax', 4: 'eax', 8: 'rax'},
+            rcx: {1: 'cl', 2: 'cx', 4: 'ecx', 8: 'rcx'},
+            rdx: {1: 'dl', 2: 'dx', 4: 'edx', 8: 'rdx'}
         };
         return registers[register][this.sizeOf(type)];
     }

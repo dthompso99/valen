@@ -1,0 +1,16 @@
+library Operations {{
+    Operation {{
+        complete() -> bool { return false }
+        failed() -> bool { return false }
+        cancel() -> void {}
+        wait() -> i64 { return 0 }
+    }}
+
+    ProgressOperation inherits Operation {{
+        progress() -> i64 { return 0 }
+    }}
+
+    Named {{
+        label() -> string { return "operation" }
+    }}
+}}

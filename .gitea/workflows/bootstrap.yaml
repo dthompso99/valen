@@ -1,0 +1,34 @@
+name: Boostrap Argon
+
+on: 
+  push:
+    paths:
+      - 'bootstrap/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Login to Registry
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+          REGISTRY_HOST: gitea.hallrd.click
+        run: |
+          echo "$REGISTRY_PASSWORD" | docker login $REGISTRY_HOST -u "$REGISTRY_USERNAME" --password-stdin
+      - name: Build and push Argon image
+        env:
+          REGISTRY_HOST: gitea.hallrd.click
+          NAMESPACE: dthompson
+          IMAGE_AGENT: argon
+        run: |
+          set -euo pipefail
+          docker build --no-cache --pull \
+            -t $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:latest \
+            -t $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:${{ github.sha }} \
+            -f ./docker/Dockerfile.bootstrap .
+          docker push $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:latest
+          docker push $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:${{ github.sha }}

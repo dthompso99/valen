@@ -1,0 +1,14 @@
+Engine {{}}
+
+Sink {{
+    retain(own value:Engine) -> void {}
+}}
+
+entry {{
+    __() -> void {
+        local engine = new Engine()
+        local sink = new Sink()
+        sink.retain(engine)
+        sink.retain(engine)
+    }
+}}

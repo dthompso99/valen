@@ -19,6 +19,11 @@ export class IrGenerator {
             ? [...semanticResult.modules.values()].map(module => module.program)
             : [semanticResult.program];
 
+        this.contractTypes = new Set();
+        for (const program of programs) {
+            for (const declaration of [...program.objects, ...program.libraries]) this.collectContractTypes(declaration);
+        }
+
         for (const program of programs) {
             for (const declaration of [...program.objects, ...program.libraries]) {
                 this.declareContainer(declaration);
@@ -47,6 +52,7 @@ export class IrGenerator {
                 displayName: symbol.qualifiedName,
                 base: symbol.base?.type ?? null,
                 virtualMethods: this.virtualMethods(symbol),
+                contracts: this.contractEntries(symbol),
                 initializer: declaration.members.some(member => member.kind === 'FieldDeclaration' && member.initializer)
                     ? `${symbol.type}.$initialize`
                     : null,
@@ -55,6 +61,7 @@ export class IrGenerator {
                         name: field.name,
                         symbol: `${field.semanticSymbol.owner.type}.${field.name}`,
                         type: field.semanticSymbol.type,
+                        ownership: field.semanticSymbol.ownership,
                         index
                     }))
             });
@@ -64,6 +71,57 @@ export class IrGenerator {
         }
     }
 
+    collectContractTypes(declaration) {
+        const symbol = declaration.semanticSymbol;
+        for (const contract of symbol?.contracts ?? []) this.contractTypes.add(contract.type);
+        for (const member of declaration.members) {
+            if (member.kind === 'ObjectDeclaration') this.collectContractTypes(member);
+        }
+    }
+
+    contractEntries(symbol) {
+        const contracts = new Map();
+        if (symbol.base) {
+            for (const entry of this.contractEntries(symbol.base)) contracts.set(entry.name, entry);
+        }
+        if (this.contractTypes.has(symbol.type)) contracts.set(symbol.type, this.contractEntry(symbol, symbol));
+        for (const contract of symbol.contracts) {
+            let current = contract;
+            while (current) {
+                contracts.set(current.type, this.contractEntry(symbol, current));
+                current = current.base;
+            }
+        }
+        return [...contracts.values()];
+    }
+
+    contractEntry(implementation, contract) {
+        const methods = [...this.contractMethodsFor(contract)].map(required => {
+            const actual = this.lookupMethodFor(implementation, required.name, required.parameters);
+            return {name: required.name, target: this.functionName(actual)};
+        });
+        return {name: contract.type, methods};
+    }
+
+    contractMethodsFor(contract) {
+        const methods = new Map();
+        if (contract.base) for (const method of this.contractMethodsFor(contract.base)) methods.set(this.methodKey(method), method);
+        for (const method of [...contract.methodOverloads.values()].flat()) if (method.name !== '__' && method.visibility !== 'private') methods.set(this.methodKey(method), method);
+        return methods.values();
+    }
+
+    lookupMethodFor(symbol, name, parameters) {
+        let current = symbol;
+        while (current) {
+            const method = (current.methodOverloads.get(name) ?? []).find(candidate =>
+                candidate.visibility !== 'private' && candidate.parameters.length === parameters.length &&
+                candidate.parameters.every((parameter, index) => parameter.type === parameters[index].type));
+            if (method && name !== '__') return method;
+            current = current.base;
+        }
+        return null;
+    }
+
     inheritedFields(symbol) {
         const fields = symbol.base ? this.inheritedFields(symbol.base) : [];
         return fields.concat([...symbol.fields.values()].map(field => field.declaration));
@@ -71,10 +129,11 @@ export class IrGenerator {
 
     virtualMethods(symbol) {
         const methods = symbol.base ? this.virtualMethods(symbol.base) : [];
-        for (const method of symbol.methods.values()) {
-            if (method.name === '__') continue;
-            const slot = methods.findIndex(entry => entry.name === method.name);
-            const entry = {name: method.name, target: this.functionName(method)};
+        for (const method of [...symbol.methodOverloads.values()].flat()) {
+            if (method.name === '__' || method.visibility === 'private') continue;
+            const key = this.methodKey(method);
+            const slot = methods.findIndex(entry => entry.name === key);
+            const entry = {name: key, target: this.functionName(method)};
             if (slot < 0) methods.push(entry);
             else methods[slot] = entry;
         }
@@ -108,6 +167,7 @@ export class IrGenerator {
         this.nextTemporary = 0;
         this.nextBlock = 0;
         this.loopStack = [];
+        this.lifetimeScopes = [];
         const instance = {kind: 'parameter', name: 'self', type: owner.type};
         for (const field of fields) {
             const value = this.lowerExpression(field.initializer);
@@ -153,6 +213,7 @@ export class IrGenerator {
         this.nextTemporary = 0;
         this.nextBlock = 0;
         this.loopStack = [];
+        this.lifetimeScopes = [];
 
         if (owner.kind === 'Object') {
             this.function.parameters.push({name: 'self', type: owner.type});
@@ -175,10 +236,14 @@ export class IrGenerator {
     }
 
     lowerBlock(block) {
+        const lifetimeScope = [];
+        this.lifetimeScopes.push(lifetimeScope);
         for (const statement of block.statements) {
             if (this.isTerminated()) break;
             this.lowerStatement(statement);
         }
+        if (!this.isTerminated()) this.destroyLifetimeScope(lifetimeScope);
+        this.lifetimeScopes.pop();
     }
 
     lowerStatement(statement) {
@@ -196,6 +261,10 @@ export class IrGenerator {
                 };
                 this.locals.set(statement.semanticSymbol, local);
                 this.emit('declare_local', {name: local.name, type: local.type, value});
+                if (statement.semanticSymbol.declaredOwnership === 'owned' && this.isObjectLifetimeType(local.type)) {
+                    local.lifetimeActive = true;
+                    this.lifetimeScopes.at(-1).push(local);
+                }
                 break;
             }
             case 'IfStatement':
@@ -214,11 +283,13 @@ export class IrGenerator {
                 this.emit('jump', {target: loop.continueTarget});
                 break;
             }
-            case 'ReturnStatement':
-                this.emit('return', {
-                    value: statement.expression ? this.lowerExpression(statement.expression) : null
-                });
+            case 'ReturnStatement': {
+                const value = statement.expression ? this.lowerExpression(statement.expression) : null;
+                if (statement.ownership === 'transfer') this.consumeLifetime(statement.expression);
+                this.destroyAllLifetimeScopes();
+                this.emit('return', {value});
                 break;
+            }
             case 'ExpressionStatement':
                 this.lowerExpression(statement.expression);
                 break;
@@ -291,11 +362,19 @@ export class IrGenerator {
                 const index = this.lowerExpression(expression.index);
                 const operation = expression.semanticSymbol.kind === 'StringElement' ? 'string_load' : 'array_load';
                 return this.result(operation, expression.inferredType, {
-                    array, index, elementType: expression.inferredType
+                    array, index, elementType: expression.inferredType,
+                    elementOwnership: expression.semanticSymbol.elementOwnership
                 });
             }
             case 'UnaryExpression': {
                 const operand = this.lowerExpression(expression.operand);
+                if (expression.operator === 'copy') {
+                    return this.result('structural_copy', expression.inferredType, {value: operand, valueType: expression.inferredType});
+                }
+                if (expression.operator === 'delete') {
+                    this.emit('destroy_object', {value: operand});
+                    return {kind: 'void', type: 'void'};
+                }
                 return this.result('unary', expression.inferredType, {operator: expression.operator, operand});
             }
             case 'BinaryExpression': {
@@ -311,6 +390,11 @@ export class IrGenerator {
                         expression.inferredType,
                         {left, right, negate: expression.operator === '!='}
                     );
+                }
+                if ((expression.operator === '==' || expression.operator === '!=') && this.isReferenceType(left.type)) {
+                    return this.result('structural_equal', 'bool', {
+                        left, right, valueType: left.type, negate: expression.operator === '!='
+                    });
                 }
                 return this.result('binary', expression.inferredType, {operator: expression.operator, left, right});
             }
@@ -389,6 +473,7 @@ export class IrGenerator {
 
     lowerAssignment(expression) {
         const value = this.lowerExpression(expression.value);
+        if (expression.value.ownership === 'consume') this.consumeLifetime(expression.value);
         const target = expression.target;
         const symbol = target.semanticSymbol;
 
@@ -400,7 +485,7 @@ export class IrGenerator {
         } else if (symbol.kind === 'ArrayElement') {
             const array = this.lowerExpression(target.object);
             const index = this.lowerExpression(target.index);
-            this.emit('array_store', {array, index, value, elementType: symbol.type});
+            this.emit('array_store', {array, index, value, elementType: symbol.type, elementOwnership: symbol.elementOwnership});
         } else {
             const local = this.locals.get(symbol);
             if (!local) throw new Error(`Local '${symbol.name}' does not have an IR slot`);
@@ -416,6 +501,9 @@ export class IrGenerator {
     lowerCall(expression) {
         const method = expression.callee.semanticSymbol;
         const args = expression.arguments.map(argument => this.lowerExpression(argument));
+        for (const argument of expression.arguments) {
+            if (argument.ownership === 'consume') this.consumeLifetime(argument);
+        }
 
         if (method.kind === 'SuperCall') {
             if (method.constructor) {
@@ -427,7 +515,7 @@ export class IrGenerator {
 
         if (method.kind === 'ArrayAppend') {
             const array = this.lowerExpression(expression.callee.object);
-            this.emit('array_append', {array, value: args[0], elementType: method.elementType});
+            this.emit('array_append', {array, value: args[0], elementType: method.elementType, elementOwnership: method.elementOwnership});
             return {kind: 'void', type: 'void'};
         }
         if (method.kind === 'StringSlice') {
@@ -460,6 +548,10 @@ export class IrGenerator {
             const builder = this.lowerExpression(expression.callee.object);
             return this.result('builder_build', 'string', {builder});
         }
+        if (method.kind === 'StructuralHash') {
+            const value = this.lowerExpression(expression.callee.object);
+            return this.result('structural_hash', 'i64', {value, valueType: method.valueType});
+        }
 
         if (method.owner.kind === 'Object') {
             const receiver = expression.callee.isSuper
@@ -472,9 +564,17 @@ export class IrGenerator {
 
         const ownerType = method.owner.type;
         const virtualType = this.program.types.find(type => type.name === ownerType);
-        const virtualSlot = method.name === '__' ? -1 : virtualType?.virtualMethods.findIndex(entry => entry.name === method.name) ?? -1;
+        const methodKey = this.methodKey(method);
+        const virtualSlot = method.name === '__' ? -1 : virtualType?.virtualMethods.findIndex(entry => entry.name === methodKey) ?? -1;
         const fields = {target: this.functionName(method), arguments: args, slot: virtualSlot};
-        const op = virtualSlot >= 0 && method.owner.kind === 'Object' && !expression.callee.isSuper ? 'virtual_call' : 'call';
+        const contractSlot = this.contractTypes.has(ownerType)
+            ? [...this.contractMethodsFor(method.owner)].findIndex(entry => this.methodKey(entry) === methodKey)
+            : -1;
+        fields.contractType = ownerType;
+        fields.slot = contractSlot >= 0 ? contractSlot : virtualSlot;
+        const op = contractSlot >= 0 && !expression.callee.isSuper
+            ? 'contract_call'
+            : virtualSlot >= 0 && method.owner.kind === 'Object' && !expression.callee.isSuper ? 'virtual_call' : 'call';
         if (expression.inferredType === 'void') {
             this.emit(op, fields);
             return {kind: 'void', type: 'void'};
@@ -493,12 +593,46 @@ export class IrGenerator {
         }
         const instance = this.result('allocate', object.type, {objectType: object.type});
         this.lowerInitializers(object, instance);
-        const constructor = object.methods.get('__');
+        const constructor = expression.constructor;
         if (constructor) {
             const args = [instance, ...expression.arguments.map(argument => this.lowerExpression(argument))];
             this.emit('call', {target: this.functionName(constructor), arguments: args});
         }
         return instance;
+    }
+
+    consumeLifetime(expression) {
+        const local = this.locals.get(expression?.semanticSymbol);
+        if (local) local.lifetimeActive = false;
+    }
+
+    destroyLifetimeScope(scope) {
+        for (let index = scope.length - 1; index >= 0; index--) {
+            const local = scope[index];
+            if (!local.lifetimeActive) continue;
+            const value = this.result('load_local', local.type, {name: local.name});
+            const elementType = this.arrayElementTypeName(local.type);
+            if (elementType) this.emit('destroy_array', {value, arrayType: local.type, elementType});
+            else this.emit('destroy_object', {value});
+            local.lifetimeActive = false;
+        }
+    }
+
+    destroyAllLifetimeScopes() {
+        const active = this.lifetimeScopes.flat().map(local => [local, local.lifetimeActive]);
+        for (let index = this.lifetimeScopes.length - 1; index >= 0; index--) {
+            this.destroyLifetimeScope(this.lifetimeScopes[index]);
+        }
+        for (const [local, lifetimeActive] of active) local.lifetimeActive = lifetimeActive;
+    }
+
+    isObjectLifetimeType(type) {
+        const base = type?.endsWith('?') ? type.slice(0, -1) : type;
+        return this.program.types.some(item => item.name === base);
+    }
+
+    arrayElementTypeName(type) {
+        return type?.startsWith('Array<') && type.endsWith('>') ? type.slice(6, -1) : null;
     }
 
     lowerInitializers(object, instance) {
@@ -544,7 +678,15 @@ export class IrGenerator {
     }
 
     functionName(method) {
-        return `${method.owner.type}.${method.name}`;
+        return `${method.owner.type}.${method.irName ?? method.name}`;
+    }
+
+    methodKey(method) {
+        return `${method.name}(${method.parameters.map(parameter => parameter.type).join(',')})`;
+    }
+
+    isReferenceType(type) {
+        return type === 'string' || type?.startsWith('Array<') || this.program.types.some(item => item.name === type);
     }
 
     runtimeSymbol(method) {

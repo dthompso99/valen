@@ -1,4 +1,4 @@
-import System from '/libSystem.ar'
+import System from '/lib/libSystem.ar'
 
 entry {{
     __() -> i32 {

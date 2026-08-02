@@ -11,12 +11,12 @@ library Scopes {{
 
     SymbolMap {{
         member keys:Array<string?>
-        member values:Array<Symbol?>
+        member values:Array<ref Symbol?>
         member count:i64
 
         __() -> void {
             self.keys = new Array<string?>(8)
-            self.values = new Array<Symbol?>(8)
+            self.values = new Array<ref Symbol?>(8)
             self.count = 0
         }
 
@@ -31,7 +31,7 @@ library Scopes {{
             return value
         }
 
-        get(key:string) -> Symbol? {
+        get(key:string) -> ref Symbol? {
             local capacity = self.keys.length
             local bucket = self.hash(key, capacity)
             local checked:i64 = 0
@@ -81,7 +81,7 @@ library Scopes {{
             local oldKeys = self.keys
             local oldValues = self.values
             self.keys = new Array<string?>(oldKeys.length * 2)
-            self.values = new Array<Symbol?>(oldValues.length * 2)
+            self.values = new Array<ref Symbol?>(oldValues.length * 2)
             self.count = 0
 
             local index:i64 = 0
@@ -140,11 +140,11 @@ library Scopes {{
             return true
         }
 
-        lookupLocal(name:string) -> Symbol? {
+        lookupLocal(name:string) -> ref Symbol? {
             return self.symbols.get(name)
         }
 
-        lookup(name:string) -> Symbol? {
+        lookup(name:string) -> ref Symbol? {
             local current:Scope? = self
             while current != null {
                 local scope = current!
