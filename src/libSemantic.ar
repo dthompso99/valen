@@ -32,12 +32,16 @@ library Semantics {{
         member globals:Symbols.Scope
         member modules:Array<ModuleScope>
         member diagnostics:Diagnostics.DiagnosticBag
+        member currentOwner:Symbols.Symbol?
+        member currentMethod:Symbols.Symbol?
 
         __(graph:ModuleLoading.ModuleGraph) -> void {
             self.graph = graph
             self.globals = new Symbols.Scope("global", null)
             self.modules = new Array<ModuleScope>(0)
             self.diagnostics = graph.diagnostics
+            self.currentOwner = null
+            self.currentMethod = null
         }
 
         analyze() -> Analysis {
@@ -46,6 +50,8 @@ library Semantics {{
             self.declareModules()
             self.bindImports()
             self.declareMembers()
+            self.bindRelationships()
+            self.validateRelationships()
             self.analyzeModules()
             return new Analysis(self.graph, self.diagnostics)
         }
@@ -190,6 +196,185 @@ library Semantics {{
             }
         }
 
+        bindRelationships() -> void {
+            local moduleIndex:i64 = 0
+            while moduleIndex < self.modules.length {
+                local declarations = self.modules[moduleIndex].module.program.declarations
+                local index:i64 = 0
+                while index < declarations.length {
+                    self.bindDeclarationRelationships(declarations[index])
+                    index = index + 1
+                }
+                moduleIndex = moduleIndex + 1
+            }
+        }
+
+        bindDeclarationRelationships(declaration:Ast.Declaration) -> void {
+            if declaration.kind == "Object" { self.bindObjectRelationships(declaration.symbol!, declaration.inheritedType, declaration.implementedTypes) }
+            self.bindNestedRelationships(declaration.members)
+        }
+
+        bindNestedRelationships(members:Array<Ast.MemberDeclaration>) -> void {
+            local index:i64 = 0
+            while index < members.length {
+                local memberNode = members[index]
+                if memberNode.kind == "Object" {
+                    self.bindObjectRelationships(memberNode.symbol!, memberNode.inheritedType, memberNode.implementedTypes)
+                    self.bindNestedRelationships(memberNode.members)
+                }
+                index = index + 1
+            }
+        }
+
+        bindObjectRelationships(object:Symbols.Symbol, inheritedType:Ast.TypeReference?, implementedTypes:Array<Ast.TypeReference>) -> void {
+            if inheritedType != null {
+                self.bindType(inheritedType!, object.memberScope!)
+                local base = inheritedType!.symbol
+                if base == null || base!.kind != "Object" {
+                    self.error(inheritedType!.span, "Inherited type must be an object")
+                } else {
+                    object.base = base
+                }
+            }
+            local index:i64 = 0
+            while index < implementedTypes.length {
+                local reference = implementedTypes[index]
+                self.bindType(reference, object.memberScope!)
+                if reference.symbol == null || reference.symbol!.kind != "Object" {
+                    self.error(reference.span, "Implemented type must be an object")
+                } else {
+                    object.contracts.append(reference.symbol!)
+                }
+                index = index + 1
+            }
+        }
+
+        validateRelationships() -> void {
+            local moduleIndex:i64 = 0
+            while moduleIndex < self.modules.length {
+                local declarations = self.modules[moduleIndex].module.program.declarations
+                local index:i64 = 0
+                while index < declarations.length {
+                    self.validateDeclarationRelationships(declarations[index])
+                    index = index + 1
+                }
+                moduleIndex = moduleIndex + 1
+            }
+        }
+
+        validateDeclarationRelationships(declaration:Ast.Declaration) -> void {
+            if declaration.kind == "Object" { self.validateObjectRelationships(declaration.symbol!) }
+            self.validateNestedRelationships(declaration.members)
+        }
+
+        validateNestedRelationships(members:Array<Ast.MemberDeclaration>) -> void {
+            local index:i64 = 0
+            while index < members.length {
+                if members[index].kind == "Object" {
+                    self.validateObjectRelationships(members[index].symbol!)
+                    self.validateNestedRelationships(members[index].members)
+                }
+                index = index + 1
+            }
+        }
+
+        validateObjectRelationships(object:Symbols.Symbol) -> void {
+            if self.inheritanceContains(object.base, object) {
+                self.error(object.span, "Inheritance cycle involving '" + object.qualifiedName + "'")
+                object.base = null
+            }
+            local memberIndex:i64 = 0
+            while memberIndex < object.memberScope!.symbols.length {
+                local method = object.memberScope!.symbols[memberIndex]
+                if method.kind == "Method" && method.name != "__" {
+                    local inherited = self.lookupMethod(object.base, method.name)
+                    if inherited != null {
+                        if !self.signaturesMatch(method, inherited!) { self.error(method.span, "Incompatible override '" + method.qualifiedName + "'") }
+                    }
+                }
+                if method.kind == "Field" {
+                    local inheritedField = self.lookupMember(object.base, method.name)
+                    if inheritedField != null { self.error(method.span, "Field '" + method.qualifiedName + "' hides an inherited field") }
+                }
+                memberIndex = memberIndex + 1
+            }
+            local contractIndex:i64 = 0
+            while contractIndex < object.contracts.length {
+                self.validateContract(object, object.contracts[contractIndex])
+                contractIndex = contractIndex + 1
+            }
+        }
+
+        validateContract(object:Symbols.Symbol, contract:Symbols.Symbol) -> void {
+            if contract.base != null { self.validateContract(object, contract.base!) }
+            local index:i64 = 0
+            while index < contract.memberScope!.symbols.length {
+                local required = contract.memberScope!.symbols[index]
+                if required.kind == "Method" && required.name != "__" {
+                    local actual = self.lookupMethod(object, required.name)
+                    if actual == null {
+                        self.error(object.span, "Object '" + object.qualifiedName + "' is missing method '" + required.name + "'")
+                    } else {
+                        if !self.signaturesMatch(actual!, required) { self.error(actual!.span, "Method '" + actual!.qualifiedName + "' does not satisfy '" + required.qualifiedName + "'") }
+                    }
+                }
+                index = index + 1
+            }
+        }
+
+        signaturesMatch(left:Symbols.Symbol, right:Symbols.Symbol) -> bool {
+            if left.returnType != right.returnType { return false }
+            if left.parameters.length != right.parameters.length { return false }
+            local index:i64 = 0
+            while index < left.parameters.length {
+                if left.parameters[index].typeName != right.parameters[index].typeName { return false }
+                index = index + 1
+            }
+            return true
+        }
+
+        inheritanceContains(start:Symbols.Symbol?, target:Symbols.Symbol) -> bool {
+            local current = start
+            while current != null {
+                if current! === target { return true }
+                current = current!.base
+            }
+            return false
+        }
+
+        lookupMethod(owner:Symbols.Symbol?, name:string) -> Symbols.Symbol? {
+            local current = owner
+            local first:bool = true
+            while current != null {
+                local found = current!.memberScope!.lookupLocal(name)
+                if found != null {
+                    if found!.kind == "Method" {
+                        if first || name != "__" { return found }
+                    }
+                }
+                first = false
+                current = current!.base
+            }
+            return null
+        }
+
+        lookupMember(owner:Symbols.Symbol?, name:string) -> Symbols.Symbol? {
+            local current = owner
+            local first:bool = true
+            while current != null {
+                local found = current!.memberScope!.lookupLocal(name)
+                if found != null {
+                    if found!.kind == "Field" { return found }
+                    if found!.kind == "Method" {
+                        if first || name != "__" { return found }
+                    }
+                }
+                first = false
+                current = current!.base
+            }
+            return null
+        }
+
         analyzeModules() -> void {
             local moduleIndex:i64 = 0
             while moduleIndex < self.modules.length {
@@ -213,7 +398,10 @@ library Semantics {{
                 } else {
                     if memberNode.kind == "Field" {
                         if memberNode.initializer != null {
+                            local previousOwner = self.currentOwner
+                            self.currentOwner = owner
                             local actual = self.analyzeExpression(memberNode.initializer!, owner.memberScope!, moduleScope)
+                            self.currentOwner = previousOwner
                             self.requireCompatible(memberNode.symbol!.typeName!, actual, memberNode.initializer!.span)
                         }
                     } else {
@@ -235,7 +423,13 @@ library Semantics {{
                 if !scope.define(parameter) { self.error(parameter.span, "Duplicate parameter '" + parameter.name + "'") }
                 index = index + 1
             }
+            local previousOwner = self.currentOwner
+            local previousMethod = self.currentMethod
+            self.currentOwner = owner
+            self.currentMethod = method.symbol
             if method.body != null { self.analyzeBlock(method.body!, scope, moduleScope, method.symbol!.returnType!, false) }
+            self.currentOwner = previousOwner
+            self.currentMethod = previousMethod
         }
 
         analyzeBlock(block:Ast.Block, parent:Symbols.Scope, moduleScope:Symbols.Scope, returnType:string, inLoop:bool) -> void {
@@ -294,6 +488,7 @@ library Semantics {{
             if expression.kind == "Null" { return self.typed(expression, "null") }
             if expression.kind == "Identifier" {
                 local symbol = scope.lookup(expression.name!)
+                if symbol == null { symbol = self.lookupMember(self.currentOwner, expression.name!) }
                 if symbol == null { self.error(expression.span, "Unknown name '" + expression.name! + "'"); return self.typed(expression, "error") }
                 expression.symbol = symbol
                 if symbol!.typeName != null { return self.typed(expression, symbol!.typeName!) }
@@ -310,12 +505,21 @@ library Semantics {{
                 if owner == null { return self.builtinMember(expression, leftType) }
                 if owner!.memberScope == null { return self.builtinMember(expression, leftType) }
                 local foundMember = owner!.memberScope!.lookupLocal(expression.name!)
+                if foundMember == null { foundMember = self.lookupMember(owner, expression.name!) }
                 if foundMember == null { return self.builtinMember(expression, leftType) }
                 expression.symbol = foundMember
                 if foundMember!.typeName != null { return self.typed(expression, foundMember!.typeName!) }
                 return self.typed(expression, foundMember!.returnType!)
             }
             if expression.kind == "Call" {
+                if expression.left!.kind == "Member" {
+                    if expression.left!.left!.kind == "Identifier" {
+                        if expression.left!.left!.name! == "super" { return self.analyzeSuperMethodCall(expression, scope, moduleScope) }
+                    }
+                }
+                if expression.left!.kind == "Identifier" {
+                    if expression.left!.name! == "super" { return self.analyzeSuperCall(expression, scope, moduleScope) }
+                }
                 self.analyzeExpression(expression.left!, scope, moduleScope)
                 local callable = expression.left!.symbol
                 local index:i64 = 0
@@ -371,8 +575,27 @@ library Semantics {{
             if expression.kind == "Binary" { return self.analyzeBinary(expression, scope, moduleScope) }
             if expression.kind == "Conversion" {
                 local source = self.analyzeExpression(expression.left!, scope, moduleScope)
-                local target = self.bindType(expression.typeArguments[0], moduleScope)
-                if !self.isInteger(source) || !self.isInteger(target) { self.error(expression.span, "Integer conversion requires integer types") }
+                local target = self.bindType(expression.typeArguments[0], scope)
+                local sourceBase = source
+                if self.isOptional(sourceBase) { sourceBase = sourceBase.slice(0, sourceBase.length - 1) }
+                local targetBase = target
+                if self.isOptional(targetBase) { targetBase = targetBase.slice(0, targetBase.length - 1) }
+                local sourceObject = self.findCanonical(sourceBase)
+                local targetObject = self.findCanonical(targetBase)
+                if sourceObject != null && targetObject != null {
+                    if self.inheritanceContains(sourceObject, targetObject!) {
+                        expression.operator = "reference"
+                    } else {
+                        if self.isOptional(target) && self.inheritanceContains(targetObject, sourceObject!) {
+                            expression.operator = "checked_reference"
+                            expression.text = targetBase
+                        } else {
+                            self.error(expression.span, "Downcast must produce an optional value")
+                        }
+                    }
+                } else {
+                    if !self.isInteger(source) || !self.isInteger(target) { self.error(expression.span, "Integer conversion requires integer types") }
+                }
                 return self.typed(expression, target)
             }
             if expression.kind == "Unwrap" || expression.kind == "Propagate" {
@@ -383,10 +606,73 @@ library Semantics {{
             return self.typed(expression, "error")
         }
 
+        analyzeSuperCall(expression:Ast.Expression, scope:Symbols.Scope, moduleScope:Symbols.Scope) -> string {
+            local base:Symbols.Symbol? = null
+            if self.currentOwner != null { base = self.currentOwner!.base }
+            if self.currentMethod == null || self.currentMethod!.name != "__" || base == null {
+                self.error(expression.left!.span, "'super()' is only valid in a child constructor")
+            }
+            local constructor:Symbols.Symbol? = null
+            if base != null { constructor = base!.memberScope!.lookupLocal("__") }
+            local superSymbol = new Symbols.Symbol("Super", "super", "", expression.left!.span)
+            superSymbol.returnType = "void"
+            superSymbol.owner = base
+            if constructor != null {
+                superSymbol.qualifiedName = constructor!.qualifiedName
+                local parameterIndex:i64 = 0
+                while parameterIndex < constructor!.parameters.length {
+                    superSymbol.parameters.append(constructor!.parameters[parameterIndex])
+                    parameterIndex = parameterIndex + 1
+                }
+            }
+            expression.left!.symbol = superSymbol
+            expression.symbol = superSymbol
+            local index:i64 = 0
+            while index < expression.arguments.length {
+                local argumentType = self.analyzeExpression(expression.arguments[index], scope, moduleScope)
+                if index < superSymbol.parameters.length { self.requireCompatible(superSymbol.parameters[index].typeName!, argumentType, expression.arguments[index].span) }
+                index = index + 1
+            }
+            if expression.arguments.length != superSymbol.parameters.length { self.error(expression.span, "Parent constructor expects " + superSymbol.parameters.length.toString() + " arguments") }
+            return self.typed(expression, "void")
+        }
+
+        analyzeSuperMethodCall(expression:Ast.Expression, scope:Symbols.Scope, moduleScope:Symbols.Scope) -> string {
+            local base:Symbols.Symbol? = null
+            if self.currentOwner != null { base = self.currentOwner!.base }
+            if self.currentMethod == null || base == null {
+                self.error(expression.left!.span, "'super.method()' is only valid in a child method")
+                return self.typed(expression, "error")
+            }
+            local method = self.lookupMethod(base, expression.left!.name!)
+            if method == null || expression.left!.name! == "__" {
+                self.error(expression.left!.span, "Parent type has no method '" + expression.left!.name! + "'")
+                return self.typed(expression, "error")
+            }
+            expression.left!.symbol = method
+            expression.left!.text = "super"
+            expression.symbol = method
+            local index:i64 = 0
+            while index < expression.arguments.length {
+                local actual = self.analyzeExpression(expression.arguments[index], scope, moduleScope)
+                if index < method!.parameters.length { self.requireCompatible(method!.parameters[index].typeName!, actual, expression.arguments[index].span) }
+                index = index + 1
+            }
+            if expression.arguments.length != method!.parameters.length { self.error(expression.span, "Parent method expects " + method!.parameters.length.toString() + " arguments") }
+            return self.typed(expression, method!.returnType!)
+        }
+
         analyzeBinary(expression:Ast.Expression, scope:Symbols.Scope, moduleScope:Symbols.Scope) -> string {
             local left = self.analyzeExpression(expression.left!, scope, moduleScope)
             local right = self.analyzeExpression(expression.right!, scope, moduleScope)
             local operator = expression.operator!
+            if operator == "is" {
+                local sourceBase = left
+                if self.isOptional(sourceBase) { sourceBase = sourceBase.slice(0, sourceBase.length - 1) }
+                if self.findCanonical(sourceBase) == null { self.error(expression.left!.span, "'is' requires an object reference") }
+                if expression.right!.symbol == null { self.error(expression.right!.span, "'is' requires an object type") } else { expression.text = expression.right!.symbol!.qualifiedName }
+                return self.typed(expression, "bool")
+            }
             if operator == "&&" || operator == "||" { self.requireCompatible("bool", left, expression.left!.span); self.requireCompatible("bool", right, expression.right!.span); return self.typed(expression, "bool") }
             if operator == "==" || operator == "!=" || operator == "===" || operator == "!==" || operator == "<" || operator == "<=" || operator == ">" || operator == ">=" { return self.typed(expression, "bool") }
             if operator == "+" {
@@ -482,11 +768,24 @@ library Semantics {{
 
         requireCompatible(expected:string, actual:string, span:Compiler.SourceSpan) -> void {
             if expected == actual || expected == "error" || actual == "error" { return }
+            local expectedType = self.findCanonical(expected)
+            local actualType = self.findCanonical(actual)
+            if expectedType != null && actualType != null {
+                if self.inheritanceContains(actualType, expectedType!) { return }
+            }
             if actual == "null" {
                 if self.isOptional(expected) { return }
             }
             if self.isOptional(expected) {
-                if expected.slice(0, expected.length - 1) == actual { return }
+                local expectedBase = expected.slice(0, expected.length - 1)
+                local actualBase = actual
+                if self.isOptional(actualBase) { actualBase = actualBase.slice(0, actualBase.length - 1) }
+                if expectedBase == actualBase { return }
+                local optionalExpectedType = self.findCanonical(expectedBase)
+                local optionalActualType = self.findCanonical(actualBase)
+                if optionalExpectedType != null && optionalActualType != null {
+                    if self.inheritanceContains(optionalActualType, optionalExpectedType!) { return }
+                }
             }
             if self.isInteger(expected) && self.isInteger(actual) { return }
             self.error(span, "Cannot use value of type '" + actual + "' where '" + expected + "' is required")

@@ -1,0 +1,58 @@
+library Diagnostics {{
+    firstMessage(bag:DiagnosticBag) -> string? {
+        local diagnostic = bag.first()?
+        return diagnostic.message
+    }
+
+    format(diagnostic:Diagnostic) -> string {
+        local builder:StringBuilder = new StringBuilder()
+        builder.append(diagnostic.source)
+        builder.append(":")
+        builder.append(diagnostic.line)
+        builder.append(":")
+        builder.append(diagnostic.column)
+        builder.append(": ")
+        builder.append(diagnostic.message)
+        return builder.build()
+    }
+
+    Diagnostic {{
+        member severity:u8
+        member message:string
+        member source:string
+        member line:i64
+        member column:i64
+
+        __(severity:u8, message:string, source:string, line:i64, column:i64) -> void {
+            self.severity = severity
+            self.message = message
+            self.source = source
+            self.line = line
+            self.column = column
+        }
+    }}
+
+    DiagnosticBag {{
+        member items:Array<Diagnostic>
+
+        __() -> void {
+            self.items = new Array<Diagnostic>(0)
+        }
+
+        add(diagnostic:Diagnostic) -> void {
+            self.items.append(diagnostic)
+        }
+
+        first() -> Diagnostic? {
+            if self.items.length == 0 {
+                return null
+            } else {
+                return self.items[0]
+            }
+        }
+
+        length() -> i64 {
+            return self.items.length
+        }
+    }}
+}}

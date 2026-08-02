@@ -1,0 +1,29 @@
+Animal {{
+    describe() -> i64 { return 1 }
+}}
+
+Dog inherits Animal {{
+    describe() -> i64 { return 2 }
+    bark() -> i64 { return 3 }
+}}
+
+Cat inherits Animal {{
+    describe() -> i64 { return 4 }
+}}
+
+entry {{
+    __() -> i32 {
+        local dog = new Dog()
+        local animal:Animal = dog
+        if animal.describe() != 2 { return 1 }
+        if animal !== dog { return 2 }
+        if !(animal is Dog) { return 3 }
+        if animal is Cat { return 4 }
+        local recovered:Dog? = animal as Dog?
+        if recovered == null { return 5 }
+        if recovered!.bark() != 3 { return 6 }
+        local wrong:Cat? = animal as Cat?
+        if wrong != null { return 7 }
+        return 0
+    }
+}}

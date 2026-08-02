@@ -1,0 +1,160 @@
+library Scopes {{
+    Symbol {{
+        member name:string
+        member kind:u8
+
+        __(name:string, kind:u8) -> void {
+            self.name = name
+            self.kind = kind
+        }
+    }}
+
+    SymbolMap {{
+        member keys:Array<string?>
+        member values:Array<Symbol?>
+        member count:i64
+
+        __() -> void {
+            self.keys = new Array<string?>(8)
+            self.values = new Array<Symbol?>(8)
+            self.count = 0
+        }
+
+        hash(key:string, capacity:i64) -> i64 {
+            local value:i64 = 0
+            local index:i64 = 0
+            while index < key.length {
+                value = value * 31 + (key[index] as i64)
+                value = value - (value / capacity) * capacity
+                index = index + 1
+            }
+            return value
+        }
+
+        get(key:string) -> Symbol? {
+            local capacity = self.keys.length
+            local bucket = self.hash(key, capacity)
+            local checked:i64 = 0
+            while checked < capacity {
+                local existing = self.keys[bucket]
+                if existing == null {
+                    return null
+                }
+                if existing! == key {
+                    return self.values[bucket]
+                }
+                bucket = bucket + 1
+                if bucket == capacity {
+                    bucket = 0
+                }
+                checked = checked + 1
+            }
+            return null
+        }
+
+        set(key:string, value:Symbol) -> void {
+            if (self.count + 1) * 4 >= self.keys.length * 3 {
+                self.grow()
+            }
+            self.insert(key, value)
+        }
+
+        insert(key:string, value:Symbol) -> void {
+            local capacity = self.keys.length
+            local bucket = self.hash(key, capacity)
+            while self.keys[bucket] != null {
+                if self.keys[bucket]! == key {
+                    self.values[bucket] = value
+                    return
+                }
+                bucket = bucket + 1
+                if bucket == capacity {
+                    bucket = 0
+                }
+            }
+            self.keys[bucket] = key
+            self.values[bucket] = value
+            self.count = self.count + 1
+        }
+
+        grow() -> void {
+            local oldKeys = self.keys
+            local oldValues = self.values
+            self.keys = new Array<string?>(oldKeys.length * 2)
+            self.values = new Array<Symbol?>(oldValues.length * 2)
+            self.count = 0
+
+            local index:i64 = 0
+            while index < oldKeys.length {
+                local key = oldKeys[index]
+                if key != null {
+                    self.insert(key!, oldValues[index]!)
+                }
+                index = index + 1
+            }
+        }
+
+        length() -> i64 {
+            return self.count
+        }
+    }}
+
+    StringSet {{
+        member entries:SymbolMap
+
+        __() -> void {
+            self.entries = new SymbolMap()
+        }
+
+        add(value:string) -> bool {
+            if self.entries.get(value) != null {
+                return false
+            }
+            self.entries.set(value, new Symbol(value, 0))
+            return true
+        }
+
+        contains(value:string) -> bool {
+            return self.entries.get(value) != null
+        }
+
+        length() -> i64 {
+            return self.entries.length()
+        }
+    }}
+
+    Scope {{
+        member parent:Scope?
+        member symbols:SymbolMap
+
+        __(parent:Scope?) -> void {
+            self.parent = parent
+            self.symbols = new SymbolMap()
+        }
+
+        define(symbol:Symbol) -> bool {
+            if self.lookupLocal(symbol.name) != null {
+                return false
+            }
+            self.symbols.set(symbol.name, symbol)
+            return true
+        }
+
+        lookupLocal(name:string) -> Symbol? {
+            return self.symbols.get(name)
+        }
+
+        lookup(name:string) -> Symbol? {
+            local current:Scope? = self
+            while current != null {
+                local scope = current!
+                local symbol = scope.lookupLocal(name)
+                if symbol != null {
+                    return symbol
+                }
+                current = scope.parent
+            }
+            return null
+        }
+    }}
+}}

@@ -40,19 +40,21 @@ export class IrGenerator {
     declareContainer(declaration) {
         const symbol = declaration.semanticSymbol;
         if (declaration.kind === 'ObjectDeclaration') {
+            const fields = this.inheritedFields(symbol);
             this.program.types.push({
                 kind: 'IrType',
                 name: symbol.type,
                 displayName: symbol.qualifiedName,
+                base: symbol.base?.type ?? null,
+                virtualMethods: this.virtualMethods(symbol),
                 initializer: declaration.members.some(member => member.kind === 'FieldDeclaration' && member.initializer)
                     ? `${symbol.type}.$initialize`
                     : null,
-                fields: declaration.members
-                    .filter(member => member.kind === 'FieldDeclaration')
+                fields: fields
                     .map((field, index) => ({
                         name: field.name,
-                        symbol: `${symbol.type}.${field.name}`,
-                        type: field.inferredType,
+                        symbol: `${field.semanticSymbol.owner.type}.${field.name}`,
+                        type: field.semanticSymbol.type,
                         index
                     }))
             });
@@ -60,6 +62,23 @@ export class IrGenerator {
         for (const member of declaration.members) {
             if (member.kind === 'ObjectDeclaration') this.declareContainer(member);
         }
+    }
+
+    inheritedFields(symbol) {
+        const fields = symbol.base ? this.inheritedFields(symbol.base) : [];
+        return fields.concat([...symbol.fields.values()].map(field => field.declaration));
+    }
+
+    virtualMethods(symbol) {
+        const methods = symbol.base ? this.virtualMethods(symbol.base) : [];
+        for (const method of symbol.methods.values()) {
+            if (method.name === '__') continue;
+            const slot = methods.findIndex(entry => entry.name === method.name);
+            const entry = {name: method.name, target: this.functionName(method)};
+            if (slot < 0) methods.push(entry);
+            else methods[slot] = entry;
+        }
+        return methods;
     }
 
     lowerContainer(declaration) {
@@ -280,6 +299,10 @@ export class IrGenerator {
                 return this.result('unary', expression.inferredType, {operator: expression.operator, operand});
             }
             case 'BinaryExpression': {
+                if (expression.operator === 'is') {
+                    const value = this.lowerExpression(expression.left);
+                    return this.result('type_test', 'bool', {value, targetType: expression.runtimeType});
+                }
                 const left = this.lowerExpression(expression.left);
                 const right = this.lowerExpression(expression.right);
                 if (left.type === 'string' && expression.operator !== '===' && expression.operator !== '!==') {
@@ -295,6 +318,13 @@ export class IrGenerator {
                 return this.lowerAssignment(expression);
             case 'ConversionExpression': {
                 const value = this.lowerExpression(expression.expression);
+                if (expression.conversionKind === 'reference') return value;
+                if (expression.conversionKind === 'checked_reference') {
+                    return this.result('checked_cast', expression.inferredType, {
+                        value,
+                        targetType: this.optionalBaseTypeName(expression.inferredType)
+                    });
+                }
                 return this.result('convert', expression.inferredType, {value, fromType: value.type});
             }
             case 'UnwrapExpression': {
@@ -310,6 +340,10 @@ export class IrGenerator {
             default:
                 throw new Error(`Cannot lower expression ${expression.kind}`);
         }
+    }
+
+    optionalBaseTypeName(type) {
+        return type.endsWith('?') ? type.slice(0, -1) : type;
     }
 
     lowerIdentifier(expression) {
@@ -383,6 +417,14 @@ export class IrGenerator {
         const method = expression.callee.semanticSymbol;
         const args = expression.arguments.map(argument => this.lowerExpression(argument));
 
+        if (method.kind === 'SuperCall') {
+            if (method.constructor) {
+                args.unshift({kind: 'parameter', name: 'self', type: method.owner.type});
+                this.emit('call', {target: this.functionName(method.constructor), arguments: args});
+            }
+            return {kind: 'void', type: 'void'};
+        }
+
         if (method.kind === 'ArrayAppend') {
             const array = this.lowerExpression(expression.callee.object);
             this.emit('array_append', {array, value: args[0], elementType: method.elementType});
@@ -420,18 +462,24 @@ export class IrGenerator {
         }
 
         if (method.owner.kind === 'Object') {
-            const receiver = expression.callee.kind === 'MemberExpression'
+            const receiver = expression.callee.isSuper
+                ? {kind: 'parameter', name: 'self', type: this.function.owner}
+                : expression.callee.kind === 'MemberExpression'
                 ? this.lowerExpression(expression.callee.object)
                 : {kind: 'parameter', name: 'self', type: method.owner.type};
             args.unshift(receiver);
         }
 
-        const fields = {target: this.functionName(method), arguments: args};
+        const ownerType = method.owner.type;
+        const virtualType = this.program.types.find(type => type.name === ownerType);
+        const virtualSlot = method.name === '__' ? -1 : virtualType?.virtualMethods.findIndex(entry => entry.name === method.name) ?? -1;
+        const fields = {target: this.functionName(method), arguments: args, slot: virtualSlot};
+        const op = virtualSlot >= 0 && method.owner.kind === 'Object' && !expression.callee.isSuper ? 'virtual_call' : 'call';
         if (expression.inferredType === 'void') {
-            this.emit('call', fields);
+            this.emit(op, fields);
             return {kind: 'void', type: 'void'};
         }
-        return this.result('call', expression.inferredType, fields);
+        return this.result(op, expression.inferredType, fields);
     }
 
     lowerNew(expression) {
@@ -444,14 +492,19 @@ export class IrGenerator {
             return this.result('array_new', object.type, {length, elementType: object.elementType});
         }
         const instance = this.result('allocate', object.type, {objectType: object.type});
-        const initializer = this.program.types.find(type => type.name === object.type)?.initializer;
-        if (initializer) this.emit('call', {target: initializer, arguments: [instance]});
+        this.lowerInitializers(object, instance);
         const constructor = object.methods.get('__');
         if (constructor) {
             const args = [instance, ...expression.arguments.map(argument => this.lowerExpression(argument))];
             this.emit('call', {target: this.functionName(constructor), arguments: args});
         }
         return instance;
+    }
+
+    lowerInitializers(object, instance) {
+        if (object.base) this.lowerInitializers(object.base, instance);
+        const initializer = this.program.types.find(type => type.name === object.type)?.initializer;
+        if (initializer) this.emit('call', {target: initializer, arguments: [instance]});
     }
 
     lowerPropagation(expression) {

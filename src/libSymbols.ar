@@ -12,6 +12,8 @@ library Symbols {{
         member memberScope:Scope?
         member parameters:Array<Symbol>
         member isNative:bool
+        member base:Symbol?
+        member contracts:Array<Symbol>
 
         __(kind:string, name:string, qualifiedName:string, span:Compiler.SourceSpan) -> void {
             self.kind = kind
@@ -24,6 +26,8 @@ library Symbols {{
             self.memberScope = null
             self.parameters = new Array<Symbol>(0)
             self.isNative = false
+            self.base = null
+            self.contracts = new Array<Symbol>(0)
         }
     }}
 

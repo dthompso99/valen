@@ -35,6 +35,8 @@ export const Tokens = [
     {type: 'LOCAL', value: 'local'},
     {type: 'LIBRARY', value: 'library'},
     {type: 'NATIVE', value: 'native'},
+    {type: 'INHERITS', value: 'inherits'},
+    {type: 'IMPLEMENTS', value: 'implements'},
     {type: 'IF', value: 'if'},
     {type: 'ELSE', value: 'else'},
     {type: 'WHILE', value: 'while'},
@@ -43,5 +45,6 @@ export const Tokens = [
     {type: 'TRUE', value: 'true'},
     {type: 'FALSE', value: 'false'},
     {type: 'AS', value: 'as'},
+    {type: 'IS', value: 'is'},
     {type: 'NULL', value: 'null'}
 ];

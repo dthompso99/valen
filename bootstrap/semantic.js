@@ -31,6 +31,8 @@ export class SemanticAnalyzer {
         for (const declaration of program.libraries) this.declareObject(declaration, null, this.globals, 'Library');
         for (const declaration of program.objects) this.declareMembers(declaration);
         for (const declaration of program.libraries) this.declareMembers(declaration);
+        for (const declaration of program.objects) this.bindRelationships(declaration);
+        for (const declaration of program.objects) this.validateRelationships(declaration);
         for (const declaration of program.objects) this.analyzeObject(declaration);
         for (const declaration of program.libraries) this.analyzeObject(declaration);
 
@@ -73,6 +75,12 @@ export class SemanticAnalyzer {
             for (const declaration of [...module.program.objects, ...module.program.libraries]) {
                 this.declareMembers(declaration);
             }
+        }
+        for (const module of graph.modules.values()) {
+            for (const declaration of module.program.objects) this.bindRelationships(declaration);
+        }
+        for (const module of graph.modules.values()) {
+            for (const declaration of module.program.objects) this.validateRelationships(declaration);
         }
         for (const module of graph.modules.values()) {
             for (const declaration of [...module.program.objects, ...module.program.libraries]) {
@@ -132,6 +140,8 @@ export class SemanticAnalyzer {
             fields: new Map(),
             methods: new Map(),
             objects: new Map(),
+            base: null,
+            contracts: [],
             moduleScope: parent?.moduleScope ?? scope
         };
         if (parent?.objects.has(declaration.name)) {
@@ -187,6 +197,116 @@ export class SemanticAnalyzer {
             }
             this.annotate(method.declaration, method.returnType, method);
         }
+        for (const field of object.fields.values()) {
+            const inherited = this.lookupField(object.base, field.name);
+            if (inherited) this.report(field.declaration.span, `Field '${field.qualifiedName}' hides inherited field '${inherited.qualifiedName}'`);
+        }
+    }
+
+    bindRelationships(declaration) {
+        const object = this.objectSymbols.get(declaration);
+        if (!object || object.kind !== 'Object') return;
+
+        if (declaration.inheritedType) {
+            const type = this.resolveTypeReference(declaration.inheritedType, object);
+            object.base = this.findObjectType(type);
+            if (!object.base || object.base.kind !== 'Object') {
+                this.report(declaration.inheritedType.span, `'${declaration.inheritedType.name}' is not an inheritable object`);
+                object.base = null;
+            }
+        }
+
+        for (const reference of declaration.implementedTypes) {
+            const type = this.resolveTypeReference(reference, object);
+            const contract = this.findObjectType(type);
+            if (!contract || contract.kind !== 'Object') {
+                this.report(reference.span, `'${reference.name}' is not an implementable object`);
+            } else {
+                object.contracts.push(contract);
+            }
+        }
+
+        for (const member of declaration.members) {
+            if (member.kind === 'ObjectDeclaration') this.bindRelationships(member);
+        }
+    }
+
+    validateRelationships(declaration) {
+        const object = this.objectSymbols.get(declaration);
+        if (!object || object.kind !== 'Object') return;
+
+        if (object.base && this.inheritanceContains(object.base, object)) {
+            this.report(declaration.inheritedType.span, `Inheritance cycle involving '${object.qualifiedName}'`);
+            object.base = null;
+        }
+        for (const method of object.methods.values()) {
+            if (method.name === '__') continue;
+            const inherited = this.lookupMethod(object.base, method.name);
+            if (inherited && !this.signaturesMatch(method, inherited)) {
+                this.report(method.declaration.span, `Override '${method.qualifiedName}' is incompatible with '${inherited.qualifiedName}'`);
+            }
+        }
+        for (const contract of object.contracts) this.validateContract(object, contract);
+        for (const member of declaration.members) {
+            if (member.kind === 'ObjectDeclaration') this.validateRelationships(member);
+        }
+    }
+
+    inheritanceContains(object, target) {
+        let current = object;
+        while (current) {
+            if (current === target) return true;
+            current = current.base;
+        }
+        return false;
+    }
+
+    validateContract(object, contract) {
+        for (const required of this.contractMethods(contract)) {
+            const implementation = this.lookupMethod(object, required.name);
+            if (!implementation) {
+                this.report(object.declaration.span, `Object '${object.qualifiedName}' implements '${contract.qualifiedName}' but is missing method '${required.name}'`);
+            } else if (!this.signaturesMatch(implementation, required)) {
+                this.report(implementation.declaration.span, `Method '${implementation.qualifiedName}' does not match '${required.qualifiedName}' required by '${contract.qualifiedName}'`);
+            }
+        }
+    }
+
+    contractMethods(contract) {
+        const methods = new Map();
+        if (contract.base) {
+            for (const method of this.contractMethods(contract.base)) methods.set(method.name, method);
+        }
+        for (const method of contract.methods.values()) {
+            if (method.name !== '__') methods.set(method.name, method);
+        }
+        return methods.values();
+    }
+
+    signaturesMatch(left, right) {
+        return left.returnType === right.returnType &&
+            left.parameters.length === right.parameters.length &&
+            left.parameters.every((parameter, index) => parameter.type === right.parameters[index].type);
+    }
+
+    lookupMethod(object, name) {
+        let current = object;
+        while (current) {
+            const method = current.methods.get(name);
+            if (method && (current === object || name !== '__')) return method;
+            current = current.base;
+        }
+        return null;
+    }
+
+    lookupField(object, name) {
+        let current = object;
+        while (current) {
+            const field = current.fields.get(name);
+            if (field) return field;
+            current = current.base;
+        }
+        return null;
     }
 
     defineMember(object, collection, declaration, kind) {
@@ -405,8 +525,8 @@ export class SemanticAnalyzer {
                 }
                 const owner = this.findObjectType(ownerType);
                 if (owner) {
-                    symbol = owner.fields.get(expression.member) ??
-                        owner.methods.get(expression.member) ??
+                    symbol = this.lookupField(owner, expression.member) ??
+                        this.lookupMethod(owner, expression.member) ??
                         owner.objects.get(expression.member);
                     if (!symbol) this.report(expression.span, `Type '${ownerType}' has no member '${expression.member}'`);
                     type = symbol?.type ?? symbol?.qualifiedName ?? UNKNOWN;
@@ -450,7 +570,15 @@ export class SemanticAnalyzer {
             case 'ConversionExpression': {
                 const sourceType = this.analyzeExpression(expression.expression, scope, object);
                 const targetType = this.resolveTypeReference(expression.targetType, object);
-                if (!integerTypes.has(sourceType) || !integerTypes.has(targetType)) {
+                const sourceObject = this.findObjectType(this.isOptionalType(sourceType) ? this.optionalBaseType(sourceType) : sourceType);
+                const targetBase = this.isOptionalType(targetType) ? this.optionalBaseType(targetType) : targetType;
+                const targetObject = this.findObjectType(targetBase);
+                if (sourceObject && targetObject) {
+                    if (this.isSubtype(sourceObject.type, targetObject.type)) expression.conversionKind = 'reference';
+                    else if (this.isOptionalType(targetType) && this.isSubtype(targetObject.type, sourceObject.type)) expression.conversionKind = 'checked_reference';
+                    else this.report(expression.span, `Downcast from '${sourceType}' to '${targetBase}' must produce an optional value`);
+                    type = targetType;
+                } else if (!integerTypes.has(sourceType) || !integerTypes.has(targetType)) {
                     this.report(expression.span, `Cannot convert '${sourceType}' to '${targetType}'; integer conversion requires integer types`);
                     type = UNKNOWN;
                 } else type = targetType;
@@ -489,13 +617,23 @@ export class SemanticAnalyzer {
             case 'BinaryExpression': {
                 let left = this.analyzeExpression(expression.left, scope, object);
                 let right = this.analyzeExpression(expression.right, scope, object);
+                if (expression.operator === 'is') {
+                    const source = this.findObjectType(this.isOptionalType(left) ? this.optionalBaseType(left) : left);
+                    const target = expression.right.semanticSymbol;
+                    if (!source) this.report(expression.left.span, `'is' requires an object reference`);
+                    if (!target || target.kind !== 'Object') this.report(expression.right.span, `'is' requires an object type`);
+                    expression.runtimeType = target?.type ?? UNKNOWN;
+                    type = BOOL;
+                    break;
+                }
                 const logical = expression.operator === '&&' || expression.operator === '||';
                 const identity = expression.operator === '===' || expression.operator === '!==';
                 const comparison = identity || ['==', '!=', '<', '<=', '>', '>='].includes(expression.operator);
                 if (identity) {
                     const leftBase = this.isOptionalType(left) ? this.optionalBaseType(left) : left;
                     const rightBase = this.isOptionalType(right) ? this.optionalBaseType(right) : right;
-                    const compatible = leftBase === rightBase && this.isReferenceType(leftBase) ||
+                    const compatible = this.isReferenceType(leftBase) && this.isReferenceType(rightBase) &&
+                            (leftBase === rightBase || this.isSubtype(leftBase, rightBase) || this.isSubtype(rightBase, leftBase)) ||
                         left === NULL && this.isOptionalType(right) ||
                         right === NULL && this.isOptionalType(left);
                     if (!compatible) {
@@ -532,6 +670,47 @@ export class SemanticAnalyzer {
                 break;
             }
             case 'CallExpression': {
+                if (expression.callee.kind === 'MemberExpression' &&
+                    expression.callee.object.kind === 'IdentifierExpression' &&
+                    expression.callee.object.name === 'super') {
+                    const owner = this.currentMethod?.owner;
+                    if (!owner?.base) {
+                        this.report(expression.callee.span, "'super.method()' is only valid in a child method");
+                        expression.arguments.forEach(argument => this.analyzeExpression(argument, scope, object));
+                        type = UNKNOWN;
+                        break;
+                    }
+                    const method = this.lookupMethod(owner.base, expression.callee.member);
+                    if (!method || method.name === '__') {
+                        this.report(expression.callee.span, `Parent type has no method '${expression.callee.member}'`);
+                        expression.arguments.forEach(argument => this.analyzeExpression(argument, scope, object));
+                        type = UNKNOWN;
+                        break;
+                    }
+                    const argumentTypes = expression.arguments.map(argument => this.analyzeExpression(argument, scope, object));
+                    this.checkArguments(method, argumentTypes, expression.arguments, expression.span);
+                    expression.callee.isSuper = true;
+                    this.annotate(expression.callee, method.returnType, method);
+                    type = method.returnType;
+                    break;
+                }
+                if (expression.callee.kind === 'IdentifierExpression' && expression.callee.name === 'super') {
+                    const owner = this.currentMethod?.owner;
+                    if (this.currentMethod?.name !== '__' || !owner?.base) {
+                        this.report(expression.callee.span, "'super()' is only valid in a child constructor");
+                        expression.arguments.forEach(argument => this.analyzeExpression(argument, scope, object));
+                        type = VOID;
+                        break;
+                    }
+                    const constructor = owner.base.methods.get('__') ?? null;
+                    const argumentTypes = expression.arguments.map(argument => this.analyzeExpression(argument, scope, object));
+                    if (constructor) this.checkArguments(constructor, argumentTypes, expression.arguments, expression.span);
+                    else if (argumentTypes.length !== 0) this.report(expression.span, 'Parent has no constructor accepting arguments');
+                    symbol = {kind: 'SuperCall', name: 'super', type: VOID, returnType: VOID, owner: owner.base, constructor};
+                    this.annotate(expression.callee, VOID, symbol);
+                    type = VOID;
+                    break;
+                }
                 this.analyzeExpression(expression.callee, scope, object);
                 const callee = expression.callee.semanticSymbol;
                 const argumentTypes = expression.arguments.map(argument => this.analyzeExpression(argument, scope, object));
@@ -753,7 +932,9 @@ export class SemanticAnalyzer {
 
     requireAssignable(actual, expected, span, expression = null) {
         if (this.isOptionalType(expected)) {
-            if (actual === NULL || actual === expected || actual === this.optionalBaseType(expected)) return;
+            const expectedBase = this.optionalBaseType(expected);
+            const actualBase = this.isOptionalType(actual) ? this.optionalBaseType(actual) : actual;
+            if (actual === NULL || actual === expected || actualBase === expectedBase || this.isSubtype(actualBase, expectedBase)) return;
         }
         const integerLiteral = expression?.kind === 'IntegerLiteral'
             ? expression
@@ -774,9 +955,18 @@ export class SemanticAnalyzer {
             }
             return;
         }
-        if (actual !== UNKNOWN && expected !== UNKNOWN && actual !== expected) {
+        if (actual !== UNKNOWN && expected !== UNKNOWN && actual !== expected && !this.isSubtype(actual, expected)) {
             this.report(span, `Cannot use value of type '${actual}' where '${expected}' is required`);
         }
+    }
+
+    isSubtype(actual, expected) {
+        let object = this.findObjectType(actual);
+        while (object?.base) {
+            object = object.base;
+            if (object.type === expected) return true;
+        }
+        return false;
     }
 
     isIntegerLiteral(expression) {
@@ -833,10 +1023,21 @@ class ObjectScope extends Scope {
     }
 
     lookup(name) {
-        return this.object.fields.get(name) ??
-            this.object.methods.get(name) ??
+        return this.lookupInheritedMember(name) ??
             this.object.objects.get(name) ??
             super.lookup(name);
+    }
+
+    lookupInheritedMember(name) {
+        let object = this.object;
+        while (object) {
+            const field = object.fields.get(name);
+            if (field) return field;
+            const method = object.methods.get(name);
+            if (method && (object === this.object || name !== '__')) return method;
+            object = object.base;
+        }
+        return null;
     }
 }
 

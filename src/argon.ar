@@ -11,8 +11,35 @@ import X86_64 from 'libX86_64.ar'
 entry {{
     __() -> i32 {
         local arguments = System.arguments()
-        if arguments.length != 2 && arguments.length != 3 {
-            System.writeError("usage: argon <source-file> [assembly-output]\n")
+        if arguments.length == 2 {
+            if (arguments[1] == "--help") {
+                self.writeUsage()
+                return 0
+            }
+        }
+
+        local sourcePath:string? = null
+        local outputPath:string? = null
+        local checkOnly:bool = false
+        if arguments.length == 2 {
+            sourcePath = arguments[1]
+        } else {
+            if arguments.length == 3 {
+                if arguments[1] == "--check" {
+                    checkOnly = true
+                    sourcePath = arguments[2]
+                }
+            } else {
+                if arguments.length == 4 {
+                    if arguments[2] == "-o" {
+                        sourcePath = arguments[1]
+                        outputPath = arguments[3]
+                    }
+                }
+            }
+        }
+        if sourcePath == null {
+            self.writeUsage()
             return 64
         }
 
@@ -22,7 +49,7 @@ entry {{
             return 74
         }
         local loader = new ModuleLoading.ModuleLoader(cwd!)
-        local graph = loader.load(arguments[1])
+        local graph = loader.load(sourcePath!)
         if graph.diagnostics.hasErrors() {
             Diagnostics.write(graph.diagnostics)
             return 65
@@ -33,46 +60,39 @@ entry {{
             Diagnostics.write(analysis.diagnostics)
             return 65
         }
+        if checkOnly { return 0 }
         local generator = new Ir.Generator(analysis)
         local ir = generator.generate()
-        if arguments.length == 3 {
-            local backend = new X86_64.Backend(ir)
-            local assembly = backend.generate()
-            local output = System.openWrite(arguments[2])
+        local backend = new X86_64.Backend(ir)
+        local assembly = backend.generate()
+        if outputPath != null {
+            local output = System.openWrite(outputPath!)
             if output == null {
-                System.writeError("argon: could not open assembly output\n")
+                System.writeError("argon: could not open '")
+                System.writeError(outputPath!)
+                System.writeError("' for writing; OS error ")
+                System.writeError(System.lastError().toString())
+                System.writeError("\n")
                 return 74
             }
             local written = System.writeFile(output!, assembly)
             local closeResult = System.close(output!)
             if written != assembly.length || closeResult != 0 {
-                System.writeError("argon: could not write assembly output\n")
+                System.writeError("argon: could not write assembly output; OS error ")
+                System.writeError(System.lastError().toString())
+                System.writeError("\n")
                 return 74
             }
             return 0
         }
-        local program = graph.entry!.program
-        System.write("modules ")
-        System.write(graph.modules.length.toString())
-        System.write("\n")
-        System.write("declarations ")
-        System.write(program.declarations.length.toString())
-        System.write("\n")
-        System.write("IR types ")
-        System.write(ir.types.length.toString())
-        System.write("\n")
-        System.write("IR functions ")
-        System.write(ir.functions.length.toString())
-        System.write("\n")
-        System.write("IR externals ")
-        System.write(ir.externals.length.toString())
-        System.write("\n")
-        System.write("IR blocks ")
-        System.write(ir.blockCount().toString())
-        System.write("\n")
-        System.write("IR instructions ")
-        System.write(ir.instructionCount().toString())
-        System.write("\n")
+        System.write(assembly)
         return 0
+    }
+
+    writeUsage() -> void {
+        System.write("usage:\n")
+        System.write("  argon <source-file>\n")
+        System.write("  argon <source-file> -o <assembly-output>\n")
+        System.write("  argon --check <source-file>\n")
     }
 }}

@@ -91,12 +91,14 @@ library X86_64 {{
             if self.usesWriteError { self.writeRuntime("argon_System_writeError", 2) }
             self.processRuntime()
             self.filesystemRuntime()
+            self.memoryRuntime()
             self.runtimeCore()
             self.arrayRuntime()
             self.stringRuntime()
             self.builderRuntime()
             self.stringData()
             self.runtimeData()
+            self.typeData()
             self.writer.line(".section .note.GNU-stack,\"\",@progbits")
             return self.writer.build()
         }
@@ -105,7 +107,7 @@ library X86_64 {{
             local typeIndex:i64 = 0
             while typeIndex < self.program.types.length {
                 local typeNode = self.program.types[typeIndex]
-                local offset:i64 = 0
+                local offset:i64 = 8
                 local alignment:i64 = 1
                 local fieldIndex:i64 = 0
                 while fieldIndex < typeNode.fields.length {
@@ -274,6 +276,8 @@ library X86_64 {{
             if op == "allocate" {
                 self.writer.line("    mov rdi, " + self.typeSize(instruction.ownerType!).toString())
                 self.writer.line("    call argon_alloc")
+                self.writer.line("    lea rcx, [rip+" + self.typeLabel(instruction.ownerType!) + "]")
+                self.writer.line("    mov QWORD PTR [rax], rcx")
                 self.storeResult(instruction, "rax")
                 return
             }
@@ -326,7 +330,7 @@ library X86_64 {{
                 self.storeResult(instruction, "rax")
                 return
             }
-            if op == "string_concat" || op == "string_equal" {
+            if (op == "string_concat" || op == "string_equal") {
                 self.load(instruction.first!, "rdi")
                 self.load(instruction.second!, "rsi")
                 if op == "string_concat" { self.writer.line("    call argon_string_concat") } else {
@@ -378,6 +382,32 @@ library X86_64 {{
                 return
             }
             if op == "call" { self.generateCall(instruction); return }
+            if op == "virtual_call" { self.generateVirtualCall(instruction); return }
+            if op == "type_test" || op == "checked_cast" {
+                local label = self.nextLabel
+                self.nextLabel = self.nextLabel + 1
+                local loop = ".Ltype_test_" + label.toString()
+                local matched = ".Ltype_match_" + label.toString()
+                local done = ".Ltype_done_" + label.toString()
+                self.load(instruction.first!, "rcx")
+                self.writer.line("    xor eax, eax")
+                self.writer.line("    test rcx, rcx")
+                self.writer.line("    jz " + done)
+                self.writer.line("    mov rdx, QWORD PTR [rcx]")
+                self.writer.line("    lea r8, [rip+" + self.typeLabel(instruction.ownerType!) + "]")
+                self.writer.line(loop + ":")
+                self.writer.line("    test rdx, rdx")
+                self.writer.line("    jz " + done)
+                self.writer.line("    cmp rdx, r8")
+                self.writer.line("    je " + matched)
+                self.writer.line("    mov rdx, QWORD PTR [rdx]")
+                self.writer.line("    jmp " + loop)
+                self.writer.line(matched + ":")
+                if op == "type_test" { self.writer.line("    mov eax, 1") } else { self.writer.line("    mov rax, rcx") }
+                self.writer.line(done + ":")
+                self.storeResult(instruction, "rax")
+                return
+            }
             if op == "convert" {
                 self.load(instruction.first!, "rax")
                 self.normalize("rax", instruction.typeName!)
@@ -464,6 +494,30 @@ library X86_64 {{
             if instruction.result != null { self.storeResult(instruction, "rax") }
         }
 
+        generateVirtualCall(instruction:Ir.Instruction) -> void {
+            local index:i64 = 0
+            while index < instruction.arguments.length {
+                if index >= 6 { break }
+                self.load(instruction.arguments[index], self.argumentRegister(index))
+                index = index + 1
+            }
+            local stackCount = instruction.arguments.length - 6
+            if stackCount < 0 { stackCount = 0 }
+            local padding:i64 = 0
+            if stackCount - (stackCount / 2) * 2 == 1 { padding = 8; self.writer.line("    sub rsp, 8") }
+            index = instruction.arguments.length
+            while index > 6 {
+                index = index - 1
+                self.load(instruction.arguments[index], "rax")
+                self.writer.line("    push rax")
+            }
+            self.writer.line("    mov rax, QWORD PTR [rdi]")
+            self.writer.line("    call QWORD PTR [rax+" + (8 + instruction.slot * 8).toString() + "]")
+            local stackBytes = stackCount * 8 + padding
+            if stackBytes > 0 { self.writer.line("    add rsp, " + stackBytes.toString()) }
+            if instruction.result != null { self.storeResult(instruction, "rax") }
+        }
+
         generateMain() -> void {
             local entry = self.findFunction(self.program.entry!)
             local entrySize = self.typeSize(entry!.ownerType)
@@ -476,6 +530,8 @@ library X86_64 {{
             self.writer.line("    sub rsp, 16")
             self.writer.line("    mov rdi, " + entrySize.toString())
             self.writer.line("    call argon_alloc")
+            self.writer.line("    lea rcx, [rip+" + self.typeLabel(entry!.ownerType) + "]")
+            self.writer.line("    mov QWORD PTR [rax], rcx")
             self.writer.line("    mov QWORD PTR [rbp-8], rax")
             local typeNode = self.findProgramType(entry!.ownerType)
             if typeNode != null {
@@ -521,9 +577,7 @@ library X86_64 {{
             self.writer.line("    jae .Lallocation_error")
             self.writer.line("    ret")
             self.writer.line(".Lallocation_error:")
-            self.writer.line("    mov rdi, rsi")
-            self.writer.line("    shr rdi, 32")
-            self.writer.line("    and edi, 255")
+            self.writer.line("    mov edi, 72")
             self.writer.line("    jmp .Lruntime_error")
             self.writer.line("")
         }
@@ -668,14 +722,12 @@ library X86_64 {{
             self.writer.line("    mov r12, rsi")
             self.writer.line("    mov r13, QWORD PTR [r14+8]")
             self.writer.line("    add r13, QWORD PTR [r12+8]")
-            self.writer.line("    mov edi, 16")
+            self.writer.line("    lea rdi, [r13+16]")
             self.writer.line("    call argon_alloc")
-            self.writer.line("    mov QWORD PTR [rax+8], r13")
             self.writer.line("    mov rbx, rax")
-            self.writer.line("    mov rdi, r13")
-            self.writer.line("    call argon_alloc")
-            self.writer.line("    mov QWORD PTR [rbx], rax")
-            self.writer.line("    mov rdi, rax")
+            self.writer.line("    lea rdi, [rbx+16]")
+            self.writer.line("    mov QWORD PTR [rbx], rdi")
+            self.writer.line("    mov QWORD PTR [rbx+8], r13")
             self.writer.line("    mov rsi, QWORD PTR [r14]")
             self.writer.line("    mov rcx, QWORD PTR [r14+8]")
             self.writer.line("    rep movsb")
@@ -709,14 +761,12 @@ library X86_64 {{
             self.writer.line("    mov r14, rdi")
             self.writer.line("    mov r12, rsi")
             self.writer.line("    mov r13, rdx")
-            self.writer.line("    mov edi, 16")
+            self.writer.line("    lea rdi, [r13+16]")
             self.writer.line("    call argon_alloc")
-            self.writer.line("    mov QWORD PTR [rax+8], r13")
             self.writer.line("    mov rbx, rax")
-            self.writer.line("    mov rdi, r13")
-            self.writer.line("    call argon_alloc")
-            self.writer.line("    mov QWORD PTR [rbx], rax")
-            self.writer.line("    mov rdi, rax")
+            self.writer.line("    lea rdi, [rbx+16]")
+            self.writer.line("    mov QWORD PTR [rbx], rdi")
+            self.writer.line("    mov QWORD PTR [rbx+8], r13")
             self.writer.line("    mov rsi, QWORD PTR [r14]")
             self.writer.line("    add rsi, r12")
             self.writer.line("    mov rcx, r13")
@@ -820,19 +870,24 @@ library X86_64 {{
             self.writer.line("    mov rbp, rsp")
             self.writer.line("    push rbx")
             self.writer.line("    push r12")
-            self.writer.line("    mov rbx, rdi")
+            self.writer.line("    push r13")
+            self.writer.line("    sub rsp, 8")
+            self.writer.line("    mov r12, rdi")
             self.writer.line("    mov edi, 16")
             self.writer.line("    call argon_alloc")
-            self.writer.line("    mov r12, rax")
-            self.writer.line("    mov rdi, QWORD PTR [rbx]")
+            self.writer.line("    mov rbx, rax")
+            self.writer.line("    mov r13, QWORD PTR [r12]")
+            self.writer.line("    mov QWORD PTR [rbx+8], r13")
+            self.writer.line("    mov rdi, r13")
             self.writer.line("    call argon_alloc")
-            self.writer.line("    mov QWORD PTR [r12], rax")
-            self.writer.line("    mov rcx, QWORD PTR [rbx]")
-            self.writer.line("    mov QWORD PTR [r12+8], rcx")
+            self.writer.line("    mov QWORD PTR [rbx], rax")
             self.writer.line("    mov rdi, rax")
-            self.writer.line("    mov rsi, QWORD PTR [rbx+16]")
+            self.writer.line("    mov rsi, QWORD PTR [r12+16]")
+            self.writer.line("    mov rcx, r13")
             self.writer.line("    rep movsb")
-            self.writer.line("    mov rax, r12")
+            self.writer.line("    mov rax, rbx")
+            self.writer.line("    add rsp, 8")
+            self.writer.line("    pop r13")
             self.writer.line("    pop r12")
             self.writer.line("    pop rbx")
             self.writer.line("    leave")
@@ -1094,6 +1149,69 @@ library X86_64 {{
             self.writer.line("")
         }
 
+        memoryRuntime() -> void {
+            self.writer.line(".globl argon_System_memoryCopy")
+            self.writer.line("argon_System_memoryCopy:")
+            self.writer.line("    test rsi, rsi")
+            self.writer.line("    js .Larray_bounds_error")
+            self.writer.line("    test rcx, rcx")
+            self.writer.line("    js .Larray_bounds_error")
+            self.writer.line("    test r8, r8")
+            self.writer.line("    js .Larray_bounds_error")
+            self.writer.line("    mov r9, QWORD PTR [rdi]")
+            self.writer.line("    sub r9, rsi")
+            self.writer.line("    jb .Larray_bounds_error")
+            self.writer.line("    cmp r8, r9")
+            self.writer.line("    ja .Larray_bounds_error")
+            self.writer.line("    mov r9, QWORD PTR [rdx]")
+            self.writer.line("    sub r9, rcx")
+            self.writer.line("    jb .Larray_bounds_error")
+            self.writer.line("    cmp r8, r9")
+            self.writer.line("    ja .Larray_bounds_error")
+            self.writer.line("    add rsi, QWORD PTR [rdi+16]")
+            self.writer.line("    mov rdi, rsi")
+            self.writer.line("    add rcx, QWORD PTR [rdx+16]")
+            self.writer.line("    mov rsi, rcx")
+            self.writer.line("    mov rcx, r8")
+            self.writer.line("    rep movsb")
+            self.writer.line("    mov eax, 1")
+            self.writer.line("    ret")
+            self.writer.line("")
+            self.writer.line(".globl argon_System_memoryCompare")
+            self.writer.line("argon_System_memoryCompare:")
+            self.writer.line("    test rsi, rsi")
+            self.writer.line("    js .Larray_bounds_error")
+            self.writer.line("    test rcx, rcx")
+            self.writer.line("    js .Larray_bounds_error")
+            self.writer.line("    test r8, r8")
+            self.writer.line("    js .Larray_bounds_error")
+            self.writer.line("    mov r9, QWORD PTR [rdi]")
+            self.writer.line("    sub r9, rsi")
+            self.writer.line("    jb .Larray_bounds_error")
+            self.writer.line("    cmp r8, r9")
+            self.writer.line("    ja .Larray_bounds_error")
+            self.writer.line("    mov r9, QWORD PTR [rdx]")
+            self.writer.line("    sub r9, rcx")
+            self.writer.line("    jb .Larray_bounds_error")
+            self.writer.line("    cmp r8, r9")
+            self.writer.line("    ja .Larray_bounds_error")
+            self.writer.line("    add rsi, QWORD PTR [rdi+16]")
+            self.writer.line("    mov rdi, rsi")
+            self.writer.line("    add rcx, QWORD PTR [rdx+16]")
+            self.writer.line("    mov rsi, rcx")
+            self.writer.line("    mov rcx, r8")
+            self.writer.line("    repe cmpsb")
+            self.writer.line("    je .Lmemory_compare_equal")
+            self.writer.line("    mov eax, -1")
+            self.writer.line("    mov r10d, 1")
+            self.writer.line("    cmova eax, r10d")
+            self.writer.line("    ret")
+            self.writer.line(".Lmemory_compare_equal:")
+            self.writer.line("    xor eax, eax")
+            self.writer.line("    ret")
+            self.writer.line("")
+        }
+
         openRuntime(symbol:string, flags:i64) -> void {
             local label = ".L" + symbol + "_"
             self.writer.line(".globl " + symbol)
@@ -1186,6 +1304,26 @@ library X86_64 {{
             self.writer.line("    .zero 8")
             self.writer.line("argon_filesystem_error:")
             self.writer.line("    .zero 8")
+            self.writer.line("")
+        }
+
+        typeLabel(typeName:string) -> string { return ".Largon_type_" + self.mangle(typeName) }
+
+        typeData() -> void {
+            self.writer.line(".section .data")
+            self.writer.line(".align 8")
+            local index:i64 = 0
+            while index < self.program.types.length {
+                local typeNode = self.program.types[index]
+                self.writer.line(self.typeLabel(typeNode.name) + ":")
+                if typeNode.baseName == null { self.writer.line("    .quad 0") } else { self.writer.line("    .quad " + self.typeLabel(typeNode.baseName!)) }
+                local methodIndex:i64 = 0
+                while methodIndex < typeNode.virtualMethods.length {
+                    self.writer.line("    .quad " + self.functionSymbol(typeNode.virtualMethods[methodIndex].target))
+                    methodIndex = methodIndex + 1
+                }
+                index = index + 1
+            }
             self.writer.line("")
         }
 

@@ -77,11 +77,7 @@ export class Parser {
 
         this.skipSeparators();
         while (!(this.check('RIGHT_BRACE') && this.peek(1).type === 'RIGHT_BRACE') && !this.check('EOF')) {
-            if (
-                this.check('IDENTIFIER') &&
-                this.peek(1).type === 'LEFT_BRACE' &&
-                this.peek(2).type === 'LEFT_BRACE'
-            ) {
+            if (this.isObjectDeclarationStart()) {
                 members.push(this.parseObject());
             } else if (this.check('MEMBER')) {
                 this.error(this.peek(), 'Libraries cannot declare instance members');
@@ -100,17 +96,19 @@ export class Parser {
 
     parseObject() {
         const start = this.consume('IDENTIFIER', 'Expected an object name');
+        const inheritedType = this.match('INHERITS') ? this.parseTypeReference() : null;
+        const implementedTypes = [];
+        if (this.match('IMPLEMENTS')) {
+            do implementedTypes.push(this.parseTypeReference());
+            while (this.match('COMMA'));
+        }
         this.consume('LEFT_BRACE', `Expected '{{' after object name ${start.value}`);
         this.consume('LEFT_BRACE', `Expected '{{' after object name ${start.value}`);
         const members = [];
 
         this.skipSeparators();
         while (!(this.check('RIGHT_BRACE') && this.peek(1).type === 'RIGHT_BRACE') && !this.check('EOF')) {
-            if (
-                this.check('IDENTIFIER') &&
-                this.peek(1).type === 'LEFT_BRACE' &&
-                this.peek(2).type === 'LEFT_BRACE'
-            ) {
+            if (this.isObjectDeclarationStart()) {
                 members.push(this.parseObject());
             } else if (this.check('MEMBER')) {
                 members.push(this.parseField());
@@ -124,7 +122,14 @@ export class Parser {
 
         this.consume('RIGHT_BRACE', `Expected '}}' after object ${start.value}`);
         const end = this.consume('RIGHT_BRACE', `Expected '}}' after object ${start.value}`);
-        return new ObjectDeclaration(start.value, members, this.span(start, end));
+        return new ObjectDeclaration(start.value, inheritedType, implementedTypes, members, this.span(start, end));
+    }
+
+    isObjectDeclarationStart() {
+        if (!this.check('IDENTIFIER')) return false;
+        return this.peek(1).type === 'LEFT_BRACE' ||
+            this.peek(1).type === 'INHERITS' ||
+            this.peek(1).type === 'IMPLEMENTS';
     }
 
     parseField() {
@@ -458,6 +463,7 @@ const binaryPrecedence = {
     BANG_EQUAL: 3,
     EQUAL_EQUAL_EQUAL: 3,
     BANG_EQUAL_EQUAL: 3,
+    IS: 3,
     LESS: 4,
     LESS_EQUAL: 4,
     GREATER: 4,

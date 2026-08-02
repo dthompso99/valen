@@ -1,0 +1,25 @@
+import System from '/libSystem.ar'
+
+entry {{
+    __() -> i64 {
+        local engine = new Engine()
+        return 0
+    }
+}}
+
+Engine {{
+    member version:i64
+    __() -> void {
+        self.version = 1
+        local worker = new self.Worker()
+        worker.run()
+    }
+
+
+    Worker {{
+        run() -> void {
+            System.print(200)
+        }
+
+    }}
+}}

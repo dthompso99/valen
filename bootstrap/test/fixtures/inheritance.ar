@@ -1,0 +1,32 @@
+Contract {{
+    render(value:i64) -> i64 { return value }
+}}
+
+Base {{
+    member baseValue:i64 = 3
+    __() -> void { self.baseValue = self.baseValue + 4 }
+    inherited() -> i64 { return 7 }
+    replaced() -> i64 { return 1 }
+}}
+
+Child inherits Base implements Contract {{
+    member childValue:i64 = baseValue + 1
+    __() -> void {
+        super()
+        self.childValue = self.childValue + 1
+    }
+    render(value:i64) -> i64 { return value + 1 }
+    replaced() -> i64 { return super.replaced() + 1 }
+}}
+
+entry {{
+    __() -> i32 {
+        local child = new Child()
+        if child.inherited() != 7 { return 1 }
+        if child.replaced() != 2 { return 2 }
+    if child.render(8) != 9 { return 3 }
+    if child.baseValue != 7 { return 4 }
+    if child.childValue != 5 { return 5 }
+        return 0
+    }
+}}

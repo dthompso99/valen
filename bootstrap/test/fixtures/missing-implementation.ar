@@ -1,0 +1,10 @@
+Contract {{
+    required(value:i64) -> i64 { return value }
+}}
+
+Broken implements Contract {{
+}}
+
+entry {{
+    __() -> i32 { return 0 }
+}}

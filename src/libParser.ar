@@ -47,6 +47,15 @@ library Parsing {{
             local start = self.peek(0)
             if kind == "Library" { start = self.consume("LIBRARY", "Expected 'library'") }
             local name = self.consume("IDENTIFIER", "Expected a declaration name")
+            local inheritedType:Ast.TypeReference? = null
+            local implementedTypes = new Array<Ast.TypeReference>(0)
+            if kind == "Object" {
+                if self.match("INHERITS") { inheritedType = self.parseTypeReference() }
+                if self.match("IMPLEMENTS") {
+                    implementedTypes.append(self.parseTypeReference())
+                    while self.match("COMMA") { implementedTypes.append(self.parseTypeReference()) }
+                }
+            }
             self.consume("LEFT_BRACE", "Expected '{{' after declaration name")
             self.consume("LEFT_BRACE", "Expected '{{' after declaration name")
             local members = new Array<Ast.MemberDeclaration>(0)
@@ -58,14 +67,26 @@ library Parsing {{
             }
             self.consume("RIGHT_BRACE", "Expected '}}' after declaration")
             local end = self.consume("RIGHT_BRACE", "Expected '}}' after declaration")
-            return new Ast.Declaration(kind, name.lexeme, members, self.span(start.span, end.span))
+            local declaration = new Ast.Declaration(kind, name.lexeme, members, self.span(start.span, end.span))
+            declaration.inheritedType = inheritedType
+            declaration.implementedTypes = implementedTypes
+            return declaration
         }
 
         parseMember(inLibrary:bool) -> Ast.MemberDeclaration {
-            if self.check("IDENTIFIER") && self.peek(1).kind == "LEFT_BRACE" && self.peek(2).kind == "LEFT_BRACE" {
+            local nestedObject:bool = false
+            if self.check("IDENTIFIER") {
+                if self.peek(1).kind == "INHERITS" || self.peek(1).kind == "IMPLEMENTS" { nestedObject = true }
+                if self.peek(1).kind == "LEFT_BRACE" {
+                    if self.peek(2).kind == "LEFT_BRACE" { nestedObject = true }
+                }
+            }
+            if nestedObject {
                 local declaration = self.parseDeclaration("Object")
                 local nested = new Ast.MemberDeclaration("Object", declaration.name, declaration.span)
                 nested.members = declaration.members
+                nested.inheritedType = declaration.inheritedType
+                nested.implementedTypes = declaration.implementedTypes
                 return nested
             }
             if self.match("MEMBER") {
@@ -370,7 +391,7 @@ library Parsing {{
         precedence(kind:string) -> i64 {
             if kind == "OR" { return 1 }
             if kind == "AND" { return 2 }
-            if kind == "EQUAL_EQUAL" || kind == "BANG_EQUAL" || kind == "EQUAL_EQUAL_EQUAL" || kind == "BANG_EQUAL_EQUAL" { return 3 }
+            if kind == "EQUAL_EQUAL" || kind == "BANG_EQUAL" || kind == "EQUAL_EQUAL_EQUAL" || kind == "BANG_EQUAL_EQUAL" || kind == "IS" { return 3 }
             if kind == "LESS" || kind == "LESS_EQUAL" || kind == "GREATER" || kind == "GREATER_EQUAL" { return 4 }
             if kind == "PLUS" || kind == "MINUS" { return 5 }
             if kind == "STAR" || kind == "SLASH" { return 6 }

@@ -1,0 +1,42 @@
+import System from '/libSystem.ar'
+
+// double slash indicates the line is a comment, and can be stripped by the lexer
+
+// this structure will evolve as the language begins to take shape.
+
+// classes, or objects are denoted by {{ }}.  A class named entry is the default entry point
+entry {{
+    // __ is the class entry point -- eventually receiving args
+    __() -> i64 {
+        System.print(self.add(10,4))
+        self.count()
+        System.write("Finished\n")
+        return 0
+    }
+    add(a: i64, b: i64) -> i64 {
+        return a + b
+    }
+    count() -> i64 {
+       local value:i64 = 0
+
+        while value < 5 {
+            value = value + 1
+
+            if value == 2 {
+                continue
+            }
+
+            if value == 4 {
+                break
+            } else {
+                System.print(value)
+            }
+        }
+
+        if true {
+            return 0
+        } else {
+            return 1
+        }
+    }
+}}

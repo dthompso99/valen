@@ -18,13 +18,6 @@ entry {{
         builder.append(42)
         builder.appendByte(10)
         System.write(builder.build())
-        local stress = new StringBuilder()
-        local index:i64 = 0
-        while index < 100000 {
-            stress.appendByte(65)
-            index = index + 1
-        }
-        System.print(index)
         return 0
     }
 }}

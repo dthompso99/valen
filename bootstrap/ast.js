@@ -31,9 +31,11 @@ export class ImportDeclaration extends AstNode {
 }
 
 export class ObjectDeclaration extends AstNode {
-    constructor(name, members, span) {
+    constructor(name, inheritedType, implementedTypes, members, span) {
         super('ObjectDeclaration', span);
         this.name = name;
+        this.inheritedType = inheritedType;
+        this.implementedTypes = implementedTypes;
         this.members = members;
     }
 }

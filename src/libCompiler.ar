@@ -284,6 +284,8 @@ library Compiler {{
             if value == "local" { return "LOCAL" }
             if value == "library" { return "LIBRARY" }
             if value == "native" { return "NATIVE" }
+            if value == "inherits" { return "INHERITS" }
+            if value == "implements" { return "IMPLEMENTS" }
             if value == "if" { return "IF" }
             if value == "else" { return "ELSE" }
             if value == "while" { return "WHILE" }
@@ -292,6 +294,7 @@ library Compiler {{
             if value == "true" { return "TRUE" }
             if value == "false" { return "FALSE" }
             if value == "as" { return "AS" }
+            if value == "is" { return "IS" }
             if value == "null" { return "NULL" }
             return "IDENTIFIER"
         }

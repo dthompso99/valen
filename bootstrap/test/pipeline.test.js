@@ -285,6 +285,9 @@ test('Argon compiler source foundation and tokenizer load and lower', () => {
     assert.ok(ir.types.some(type => type.displayName === 'Ir.Instruction'));
     assert.ok(ir.functions.some(fn => fn.displayName === 'Ir.Generator.generate'));
     assert.ok(ir.functions.some(fn => fn.displayName === 'Ir.Generator.lowerExpression'));
+    assert.ok(ir.types.some(type => type.displayName === 'X86_64.Backend'));
+    assert.ok(ir.functions.some(fn => fn.displayName === 'X86_64.Backend.generate'));
+    assert.ok(ir.functions.some(fn => fn.displayName === 'X86_64.Backend.generateInstruction'));
     assert.doesNotThrow(() => new X86_64Backend().generate(ir));
 });
 
@@ -293,6 +296,48 @@ test('Argon symbols support duplicate checks, parent lookup, and shadowing', () 
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     assert.doesNotThrow(() => new X86_64Backend().generate(new IrGenerator().generate(semantic)));
+});
+
+test('objects inherit methods, override by name, and satisfy implemented contracts', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/inheritance.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    assert.ok(ir.functions.some(fn => fn.displayName === 'Base.inherited'));
+    assert.ok(ir.functions.some(fn => fn.displayName === 'Child.replaced'));
+    assert.ok(ir.functions.some(fn => fn.displayName === 'Child.render'));
+    const childType = ir.types.find(type => type.displayName === 'Child');
+    assert.deepEqual(childType.fields.map(field => field.name), ['baseValue', 'childValue']);
+    const childConstructor = ir.functions.find(fn => fn.displayName === 'Child.__');
+    assert.ok(childConstructor.blocks.some(block => block.instructions.some(instruction =>
+        instruction.op === 'call' && instruction.target.endsWith('Base.__'))));
+    assert.doesNotThrow(() => new X86_64Backend().generate(ir));
+
+    const missing = new SemanticAnalyzer().analyze(new Parser().parse(
+        'Contract {{ required() -> void {} }} Broken implements Contract {{ __() -> void {} }}',
+        'missing-implementation.ar'
+    ));
+    assert.equal(missing.success, false);
+    assert.match(missing.diagnostics[0].message, /missing method 'required'/);
+
+    const illegalSuper = new SemanticAnalyzer().analyze(new Parser().parse(
+        'Plain {{ run() -> void { super() } }} entry {{ __() -> i32 { return 0 } }}',
+        'illegal-super.ar'
+    ));
+    assert.equal(illegalSuper.success, false);
+    assert.match(illegalSuper.diagnostics[0].message, /only valid in a child constructor/);
+});
+
+test('subtypes preserve identity, dispatch overrides, and support checked recovery', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/subtypes.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    const operations = ir.functions.flatMap(fn => fn.blocks.flatMap(block => block.instructions.map(i => i.op)));
+    assert.ok(operations.includes('virtual_call'));
+    assert.ok(operations.includes('type_test'));
+    assert.ok(operations.includes('checked_cast'));
+    assert.doesNotThrow(() => new X86_64Backend().generate(ir));
 });
 
 test('UTF-8 strings support length, byte indexing, equality, concatenation, and slicing', () => {

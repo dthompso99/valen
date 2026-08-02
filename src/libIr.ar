@@ -30,6 +30,7 @@ library Ir {{
         member ownerType:string?
         member elementType:string?
         member text:string?
+        member slot:i64
 
         __(op:string) -> void {
             self.op = op
@@ -46,6 +47,7 @@ library Ir {{
             self.ownerType = null
             self.elementType = null
             self.text = null
+            self.slot = -1
         }
     }}
 
@@ -117,17 +119,31 @@ library Ir {{
         }
     }}
 
+    VirtualMethod {{
+        member name:string
+        member target:string
+
+        __(name:string, target:string) -> void {
+            self.name = name
+            self.target = target
+        }
+    }}
+
     Type {{
         member name:string
         member displayName:string
         member initializer:string?
         member fields:Array<Field>
+        member baseName:string?
+        member virtualMethods:Array<VirtualMethod>
 
         __(name:string, displayName:string) -> void {
             self.name = name
             self.displayName = displayName
             self.initializer = null
             self.fields = new Array<Field>(0)
+            self.baseName = null
+            self.virtualMethods = new Array<VirtualMethod>(0)
         }
     }}
 
@@ -262,18 +278,49 @@ library Ir {{
 
         declareObject(name:string, members:Array<Ast.MemberDeclaration>, symbol:Symbols.Symbol) -> void {
             local typeNode = new Type(symbol.qualifiedName, symbol.qualifiedName)
-            local fieldIndex:i64 = 0
+            if symbol.base != null { typeNode.baseName = symbol.base!.qualifiedName }
+            self.appendFields(typeNode, symbol)
+            self.appendVirtualMethods(typeNode, symbol)
             local index:i64 = 0
             while index < members.length {
                 local memberNode = members[index]
                 if memberNode.kind == "Field" {
-                    typeNode.fields.append(new Field(memberNode.name, memberNode.symbol!.qualifiedName, memberNode.symbol!.typeName!, fieldIndex))
-                    fieldIndex = fieldIndex + 1
                     if memberNode.initializer != null { typeNode.initializer = symbol.qualifiedName + ".$initialize" }
                 }
                 index = index + 1
             }
             self.program.types.append(typeNode)
+        }
+
+        appendVirtualMethods(typeNode:Type, symbol:Symbols.Symbol) -> void {
+            if symbol.base != null { self.appendVirtualMethods(typeNode, symbol.base!) }
+            local index:i64 = 0
+            while index < symbol.memberScope!.symbols.length {
+                local method = symbol.memberScope!.symbols[index]
+                if method.kind == "Method" && method.name != "__" {
+                    local slot:i64 = -1
+                    local search:i64 = 0
+                    while search < typeNode.virtualMethods.length {
+                        if typeNode.virtualMethods[search].name == method.name { slot = search; break }
+                        search = search + 1
+                    }
+                    local entry = new VirtualMethod(method.name, method.qualifiedName)
+                    if slot < 0 { typeNode.virtualMethods.append(entry) } else { typeNode.virtualMethods[slot] = entry }
+                }
+                index = index + 1
+            }
+        }
+
+        appendFields(typeNode:Type, symbol:Symbols.Symbol) -> void {
+            if symbol.base != null { self.appendFields(typeNode, symbol.base!) }
+            local index:i64 = 0
+            while index < symbol.memberScope!.symbols.length {
+                local field = symbol.memberScope!.symbols[index]
+                if field.kind == "Field" {
+                    typeNode.fields.append(new Field(field.name, field.qualifiedName, field.typeName!, typeNode.fields.length))
+                }
+                index = index + 1
+            }
         }
 
         lowerContainer(declaration:Ast.Declaration) -> void {
@@ -525,6 +572,15 @@ library Ir {{
             if expression.kind == "Binary" { return self.lowerBinary(expression) }
             if expression.kind == "Conversion" {
                 local value = self.lowerExpression(expression.left!)
+                if expression.operator != null {
+                    if expression.operator! == "reference" { return value }
+                    if expression.operator! == "checked_reference" {
+                        local checked = self.temporary("checked_cast", expression.inferredType!)
+                        checked.first = value
+                        checked.ownerType = expression.text
+                        return checked.result!
+                    }
+                }
                 local instruction = self.temporary("convert", expression.inferredType!)
                 instruction.first = value
                 return instruction.result!
@@ -629,6 +685,12 @@ library Ir {{
 
         lowerBinary(expression:Ast.Expression) -> Value {
             local left = self.lowerExpression(expression.left!)
+            if expression.operator! == "is" {
+                local tested = self.temporary("type_test", "bool")
+                tested.first = left
+                tested.ownerType = expression.text
+                return tested.result!
+            }
             local right = self.lowerExpression(expression.right!)
             local op = "binary"
             if left.typeName == "string" {
@@ -646,6 +708,19 @@ library Ir {{
             local name = ""
             if callee.kind == "Member" { name = callee.name! }
             if callee.symbol != null { name = callee.symbol!.name }
+            if callee.symbol != null {
+                if callee.symbol!.kind == "Super" {
+                    local superCall = new Instruction("call")
+                    superCall.target = callee.symbol!.qualifiedName
+                    if superCall.target!.length > 0 {
+                        superCall.arguments.append(new Value("parameter", "self", self.currentFunction!.ownerType))
+                        local superIndex:i64 = 0
+                        while superIndex < expression.arguments.length { superCall.arguments.append(self.lowerExpression(expression.arguments[superIndex])); superIndex = superIndex + 1 }
+                        self.emit(superCall)
+                    }
+                    return new Value("void", "", "void")
+                }
+            }
             if name == "append" || name == "appendByte" {
                 local op = "array_append"
                 if callee.left!.inferredType! == "StringBuilder" {
@@ -684,7 +759,13 @@ library Ir {{
             if callee.symbol != null { instruction.target = callee.symbol!.qualifiedName }
             if callee.kind == "Member" {
                 if callee.symbol != null {
-                    if callee.symbol!.owner!.kind == "Object" { instruction.arguments.append(self.lowerExpression(callee.left!)) }
+                    if callee.symbol!.owner!.kind == "Object" {
+                        if callee.text != null {
+                            if callee.text! == "super" { instruction.arguments.append(new Value("parameter", "self", self.currentFunction!.ownerType)) } else { instruction.arguments.append(self.lowerExpression(callee.left!)) }
+                        } else {
+                            instruction.arguments.append(self.lowerExpression(callee.left!))
+                        }
+                    }
                 }
             } else {
                 if callee.symbol != null {
@@ -693,6 +774,18 @@ library Ir {{
             }
             local index:i64 = 0
             while index < expression.arguments.length { instruction.arguments.append(self.lowerExpression(expression.arguments[index])); index = index + 1 }
+            if callee.symbol != null {
+                if callee.symbol!.kind == "Method" && callee.symbol!.name != "__" && callee.symbol!.owner!.kind == "Object" && callee.text == null {
+                    local ownerType = self.findType(callee.symbol!.owner!.qualifiedName)
+                    if ownerType != null {
+                        local slotIndex:i64 = 0
+                        while slotIndex < ownerType!.virtualMethods.length {
+                            if ownerType!.virtualMethods[slotIndex].name == callee.symbol!.name { instruction.op = "virtual_call"; instruction.slot = slotIndex; break }
+                            slotIndex = slotIndex + 1
+                        }
+                    }
+                }
+            }
             if expression.inferredType! == "void" { self.emit(instruction); return new Value("void", "", "void") }
             instruction.result = new Value("temporary", "%" + self.nextTemporary.toString(), expression.inferredType!)
             instruction.typeName = expression.inferredType
@@ -717,15 +810,7 @@ library Ir {{
             local instruction = self.temporary("allocate", typeName)
             instruction.ownerType = typeName
             local instance = instruction.result!
-            local typeNode = self.findType(typeName)
-            if typeNode != null {
-                if typeNode!.initializer != null {
-                    local initialize = new Instruction("call")
-                    initialize.target = typeNode!.initializer
-                    initialize.arguments.append(instance)
-                    self.emit(initialize)
-                }
-            }
+            self.lowerInitializers(expression.symbol!, instance)
             local constructor = self.findMethod(expression.symbol!, "__")
             if constructor != null {
                 local call = new Instruction("call")
@@ -736,6 +821,19 @@ library Ir {{
                 self.emit(call)
             }
             return instance
+        }
+
+        lowerInitializers(owner:Symbols.Symbol, instance:Value) -> void {
+            if owner.base != null { self.lowerInitializers(owner.base!, instance) }
+            local typeNode = self.findType(owner.qualifiedName)
+            if typeNode != null {
+                if typeNode!.initializer != null {
+                    local initialize = new Instruction("call")
+                    initialize.target = typeNode!.initializer
+                    initialize.arguments.append(instance)
+                    self.emit(initialize)
+                }
+            }
         }
 
         lowerPropagation(expression:Ast.Expression) -> Value {

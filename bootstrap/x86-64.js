@@ -7,9 +7,10 @@ export class X86_64Backend {
         this.fieldOffsets = new Map();
         this.typeSizes = new Map();
         this.stringLiterals = new Map();
+        this.runtimeLabel = 0;
 
         for (const type of program.types) {
-            let offset = 0;
+            let offset = 8;
             let alignment = 1;
             for (const field of type.fields) {
                 const size = this.sizeOf(field.type);
@@ -89,6 +90,7 @@ export class X86_64Backend {
         lines.push(...this.stringRuntime());
         lines.push(...this.builderRuntime());
         lines.push(...this.stringData());
+        lines.push(...this.typeData());
         if (this.needsProcessArguments) lines.push(...this.processData());
         if (this.needsFilesystemState) lines.push(...this.filesystemData());
         lines.push('.section .note.GNU-stack,"",@progbits');
@@ -195,6 +197,7 @@ export class X86_64Backend {
                 break;
             case 'allocate':
                 lines.push(`    mov rdi, ${this.typeSizes.get(instruction.objectType) ?? 8}`, '    call argon_alloc');
+                lines.push(`    lea rcx, [rip+${this.typeLabel(instruction.objectType)}]`, '    mov QWORD PTR [rax], rcx');
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
                 break;
             case 'array_new':
@@ -279,6 +282,22 @@ export class X86_64Backend {
             case 'call':
                 lines.push(...this.call(instruction));
                 break;
+            case 'virtual_call':
+                lines.push(...this.call(instruction, true));
+                break;
+            case 'type_test':
+            case 'checked_cast': {
+                const id = this.runtimeLabel++;
+                const loop = `.Ltype_test_${id}`;
+                const match = `.Ltype_match_${id}`;
+                const done = `.Ltype_done_${id}`;
+                lines.push(...this.load(instruction.value, 'rcx'), '    xor eax, eax', '    test rcx, rcx', `    jz ${done}`,
+                    '    mov rdx, QWORD PTR [rcx]', `    lea r8, [rip+${this.typeLabel(instruction.targetType)}]`, `${loop}:`,
+                    '    test rdx, rdx', `    jz ${done}`, '    cmp rdx, r8', `    je ${match}`, '    mov rdx, QWORD PTR [rdx]', `    jmp ${loop}`,
+                    `${match}:`, instruction.op === 'type_test' ? '    mov eax, 1' : '    mov rax, rcx', `${done}:`,
+                    `    mov ${this.temp(instruction.result)}, rax`);
+                break;
+            }
             case 'convert':
                 lines.push(...this.load(instruction.value, 'rax'));
                 lines.push(...this.normalize('rax', instruction.type));
@@ -333,7 +352,7 @@ export class X86_64Backend {
         return lines;
     }
 
-    call(instruction) {
+    call(instruction, dynamic = false) {
         const lines = [];
         instruction.arguments.slice(0, argumentRegisters.length)
             .forEach((argument, index) => lines.push(...this.load(argument, argumentRegisters[index])));
@@ -343,9 +362,13 @@ export class X86_64Backend {
         for (let index = stackArguments.length - 1; index >= 0; index--) {
             lines.push(...this.load(stackArguments[index], 'rax'), '    push rax');
         }
-        const target = this.functionSymbols.get(instruction.target);
-        if (!target) throw new Error(`No function symbol for ${instruction.target}`);
-        lines.push(`    call ${target}`);
+        if (dynamic) {
+            lines.push('    mov rax, QWORD PTR [rdi]', `    call QWORD PTR [rax+${8 + instruction.slot * 8}]`);
+        } else {
+            const target = this.functionSymbols.get(instruction.target);
+            if (!target) throw new Error(`No function symbol for ${instruction.target}`);
+            lines.push(`    call ${target}`);
+        }
         const stackBytes = stackArguments.length * 8 + padding;
         if (stackBytes) lines.push(`    add rsp, ${stackBytes}`);
         if (instruction.result) lines.push(`    mov ${this.temp(instruction.result)}, rax`);
@@ -370,6 +393,8 @@ export class X86_64Backend {
             '    sub rsp, 16',
             `    mov rdi, ${this.typeSizes.get(entryType) ?? 8}`,
             '    call argon_alloc',
+            `    lea rcx, [rip+${this.typeLabel(entryType)}]`,
+            '    mov QWORD PTR [rax], rcx',
             '    mov QWORD PTR [rbp-8], rax',
             ...(initializer ? [
                 '    mov rdi, rax',
@@ -382,6 +407,20 @@ export class X86_64Backend {
             '    ret',
             ''
         ];
+    }
+
+    typeLabel(typeName) {
+        return `.Largon_type_${this.mangle(typeName)}`;
+    }
+
+    typeData() {
+        const lines = ['.section .data', '.align 8'];
+        for (const type of this.program.types) {
+            lines.push(`${this.typeLabel(type.name)}:`, type.base ? `    .quad ${this.typeLabel(type.base)}` : '    .quad 0');
+            for (const method of type.virtualMethods ?? []) lines.push(`    .quad ${this.functionSymbols.get(method.target)}`);
+        }
+        lines.push('.text');
+        return lines;
     }
 
     printI64Runtime() {
