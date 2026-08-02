@@ -1,0 +1,33 @@
+import Diagnostics from '/libDiagnostics.ar'
+
+entry {{
+    __() -> i64 {
+        local bag = new Diagnostics.DiagnosticBag()
+        local empty = bag.first()
+        if empty != null {
+            return 1
+        }
+        if Diagnostics.firstMessage(bag) != null {
+            return 2
+        }
+
+        local diagnostic = new Diagnostics.Diagnostic(2, "unexpected token", "sample.ar", 4, 12)
+        bag.add(diagnostic)
+        local first = bag.first()
+        if first == null {
+            return 3
+        }
+
+        local resolved = first!
+        local message = Diagnostics.firstMessage(bag)
+        if message == null || message! != "unexpected token" {
+            return 4
+        }
+        local rendered = Diagnostics.format(resolved)
+        if bag.length() == 1 && resolved.message == "unexpected token" && resolved.line == 4 && rendered == "sample.ar:4:12: unexpected token" {
+            return 0
+        } else {
+            return 5
+        }
+    }
+}}

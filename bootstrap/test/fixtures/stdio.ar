@@ -1,0 +1,9 @@
+import System from '/libSystem.ar'
+
+entry {{
+    __() -> i32 {
+        System.write("standard output\n")
+        System.writeError("standard error\n")
+        return 0
+    }
+}}

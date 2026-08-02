@@ -1,0 +1,4 @@
+import CycleB from 'module-cycle-b.ar'
+
+library CycleA {{
+}}

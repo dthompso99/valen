@@ -1,0 +1,518 @@
+import Ast from 'libAst.ar'
+import Compiler from 'libCompiler.ar'
+import Symbols from 'libSymbols.ar'
+import Diagnostics from 'libDiagnostics.ar'
+import ModuleLoading from 'libModuleLoader.ar'
+
+library Semantics {{
+    ModuleScope {{
+        member module:ModuleLoading.Module
+        member scope:Symbols.Scope
+
+        __(module:ModuleLoading.Module, scope:Symbols.Scope) -> void {
+            self.module = module
+            self.scope = scope
+        }
+    }}
+
+    Analysis {{
+        member graph:ModuleLoading.ModuleGraph
+        member diagnostics:Diagnostics.DiagnosticBag
+
+        __(graph:ModuleLoading.ModuleGraph, diagnostics:Diagnostics.DiagnosticBag) -> void {
+            self.graph = graph
+            self.diagnostics = diagnostics
+        }
+
+        success() -> bool { return !self.diagnostics.hasErrors() }
+    }}
+
+    Analyzer {{
+        member graph:ModuleLoading.ModuleGraph
+        member globals:Symbols.Scope
+        member modules:Array<ModuleScope>
+        member diagnostics:Diagnostics.DiagnosticBag
+
+        __(graph:ModuleLoading.ModuleGraph) -> void {
+            self.graph = graph
+            self.globals = new Symbols.Scope("global", null)
+            self.modules = new Array<ModuleScope>(0)
+            self.diagnostics = graph.diagnostics
+        }
+
+        analyze() -> Analysis {
+            self.defineBuiltins()
+            self.createModuleScopes()
+            self.declareModules()
+            self.bindImports()
+            self.declareMembers()
+            self.analyzeModules()
+            return new Analysis(self.graph, self.diagnostics)
+        }
+
+        defineBuiltins() -> void {
+            self.defineBuiltin("void")
+            self.defineBuiltin("bool")
+            self.defineBuiltin("u8")
+            self.defineBuiltin("i32")
+            self.defineBuiltin("i64")
+            self.defineBuiltin("string")
+            self.defineBuiltin("Array")
+            self.defineBuiltin("StringBuilder")
+        }
+
+        defineBuiltin(name:string) -> void {
+            local span = self.graph.modules[0].program.span
+            local symbol = new Symbols.Symbol("Type", name, name, span)
+            symbol.typeName = name
+            symbol.memberScope = new Symbols.Scope(name, null)
+            self.globals.define(symbol)
+        }
+
+        createModuleScopes() -> void {
+            local index:i64 = 0
+            while index < self.graph.modules.length {
+                local module = self.graph.modules[index]
+                self.modules.append(new ModuleScope(module, new Symbols.Scope(module.path, self.globals)))
+                index = index + 1
+            }
+        }
+
+        declareModules() -> void {
+            local index:i64 = 0
+            while index < self.modules.length {
+                local item = self.modules[index]
+                local declarationIndex:i64 = 0
+                while declarationIndex < item.module.program.declarations.length {
+                    self.declareDeclaration(item.module.program.declarations[declarationIndex], item.scope, null, "")
+                    declarationIndex = declarationIndex + 1
+                }
+                index = index + 1
+            }
+        }
+
+        declareDeclaration(declaration:Ast.Declaration, scope:Symbols.Scope, owner:Symbols.Symbol?, prefix:string) -> void {
+            local qualified = declaration.name
+            if prefix.length > 0 { qualified = prefix + "." + declaration.name }
+            local symbol = new Symbols.Symbol(declaration.kind, declaration.name, qualified, declaration.span)
+            symbol.typeName = qualified
+            symbol.owner = owner
+            symbol.memberScope = new Symbols.Scope(qualified, scope)
+            declaration.symbol = symbol
+            if !scope.define(symbol) { self.error(declaration.span, "Duplicate declaration '" + declaration.name + "'") }
+            local index:i64 = 0
+            while index < declaration.members.length {
+                local memberNode = declaration.members[index]
+                if memberNode.kind == "Object" { self.declareNested(memberNode, symbol, qualified) }
+                index = index + 1
+            }
+        }
+
+        declareNested(memberNode:Ast.MemberDeclaration, owner:Symbols.Symbol, prefix:string) -> void {
+            local qualified = prefix + "." + memberNode.name
+            local symbol = new Symbols.Symbol("Object", memberNode.name, qualified, memberNode.span)
+            symbol.typeName = qualified
+            symbol.owner = owner
+            symbol.memberScope = new Symbols.Scope(qualified, owner.memberScope)
+            memberNode.symbol = symbol
+            if !owner.memberScope!.define(symbol) { self.error(memberNode.span, "Duplicate member '" + memberNode.name + "'") }
+            local index:i64 = 0
+            while index < memberNode.members.length {
+                if memberNode.members[index].kind == "Object" { self.declareNested(memberNode.members[index], symbol, qualified) }
+                index = index + 1
+            }
+        }
+
+        bindImports() -> void {
+            local index:i64 = 0
+            while index < self.modules.length {
+                local item = self.modules[index]
+                local importIndex:i64 = 0
+                while importIndex < item.module.imports.length {
+                    local imported = item.module.imports[importIndex]
+                    local targetScope = self.scopeFor(imported.loadedModule)
+                    local target = targetScope.lookupLocal(imported.name)
+                    if target == null {
+                        self.error(imported.declaration.span, "Module does not declare '" + imported.name + "'")
+                    } else {
+                        imported.declaration.symbol = target
+                        if !item.scope.define(target!) { self.error(imported.declaration.span, "Duplicate name '" + imported.name + "'") }
+                    }
+                    importIndex = importIndex + 1
+                }
+                index = index + 1
+            }
+        }
+
+        declareMembers() -> void {
+            local moduleIndex:i64 = 0
+            while moduleIndex < self.modules.length {
+                local item = self.modules[moduleIndex]
+                local index:i64 = 0
+                while index < item.module.program.declarations.length {
+                    local declaration = item.module.program.declarations[index]
+                    self.declareMemberList(declaration.members, declaration.symbol!, item.scope)
+                    index = index + 1
+                }
+                moduleIndex = moduleIndex + 1
+            }
+        }
+
+        declareMemberList(members:Array<Ast.MemberDeclaration>, owner:Symbols.Symbol, moduleScope:Symbols.Scope) -> void {
+            local index:i64 = 0
+            while index < members.length {
+                local memberNode = members[index]
+                if memberNode.kind == "Object" {
+                    self.declareMemberList(memberNode.members, memberNode.symbol!, moduleScope)
+                } else {
+                    local symbol = new Symbols.Symbol(memberNode.kind, memberNode.name, owner.qualifiedName + "." + memberNode.name, memberNode.span)
+                    symbol.owner = owner
+                    symbol.isNative = memberNode.isNative
+                    if memberNode.kind == "Field" {
+                        symbol.typeName = self.bindType(memberNode.declaredType!, owner.memberScope!)
+                    } else {
+                        symbol.returnType = self.bindType(memberNode.returnType!, owner.memberScope!)
+                        local parameterIndex:i64 = 0
+                        while parameterIndex < memberNode.parameters.length {
+                            local parameter = memberNode.parameters[parameterIndex]
+                            local parameterSymbol = new Symbols.Symbol("Parameter", parameter.name, symbol.qualifiedName + "." + parameter.name, parameter.span)
+                            parameterSymbol.typeName = self.bindType(parameter.parameterType, owner.memberScope!)
+                            parameterSymbol.owner = symbol
+                            parameter.symbol = parameterSymbol
+                            symbol.parameters.append(parameterSymbol)
+                            parameterIndex = parameterIndex + 1
+                        }
+                    }
+                    memberNode.symbol = symbol
+                    if !owner.memberScope!.define(symbol) { self.error(memberNode.span, "Duplicate member '" + memberNode.name + "'") }
+                }
+                index = index + 1
+            }
+        }
+
+        analyzeModules() -> void {
+            local moduleIndex:i64 = 0
+            while moduleIndex < self.modules.length {
+                local item = self.modules[moduleIndex]
+                local index:i64 = 0
+                while index < item.module.program.declarations.length {
+                    local declaration = item.module.program.declarations[index]
+                    self.analyzeMemberList(declaration.members, declaration.symbol!, item.scope)
+                    index = index + 1
+                }
+                moduleIndex = moduleIndex + 1
+            }
+        }
+
+        analyzeMemberList(members:Array<Ast.MemberDeclaration>, owner:Symbols.Symbol, moduleScope:Symbols.Scope) -> void {
+            local index:i64 = 0
+            while index < members.length {
+                local memberNode = members[index]
+                if memberNode.kind == "Object" {
+                    self.analyzeMemberList(memberNode.members, memberNode.symbol!, moduleScope)
+                } else {
+                    if memberNode.kind == "Field" {
+                        if memberNode.initializer != null {
+                            local actual = self.analyzeExpression(memberNode.initializer!, owner.memberScope!, moduleScope)
+                            self.requireCompatible(memberNode.symbol!.typeName!, actual, memberNode.initializer!.span)
+                        }
+                    } else {
+                        self.analyzeMethod(memberNode, owner, moduleScope)
+                    }
+                }
+                index = index + 1
+            }
+        }
+
+        analyzeMethod(method:Ast.MemberDeclaration, owner:Symbols.Symbol, moduleScope:Symbols.Scope) -> void {
+            local scope = new Symbols.Scope(method.symbol!.qualifiedName, owner.memberScope)
+            local selfSymbol = new Symbols.Symbol("Local", "self", method.symbol!.qualifiedName + ".self", method.span)
+            selfSymbol.typeName = owner.qualifiedName
+            scope.define(selfSymbol)
+            local index:i64 = 0
+            while index < method.symbol!.parameters.length {
+                local parameter = method.symbol!.parameters[index]
+                if !scope.define(parameter) { self.error(parameter.span, "Duplicate parameter '" + parameter.name + "'") }
+                index = index + 1
+            }
+            if method.body != null { self.analyzeBlock(method.body!, scope, moduleScope, method.symbol!.returnType!, false) }
+        }
+
+        analyzeBlock(block:Ast.Block, parent:Symbols.Scope, moduleScope:Symbols.Scope, returnType:string, inLoop:bool) -> void {
+            local scope = new Symbols.Scope("block", parent)
+            local index:i64 = 0
+            while index < block.statements.length {
+                self.analyzeStatement(block.statements[index], scope, moduleScope, returnType, inLoop)
+                index = index + 1
+            }
+        }
+
+        analyzeStatement(statement:Ast.Statement, scope:Symbols.Scope, moduleScope:Symbols.Scope, returnType:string, inLoop:bool) -> void {
+            if statement.kind == "Local" {
+                local valueType:string? = null
+                if statement.expression != null { valueType = self.analyzeExpression(statement.expression!, scope, moduleScope) }
+                local localType = valueType
+                if statement.declaredType != null { localType = self.bindType(statement.declaredType!, scope) }
+                if localType == null { self.error(statement.span, "Local '" + statement.name! + "' needs a type or initializer"); return }
+                if valueType != null { self.requireCompatible(localType!, valueType!, statement.span) }
+                local symbol = new Symbols.Symbol("Local", statement.name!, statement.name!, statement.span)
+                symbol.typeName = localType
+                statement.symbol = symbol
+                if !scope.define(symbol) { self.error(statement.span, "Duplicate local '" + statement.name! + "'") }
+                return
+            }
+            if statement.kind == "Return" {
+                if statement.expression == null {
+                    if returnType != "void" { self.error(statement.span, "Expected a return value of type '" + returnType + "'") }
+                } else {
+                    local actual = self.analyzeExpression(statement.expression!, scope, moduleScope)
+                    self.requireCompatible(returnType, actual, statement.span)
+                }
+                return
+            }
+            if statement.kind == "If" || statement.kind == "While" {
+                local conditionType = self.analyzeExpression(statement.condition!, scope, moduleScope)
+                self.requireCompatible("bool", conditionType, statement.condition!.span)
+                local childLoop = inLoop
+                if statement.kind == "While" { childLoop = true }
+                self.analyzeBlock(statement.body!, scope, moduleScope, returnType, childLoop)
+                if statement.alternate != null { self.analyzeBlock(statement.alternate!, scope, moduleScope, returnType, inLoop) }
+                return
+            }
+            if statement.kind == "Break" || statement.kind == "Continue" {
+                if !inLoop { self.error(statement.span, "'" + statement.kind + "' is only valid inside a loop") }
+                return
+            }
+            if statement.kind == "Block" { self.analyzeBlock(statement.body!, scope, moduleScope, returnType, inLoop); return }
+            if statement.expression != null { self.analyzeExpression(statement.expression!, scope, moduleScope) }
+        }
+
+        analyzeExpression(expression:Ast.Expression, scope:Symbols.Scope, moduleScope:Symbols.Scope) -> string {
+            if expression.kind == "Integer" { return self.typed(expression, "i64") }
+            if expression.kind == "String" { return self.typed(expression, "string") }
+            if expression.kind == "Boolean" { return self.typed(expression, "bool") }
+            if expression.kind == "Null" { return self.typed(expression, "null") }
+            if expression.kind == "Identifier" {
+                local symbol = scope.lookup(expression.name!)
+                if symbol == null { self.error(expression.span, "Unknown name '" + expression.name! + "'"); return self.typed(expression, "error") }
+                expression.symbol = symbol
+                if symbol!.typeName != null { return self.typed(expression, symbol!.typeName!) }
+                if symbol!.returnType != null { return self.typed(expression, symbol!.returnType!) }
+                return self.typed(expression, "error")
+            }
+            if expression.kind == "Member" {
+                local leftType = self.analyzeExpression(expression.left!, scope, moduleScope)
+                local owner = expression.left!.symbol
+                if owner == null { owner = self.findType(leftType, moduleScope) }
+                if owner != null {
+                    if owner!.memberScope == null { owner = self.findType(leftType, moduleScope) }
+                }
+                if owner == null { return self.builtinMember(expression, leftType) }
+                if owner!.memberScope == null { return self.builtinMember(expression, leftType) }
+                local foundMember = owner!.memberScope!.lookupLocal(expression.name!)
+                if foundMember == null { return self.builtinMember(expression, leftType) }
+                expression.symbol = foundMember
+                if foundMember!.typeName != null { return self.typed(expression, foundMember!.typeName!) }
+                return self.typed(expression, foundMember!.returnType!)
+            }
+            if expression.kind == "Call" {
+                self.analyzeExpression(expression.left!, scope, moduleScope)
+                local callable = expression.left!.symbol
+                local index:i64 = 0
+                while index < expression.arguments.length {
+                    local argumentType = self.analyzeExpression(expression.arguments[index], scope, moduleScope)
+                    if callable != null {
+                        if index < callable!.parameters.length { self.requireCompatible(callable!.parameters[index].typeName!, argumentType, expression.arguments[index].span) }
+                    }
+                    index = index + 1
+                }
+                if callable != null {
+                    if expression.arguments.length != callable!.parameters.length { self.error(expression.span, "Expected " + callable!.parameters.length.toString() + " arguments but received " + expression.arguments.length.toString()) }
+                    expression.symbol = callable
+                    return self.typed(expression, callable!.returnType!)
+                }
+                return self.typed(expression, expression.left!.inferredType!)
+            }
+            if expression.kind == "New" {
+                local name = self.expressionName(expression.left!)
+                if expression.typeArguments.length > 0 { name = name + "<" + self.bindType(expression.typeArguments[0], scope) + ">" }
+                local target = self.findType(name, scope)
+                if target == null {
+                    if !self.isArray(name) { self.error(expression.span, "Unknown type '" + name + "'") }
+                } else {
+                    expression.symbol = target
+                    if !self.isArray(name) { name = target!.qualifiedName }
+                }
+                local index:i64 = 0
+                while index < expression.arguments.length { self.analyzeExpression(expression.arguments[index], scope, moduleScope); index = index + 1 }
+                return self.typed(expression, name)
+            }
+            if expression.kind == "Index" {
+                local container = self.analyzeExpression(expression.left!, scope, moduleScope)
+                local indexType = self.analyzeExpression(expression.right!, scope, moduleScope)
+                if !self.isInteger(indexType) { self.error(expression.right!.span, "Array index must be an integer") }
+                if self.isArray(container) { return self.typed(expression, container.slice(6, container.length - 7)) }
+                if container == "string" { return self.typed(expression, "u8") }
+                self.error(expression.span, "Type '" + container + "' cannot be indexed")
+                return self.typed(expression, "error")
+            }
+            if expression.kind == "Assignment" {
+                local target = self.analyzeExpression(expression.left!, scope, moduleScope)
+                local value = self.analyzeExpression(expression.right!, scope, moduleScope)
+                self.requireCompatible(target, value, expression.span)
+                return self.typed(expression, target)
+            }
+            if expression.kind == "Unary" {
+                local operand = self.analyzeExpression(expression.left!, scope, moduleScope)
+                if expression.operator! == "!" { self.requireCompatible("bool", operand, expression.span); return self.typed(expression, "bool") }
+                if !self.isInteger(operand) { self.error(expression.span, "Unary '-' requires an integer") }
+                return self.typed(expression, operand)
+            }
+            if expression.kind == "Binary" { return self.analyzeBinary(expression, scope, moduleScope) }
+            if expression.kind == "Conversion" {
+                local source = self.analyzeExpression(expression.left!, scope, moduleScope)
+                local target = self.bindType(expression.typeArguments[0], moduleScope)
+                if !self.isInteger(source) || !self.isInteger(target) { self.error(expression.span, "Integer conversion requires integer types") }
+                return self.typed(expression, target)
+            }
+            if expression.kind == "Unwrap" || expression.kind == "Propagate" {
+                local optional = self.analyzeExpression(expression.left!, scope, moduleScope)
+                if !self.isOptional(optional) { self.error(expression.span, "Operator requires an optional value"); return self.typed(expression, "error") }
+                return self.typed(expression, optional.slice(0, optional.length - 1))
+            }
+            return self.typed(expression, "error")
+        }
+
+        analyzeBinary(expression:Ast.Expression, scope:Symbols.Scope, moduleScope:Symbols.Scope) -> string {
+            local left = self.analyzeExpression(expression.left!, scope, moduleScope)
+            local right = self.analyzeExpression(expression.right!, scope, moduleScope)
+            local operator = expression.operator!
+            if operator == "&&" || operator == "||" { self.requireCompatible("bool", left, expression.left!.span); self.requireCompatible("bool", right, expression.right!.span); return self.typed(expression, "bool") }
+            if operator == "==" || operator == "!=" || operator == "===" || operator == "!==" || operator == "<" || operator == "<=" || operator == ">" || operator == ">=" { return self.typed(expression, "bool") }
+            if operator == "+" {
+                if left == "string" && right == "string" { return self.typed(expression, "string") }
+            }
+            if !self.isInteger(left) || !self.isInteger(right) { self.error(expression.span, "Operator '" + operator + "' requires compatible operands"); return self.typed(expression, "error") }
+            return self.typed(expression, left)
+        }
+
+        builtinMember(expression:Ast.Expression, ownerType:string) -> string {
+            local name = expression.name!
+            if name == "length" {
+                if ownerType == "string" || self.isArray(ownerType) || ownerType == "StringBuilder" { return self.typed(expression, "i64") }
+            }
+            if name == "append" { return self.typed(expression, "void") }
+            if name == "appendByte" { return self.typed(expression, "void") }
+            if name == "build" { return self.typed(expression, "string") }
+            if name == "slice" { return self.typed(expression, "string") }
+            if name == "toString" { return self.typed(expression, "string") }
+            self.error(expression.span, "Type '" + ownerType + "' has no member '" + name + "'")
+            return self.typed(expression, "error")
+        }
+
+        bindType(reference:Ast.TypeReference, scope:Symbols.Scope) -> string {
+            local name = reference.name
+            local symbol = self.findType(name, scope)
+            if symbol == null {
+                self.error(reference.span, "Unknown type '" + name + "'")
+            } else {
+                reference.symbol = symbol
+                name = symbol!.qualifiedName
+            }
+            if reference.arguments.length > 0 { name = name + "<" + self.bindType(reference.arguments[0], scope) + ">" }
+            if reference.optional { name = name + "?" }
+            return name
+        }
+
+        findType(name:string, scope:Symbols.Scope) -> Symbols.Symbol? {
+            local direct = scope.lookup(name)
+            if direct != null { return direct }
+            local dot:i64 = -1
+            local index:i64 = 0
+            while index < name.length { if name[index] == 46 { dot = index; break }; index = index + 1 }
+            if dot < 0 { return self.findCanonical(name) }
+            local current = scope.lookup(name.slice(0, dot))
+            local start = dot + 1
+            while current != null {
+                local nextDot:i64 = -1
+                index = start
+                while index < name.length { if name[index] == 46 { nextDot = index; break }; index = index + 1 }
+                local length = name.length - start
+                if nextDot >= 0 { length = nextDot - start }
+                if current!.memberScope == null { return self.findCanonical(name) }
+                current = current!.memberScope!.lookupLocal(name.slice(start, length))
+                if nextDot < 0 { return current }
+                start = nextDot + 1
+            }
+            return self.findCanonical(name)
+        }
+
+        findCanonical(name:string) -> Symbols.Symbol? {
+            local moduleIndex:i64 = 0
+            while moduleIndex < self.modules.length {
+                local symbols = self.modules[moduleIndex].scope.symbols
+                local index:i64 = 0
+                while index < symbols.length {
+                    local found = self.findCanonicalMember(symbols[index], name)
+                    if found != null { return found }
+                    index = index + 1
+                }
+                moduleIndex = moduleIndex + 1
+            }
+            return null
+        }
+
+        findCanonicalMember(symbol:Symbols.Symbol, name:string) -> Symbols.Symbol? {
+            if symbol.qualifiedName == name { return symbol }
+            if symbol.memberScope == null { return null }
+            local index:i64 = 0
+            while index < symbol.memberScope!.symbols.length {
+                local found = self.findCanonicalMember(symbol.memberScope!.symbols[index], name)
+                if found != null { return found }
+                index = index + 1
+            }
+            return null
+        }
+
+        expressionName(expression:Ast.Expression) -> string {
+            if expression.kind == "Identifier" { return expression.name! }
+            if expression.kind == "Member" { return self.expressionName(expression.left!) + "." + expression.name! }
+            return ""
+        }
+
+        requireCompatible(expected:string, actual:string, span:Compiler.SourceSpan) -> void {
+            if expected == actual || expected == "error" || actual == "error" { return }
+            if actual == "null" {
+                if self.isOptional(expected) { return }
+            }
+            if self.isOptional(expected) {
+                if expected.slice(0, expected.length - 1) == actual { return }
+            }
+            if self.isInteger(expected) && self.isInteger(actual) { return }
+            self.error(span, "Cannot use value of type '" + actual + "' where '" + expected + "' is required")
+        }
+
+        typed(expression:Ast.Expression, typeName:string) -> string { expression.inferredType = typeName; return typeName }
+        isArray(name:string) -> bool {
+            if name.length <= 7 { return false }
+            if name.slice(0, 6) != "Array<" { return false }
+            return name[name.length - 1] == 62
+        }
+
+        isOptional(name:string) -> bool {
+            if name.length == 0 { return false }
+            return name[name.length - 1] == 63
+        }
+        isInteger(name:string) -> bool { return name == "u8" || name == "i32" || name == "i64" }
+
+        scopeFor(module:ModuleLoading.Module) -> Symbols.Scope {
+            local index:i64 = 0
+            while index < self.modules.length { if self.modules[index].module.path == module.path { return self.modules[index].scope }; index = index + 1 }
+            return self.globals
+        }
+
+        error(span:Compiler.SourceSpan, message:string) -> void {
+            self.diagnostics.add(new Diagnostics.Diagnostic(1, message, span))
+        }
+    }}
+}}

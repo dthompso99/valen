@@ -1,0 +1,67 @@
+import Compiler from 'libCompiler.ar'
+
+library Symbols {{
+    Symbol {{
+        member kind:string
+        member name:string
+        member qualifiedName:string
+        member typeName:string?
+        member returnType:string?
+        member span:Compiler.SourceSpan
+        member owner:Symbol?
+        member memberScope:Scope?
+        member parameters:Array<Symbol>
+        member isNative:bool
+
+        __(kind:string, name:string, qualifiedName:string, span:Compiler.SourceSpan) -> void {
+            self.kind = kind
+            self.name = name
+            self.qualifiedName = qualifiedName
+            self.typeName = null
+            self.returnType = null
+            self.span = span
+            self.owner = null
+            self.memberScope = null
+            self.parameters = new Array<Symbol>(0)
+            self.isNative = false
+        }
+    }}
+
+    Scope {{
+        member name:string
+        member parent:Scope?
+        member symbols:Array<Symbol>
+
+        __(name:string, parent:Scope?) -> void {
+            self.name = name
+            self.parent = parent
+            self.symbols = new Array<Symbol>(0)
+        }
+
+        define(symbol:Symbol) -> bool {
+            if self.lookupLocal(symbol.name) != null { return false }
+            self.symbols.append(symbol)
+            return true
+        }
+
+        lookupLocal(name:string) -> Symbol? {
+            local index:i64 = 0
+            while index < self.symbols.length {
+                local symbol = self.symbols[index]
+                if symbol.name == name { return symbol }
+                index = index + 1
+            }
+            return null
+        }
+
+        lookup(name:string) -> Symbol? {
+            local current:Scope? = self
+            while current != null {
+                local found = current!.lookupLocal(name)
+                if found != null { return found }
+                current = current!.parent
+            }
+            return null
+        }
+    }}
+}}

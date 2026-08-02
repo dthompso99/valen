@@ -1,0 +1,63 @@
+import Scopes from '/libScopes.ar'
+
+entry {{
+    __() -> i64 {
+        local root = new Scopes.Scope(null)
+        local outer = new Scopes.Symbol("value", 1)
+        if !root.define(outer) || root.define(outer) {
+            return 1
+        }
+
+        local child = new Scopes.Scope(root)
+        local inherited = child.lookup("value")
+        if inherited == null || inherited!.kind != 1 {
+            return 2
+        }
+
+        local inner = new Scopes.Symbol("value", 2)
+        if !child.define(inner) {
+            return 3
+        }
+        local shadowed = child.lookup("value")
+        if shadowed == null || shadowed!.kind != 2 {
+            return 4
+        }
+
+        local index:i64 = 0
+        while index < 20 {
+            local generated = new Scopes.Symbol("symbol" + index.toString(), index as u8)
+            if !child.define(generated) {
+                return 5
+            }
+            index = index + 1
+        }
+        local mapped = child.lookup("symbol17")
+        if mapped == null || mapped!.kind != 17 {
+            return 6
+        }
+
+        local names = new Scopes.StringSet()
+        index = 0
+        while index < 20 {
+            if !names.add("name" + index.toString()) {
+                return 7
+            }
+            index = index + 1
+        }
+        if names.add("name17") || !names.contains("name17") || names.contains("missing") || names.length() != 20 {
+            return 8
+        }
+
+        local marker:i64 = 10
+        {
+            local marker:i64 = 20
+            if marker != 20 {
+                return 9
+            }
+        }
+        if marker != 10 {
+            return 10
+        }
+        return 0
+    }
+}}

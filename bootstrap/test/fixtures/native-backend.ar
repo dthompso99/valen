@@ -1,0 +1,30 @@
+import System from '/libSystem.ar'
+
+entry {{
+    __() -> i32 {
+        local values = new Array<i64>(2)
+        values[0] = 7
+        values[1] = 8
+        values.append(9)
+        System.print(values.length)
+        System.print(values[2])
+
+        local greeting = "native " + "argon\n"
+        System.write(greeting)
+        System.write(greeting.slice(0, 6) + "!\n")
+
+        local builder = new StringBuilder()
+        builder.append("value=")
+        builder.append(42)
+        builder.appendByte(10)
+        System.write(builder.build())
+        local stress = new StringBuilder()
+        local index:i64 = 0
+        while index < 100000 {
+            stress.appendByte(65)
+            index = index + 1
+        }
+        System.print(index)
+        return 0
+    }
+}}

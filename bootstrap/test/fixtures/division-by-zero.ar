@@ -1,0 +1,6 @@
+entry {{
+    __() -> i64 {
+        local zero:i64 = 0
+        return 10 / zero
+    }
+}}

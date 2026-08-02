@@ -1,0 +1,14 @@
+import System from '/libSystem.ar'
+
+entry {{
+    __() -> i32 {
+        local arguments = System.arguments()
+        if arguments.length != 3 {
+            System.exit(9)
+        }
+        if arguments[1] != "alpha" || arguments[2] != "beta" {
+            System.exit(9)
+        }
+        return 0
+    }
+}}

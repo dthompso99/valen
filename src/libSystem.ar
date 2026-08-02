@@ -1,0 +1,43 @@
+//this is intended to be a library, it has no entry point
+
+library System {{
+    native print(input:i64)-> void
+    native arguments() -> Array<string>
+    native exit(code:i32) -> void
+    native write(input:string) -> void
+    native writeError(input:string) -> void
+
+    native openRead(path:string) -> File?
+    native openWrite(path:string) -> File?
+    native read(file:File, count:i64) -> string?
+    native writeFile(file:File, input:string) -> i64
+    native close(file:File) -> i64
+    native lastError() -> i64
+    native currentDirectory() -> string?
+    native memoryCopy(destination:Array<u8>, destinationOffset:i64, source:Array<u8>, sourceOffset:i64, count:i64) -> bool
+    native memoryCompare(left:Array<u8>, leftOffset:i64, right:Array<u8>, rightOffset:i64, count:i64) -> i64
+
+    resolvePath(sourceRoot:string, importer:string, specifier:string) -> string {
+        if specifier.length > 0 {
+            if specifier[0] == 47 {
+                return sourceRoot + specifier
+            }
+        }
+        local slash:i64 = -1
+        local index:i64 = 0
+        while index < importer.length {
+            if importer[index] == 47 {
+                slash = index
+            }
+            index = index + 1
+        }
+        if slash < 0 {
+            return specifier
+        }
+        return importer.slice(0, slash + 1) + specifier
+    }
+
+    File {{
+        member descriptor:i64
+    }}
+}}

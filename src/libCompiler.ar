@@ -1,0 +1,365 @@
+import System from 'libSystem.ar'
+
+library Compiler {{
+    loadSource(path:string) -> SourceFile? {
+        local file = System.openRead(path)
+        if file == null {
+            return null
+        }
+
+        local builder = new StringBuilder()
+        while true {
+            local chunk = System.read(file!, 4096)
+            if chunk == null {
+                System.close(file!)
+                return null
+            }
+            local bytes = chunk!
+            if bytes.length == 0 {
+                break
+            }
+            builder.append(bytes)
+        }
+        if System.close(file!) != 0 {
+            return null
+        }
+        return new SourceFile(path, builder.build())
+    }
+
+    SourceFile {{
+        member path:string
+        member content:string
+
+        __(path:string, content:string) -> void {
+            self.path = path
+            self.content = content
+        }
+    }}
+
+    SourceSpan {{
+        member source:SourceFile
+        member start:i64
+        member end:i64
+        member line:i64
+        member column:i64
+
+        __(source:SourceFile, start:i64, end:i64, line:i64, column:i64) -> void {
+            self.source = source
+            self.start = start
+            self.end = end
+            self.line = line
+            self.column = column
+        }
+
+        length() -> i64 {
+            return self.end - self.start
+        }
+    }}
+
+    Token {{
+        member kind:string
+        member lexeme:string
+        member span:SourceSpan
+
+        __(kind:string, lexeme:string, span:SourceSpan) -> void {
+            self.kind = kind
+            self.lexeme = lexeme
+            self.span = span
+        }
+    }}
+
+    Tokenizer {{
+        member source:SourceFile
+        member tokens:Array<Token>
+        member offset:i64
+        member line:i64
+        member column:i64
+        member error:string?
+        member errorSpan:SourceSpan?
+
+        __(source:SourceFile) -> void {
+            self.source = source
+            self.tokens = new Array<Token>(0)
+            self.offset = 0
+            self.line = 1
+            self.column = 1
+            self.error = null
+            self.errorSpan = null
+        }
+
+        tokenize() -> Array<Token> {
+            while !self.atEnd() {
+                if self.error != null {
+                    break
+                }
+                local character = self.peek(0)
+                if character == 10 {
+                    self.scanNewline()
+                } else {
+                    if character == 32 || character == 9 || character == 13 {
+                        self.advance()
+                    } else {
+                        if character == 47 && self.peek(1) == 47 {
+                            self.scanComment()
+                        } else {
+                            if character == 34 || character == 39 {
+                                self.scanString()
+                            } else {
+                                if self.isIdentifierStart(character) {
+                                    self.scanIdentifier()
+                                } else {
+                                    if self.isDigit(character) {
+                                        self.scanInteger()
+                                    } else {
+                                        self.scanSymbol()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            self.tokens.append(new Token(
+                "EOF",
+                "",
+                new SourceSpan(self.source, self.offset, self.offset, self.line, self.column)
+            ))
+            return self.tokens
+        }
+
+        scanNewline() -> void {
+            local start = self.offset
+            local tokenLine = self.line
+            local tokenColumn = self.column
+            self.advance()
+            self.addToken("NEWLINE", start, tokenLine, tokenColumn)
+        }
+
+        scanComment() -> void {
+            while !self.atEnd() {
+                if self.peek(0) == 10 {
+                    break
+                }
+                self.advance()
+            }
+        }
+
+        scanString() -> void {
+            local start = self.offset
+            local tokenLine = self.line
+            local tokenColumn = self.column
+            local quote = self.advance()
+            local closed:bool = false
+            while !self.atEnd() {
+                local character = self.peek(0)
+                if character == quote {
+                    self.advance()
+                    closed = true
+                    break
+                }
+                if character == 92 {
+                    self.advance()
+                    if !self.atEnd() {
+                        self.advance()
+                    }
+                } else {
+                    self.advance()
+                }
+            }
+            if !closed {
+                self.fail("Unclosed string", tokenLine, tokenColumn)
+                return
+            }
+            self.addToken("STRING_LITERAL", start, tokenLine, tokenColumn)
+        }
+
+        scanIdentifier() -> void {
+            local start = self.offset
+            local tokenLine = self.line
+            local tokenColumn = self.column
+            self.advance()
+            while self.isIdentifierPart(self.peek(0)) {
+                self.advance()
+            }
+            local value = self.source.content.slice(start, self.offset - start)
+            self.tokens.append(new Token(
+                self.keywordKind(value),
+                value,
+                new SourceSpan(self.source, start, self.offset, tokenLine, tokenColumn)
+            ))
+        }
+
+        scanInteger() -> void {
+            local start = self.offset
+            local tokenLine = self.line
+            local tokenColumn = self.column
+            self.advance()
+            while self.isDigit(self.peek(0)) {
+                self.advance()
+            }
+            self.addToken("INTEGER_LITERAL", start, tokenLine, tokenColumn)
+        }
+
+        scanSymbol() -> void {
+            local start = self.offset
+            local tokenLine = self.line
+            local tokenColumn = self.column
+            local character = self.advance()
+            local kind:string? = null
+
+            if character == 61 {
+                kind = "EQUAL"
+                if self.matchByte(61) {
+                    kind = "EQUAL_EQUAL"
+                    if self.matchByte(61) {
+                        kind = "EQUAL_EQUAL_EQUAL"
+                    }
+                }
+            }
+            if character == 33 {
+                kind = "BANG"
+                if self.matchByte(61) {
+                    kind = "BANG_EQUAL"
+                    if self.matchByte(61) {
+                        kind = "BANG_EQUAL_EQUAL"
+                    }
+                }
+            }
+            if character == 45 {
+                kind = "MINUS"
+                if self.matchByte(62) {
+                    kind = "ARROW"
+                }
+            }
+            if character == 60 {
+                kind = "LESS"
+                if self.matchByte(61) {
+                    kind = "LESS_EQUAL"
+                }
+            }
+            if character == 62 {
+                kind = "GREATER"
+                if self.matchByte(61) {
+                    kind = "GREATER_EQUAL"
+                }
+            }
+            if character == 38 {
+                if self.matchByte(38) {
+                    kind = "AND"
+                }
+            }
+            if character == 124 {
+                if self.matchByte(124) {
+                    kind = "OR"
+                }
+            }
+            if character == 43 { kind = "PLUS" }
+            if character == 42 { kind = "STAR" }
+            if character == 47 { kind = "SLASH" }
+            if character == 40 { kind = "LEFT_PAREN" }
+            if character == 41 { kind = "RIGHT_PAREN" }
+            if character == 123 { kind = "LEFT_BRACE" }
+            if character == 125 { kind = "RIGHT_BRACE" }
+            if character == 91 { kind = "LEFT_BRACKET" }
+            if character == 93 { kind = "RIGHT_BRACKET" }
+            if character == 44 { kind = "COMMA" }
+            if character == 46 { kind = "DOT" }
+            if character == 58 { kind = "COLON" }
+            if character == 63 { kind = "QUESTION" }
+            if character == 59 { kind = "SEMICOLON" }
+
+            if kind == null {
+                self.fail("Unexpected byte " + character.toString(), tokenLine, tokenColumn)
+                return
+            }
+            self.addToken(kind!, start, tokenLine, tokenColumn)
+        }
+
+        keywordKind(value:string) -> string {
+            if value == "return" { return "RETURN" }
+            if value == "new" { return "NEW" }
+            if value == "import" { return "IMPORT" }
+            if value == "from" { return "FROM" }
+            if value == "member" { return "MEMBER" }
+            if value == "local" { return "LOCAL" }
+            if value == "library" { return "LIBRARY" }
+            if value == "native" { return "NATIVE" }
+            if value == "if" { return "IF" }
+            if value == "else" { return "ELSE" }
+            if value == "while" { return "WHILE" }
+            if value == "break" { return "BREAK" }
+            if value == "continue" { return "CONTINUE" }
+            if value == "true" { return "TRUE" }
+            if value == "false" { return "FALSE" }
+            if value == "as" { return "AS" }
+            if value == "null" { return "NULL" }
+            return "IDENTIFIER"
+        }
+
+        addToken(kind:string, start:i64, tokenLine:i64, tokenColumn:i64) -> void {
+            self.tokens.append(new Token(
+                kind,
+                self.source.content.slice(start, self.offset - start),
+                new SourceSpan(self.source, start, self.offset, tokenLine, tokenColumn)
+            ))
+        }
+
+        matchByte(expected:u8) -> bool {
+            if self.peek(0) != expected {
+                return false
+            }
+            self.advance()
+            return true
+        }
+
+        advance() -> u8 {
+            local character = self.source.content[self.offset]
+            self.offset = self.offset + 1
+            if character == 10 {
+                self.line = self.line + 1
+                self.column = 1
+            } else {
+                self.column = self.column + 1
+            }
+            return character
+        }
+
+        peek(distance:i64) -> u8 {
+            local index = self.offset + distance
+            if index >= self.source.content.length {
+                return 0
+            }
+            return self.source.content[index]
+        }
+
+        atEnd() -> bool {
+            return self.offset >= self.source.content.length
+        }
+
+        isDigit(character:u8) -> bool {
+            return character >= 48 && character <= 57
+        }
+
+        isIdentifierStart(character:u8) -> bool {
+            if character >= 65 && character <= 90 { return true }
+            if character >= 97 && character <= 122 { return true }
+            return character == 95
+        }
+
+        isIdentifierPart(character:u8) -> bool {
+            if self.isIdentifierStart(character) { return true }
+            return self.isDigit(character)
+        }
+
+        fail(message:string, errorLine:i64, errorColumn:i64) -> void {
+            self.error = message
+            self.errorSpan = new SourceSpan(
+                self.source,
+                self.offset,
+                self.offset,
+                errorLine,
+                errorColumn
+            )
+        }
+    }}
+}}

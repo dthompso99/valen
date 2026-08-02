@@ -1,0 +1,110 @@
+import {Token} from './token.js';
+import {Tokens} from './tokens.js';
+
+const keywords = new Map();
+const symbols = new Map();
+
+for (const token of Tokens) {
+    if (/^[A-Za-z_]\w*$/.test(token.value)) {
+        keywords.set(token.value, token.type);
+    } else {
+        const matches = symbols.get(token.value[0]);
+        if (matches) matches.push(token);
+        else symbols.set(token.value[0], [token]);
+    }
+}
+for (const matches of symbols.values()) matches.sort((a, b) => b.value.length - a.value.length);
+
+export class Tokenizer {
+    constructor(source, sourceName = '<source>') {
+        this.source = source;
+        this.sourceName = sourceName;
+    }
+
+    parse() {
+        const tokens = [];
+        let offset = 0;
+        let line = 1;
+        let column = 1;
+
+        const advance = () => {
+            const character = this.source[offset++];
+            if (character === '\n') {
+                line++;
+                column = 1;
+            } else column++;
+            return character;
+        };
+
+        const add = (type, value, start, tokenLine, tokenColumn) => {
+            tokens.push(new Token(type, value, this.sourceName, start, offset, tokenLine, tokenColumn));
+        };
+
+        while (offset < this.source.length) {
+            const character = this.source[offset];
+
+            if (character === '\n') {
+                const start = offset;
+                const tokenLine = line;
+                const tokenColumn = column;
+                advance();
+                add('NEWLINE', '\n', start, tokenLine, tokenColumn);
+                continue;
+            }
+
+            if (/\s/.test(character)) {
+                advance();
+                continue;
+            }
+
+            if (character === '/' && this.source[offset + 1] === '/') {
+                while (offset < this.source.length && this.source[offset] !== '\n') advance();
+                continue;
+            }
+
+            const start = offset;
+            const tokenLine = line;
+            const tokenColumn = column;
+
+            if (character === '"' || character === "'") {
+                const quote = character;
+                advance();
+                while (offset < this.source.length && this.source[offset] !== quote) {
+                    if (this.source[offset] === '\\') advance();
+                    if (offset < this.source.length) advance();
+                }
+                if (offset >= this.source.length) this.fail('Unclosed string', tokenLine, tokenColumn);
+                advance();
+                add('STRING_LITERAL', this.source.slice(start, offset), start, tokenLine, tokenColumn);
+                continue;
+            }
+
+            if (/[A-Za-z_]/.test(character)) {
+                advance();
+                while (offset < this.source.length && /\w/.test(this.source[offset])) advance();
+                const value = this.source.slice(start, offset);
+                add(keywords.get(value) ?? 'IDENTIFIER', value, start, tokenLine, tokenColumn);
+                continue;
+            }
+
+            if (/\d/.test(character)) {
+                advance();
+                while (offset < this.source.length && /\d/.test(this.source[offset])) advance();
+                add('INTEGER_LITERAL', this.source.slice(start, offset), start, tokenLine, tokenColumn);
+                continue;
+            }
+
+            const known = symbols.get(character)?.find(token => this.source.startsWith(token.value, offset));
+            if (!known) this.fail(`Unexpected character ${JSON.stringify(character)}`, line, column);
+            for (let i = 0; i < known.value.length; i++) advance();
+            add(known.type, known.value, start, tokenLine, tokenColumn);
+        }
+
+        tokens.push(new Token('EOF', '', this.sourceName, offset, offset, line, column));
+        return tokens;
+    }
+
+    fail(message, line, column) {
+        throw new SyntaxError(`${this.sourceName}:${line}:${column}: ${message}`);
+    }
+}

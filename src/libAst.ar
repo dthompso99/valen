@@ -1,0 +1,170 @@
+import Compiler from 'libCompiler.ar'
+import Symbols from 'libSymbols.ar'
+
+library Ast {{
+    Program {{
+        member imports:Array<ImportDeclaration>
+        member declarations:Array<Declaration>
+        member span:Compiler.SourceSpan
+        member symbol:Symbols.Symbol?
+
+        __(imports:Array<ImportDeclaration>, declarations:Array<Declaration>, span:Compiler.SourceSpan) -> void {
+            self.imports = imports
+            self.declarations = declarations
+            self.span = span
+            self.symbol = null
+        }
+    }}
+
+    ImportDeclaration {{
+        member name:string
+        member path:string
+        member span:Compiler.SourceSpan
+        member symbol:Symbols.Symbol?
+
+        __(name:string, path:string, span:Compiler.SourceSpan) -> void {
+            self.name = name
+            self.path = path
+            self.span = span
+            self.symbol = null
+        }
+    }}
+
+    Declaration {{
+        member kind:string
+        member name:string
+        member members:Array<MemberDeclaration>
+        member span:Compiler.SourceSpan
+        member symbol:Symbols.Symbol?
+
+        __(kind:string, name:string, members:Array<MemberDeclaration>, span:Compiler.SourceSpan) -> void {
+            self.kind = kind
+            self.name = name
+            self.members = members
+            self.span = span
+            self.symbol = null
+        }
+    }}
+
+    MemberDeclaration {{
+        member kind:string
+        member name:string
+        member declaredType:TypeReference?
+        member initializer:Expression?
+        member parameters:Array<Parameter>
+        member returnType:TypeReference?
+        member body:Block?
+        member isNative:bool
+        member members:Array<MemberDeclaration>
+        member span:Compiler.SourceSpan
+        member symbol:Symbols.Symbol?
+
+        __(kind:string, name:string, span:Compiler.SourceSpan) -> void {
+            self.kind = kind
+            self.name = name
+            self.declaredType = null
+            self.initializer = null
+            self.parameters = new Array<Parameter>(0)
+            self.returnType = null
+            self.body = null
+            self.isNative = false
+            self.members = new Array<MemberDeclaration>(0)
+            self.span = span
+            self.symbol = null
+        }
+    }}
+
+    Parameter {{
+        member name:string
+        member parameterType:TypeReference
+        member span:Compiler.SourceSpan
+        member symbol:Symbols.Symbol?
+
+        __(name:string, parameterType:TypeReference, span:Compiler.SourceSpan) -> void {
+            self.name = name
+            self.parameterType = parameterType
+            self.span = span
+            self.symbol = null
+        }
+    }}
+
+    TypeReference {{
+        member name:string
+        member arguments:Array<TypeReference>
+        member optional:bool
+        member span:Compiler.SourceSpan
+        member symbol:Symbols.Symbol?
+
+        __(name:string, arguments:Array<TypeReference>, optional:bool, span:Compiler.SourceSpan) -> void {
+            self.name = name
+            self.arguments = arguments
+            self.optional = optional
+            self.span = span
+            self.symbol = null
+        }
+    }}
+
+    Block {{
+        member statements:Array<Statement>
+        member span:Compiler.SourceSpan
+        member symbol:Symbols.Symbol?
+
+        __(statements:Array<Statement>, span:Compiler.SourceSpan) -> void {
+            self.statements = statements
+            self.span = span
+            self.symbol = null
+        }
+    }}
+
+    Statement {{
+        member kind:string
+        member name:string?
+        member declaredType:TypeReference?
+        member expression:Expression?
+        member condition:Expression?
+        member body:Block?
+        member alternate:Block?
+        member span:Compiler.SourceSpan
+        member symbol:Symbols.Symbol?
+
+        __(kind:string, span:Compiler.SourceSpan) -> void {
+            self.kind = kind
+            self.name = null
+            self.declaredType = null
+            self.expression = null
+            self.condition = null
+            self.body = null
+            self.alternate = null
+            self.span = span
+            self.symbol = null
+        }
+    }}
+
+    Expression {{
+        member kind:string
+        member name:string?
+        member text:string?
+        member operator:string?
+        member left:Expression?
+        member right:Expression?
+        member arguments:Array<Expression>
+        member typeArguments:Array<TypeReference>
+        member span:Compiler.SourceSpan
+        member symbol:Symbols.Symbol?
+        member inferredType:string?
+
+        __(kind:string, span:Compiler.SourceSpan) -> void {
+            self.kind = kind
+            self.name = null
+            self.text = null
+            self.operator = null
+            self.left = null
+            self.right = null
+            self.arguments = new Array<Expression>(0)
+            self.typeArguments = new Array<TypeReference>(0)
+            self.span = span
+            self.symbol = null
+            self.inferredType = null
+        }
+    }}
+}}

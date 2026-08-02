@@ -1,0 +1,145 @@
+import System from 'libSystem.ar'
+import Compiler from 'libCompiler.ar'
+import Ast from 'libAst.ar'
+import Parsing from 'libParser.ar'
+import Diagnostics from 'libDiagnostics.ar'
+
+library ModuleLoading {{
+    ModuleImport {{
+        member name:string
+        member declaration:Ast.ImportDeclaration
+        member loadedModule:Module
+
+        __(name:string, declaration:Ast.ImportDeclaration, loadedModule:Module) -> void {
+            self.name = name
+            self.declaration = declaration
+            self.loadedModule = loadedModule
+        }
+    }}
+
+    Module {{
+        member path:string
+        member source:Compiler.SourceFile
+        member program:Ast.Program
+        member imports:Array<ModuleImport>
+        member loading:bool
+
+        __(path:string, source:Compiler.SourceFile, program:Ast.Program) -> void {
+            self.path = path
+            self.source = source
+            self.program = program
+            self.imports = new Array<ModuleImport>(0)
+            self.loading = true
+        }
+
+        hasImport(name:string) -> bool {
+            local index:i64 = 0
+            while index < self.imports.length {
+                if self.imports[index].name == name { return true }
+                index = index + 1
+            }
+            return false
+        }
+    }}
+
+    ModuleGraph {{
+        member entry:Module?
+        member modules:Array<Module>
+        member diagnostics:Diagnostics.DiagnosticBag
+
+        __(entry:Module?, modules:Array<Module>, diagnostics:Diagnostics.DiagnosticBag) -> void {
+            self.entry = entry
+            self.modules = modules
+            self.diagnostics = diagnostics
+        }
+    }}
+
+    ModuleLoader {{
+        member sourceRoot:string
+        member modules:Array<Module>
+        member diagnostics:Diagnostics.DiagnosticBag
+
+        __(sourceRoot:string) -> void {
+            self.sourceRoot = sourceRoot
+            self.modules = new Array<Module>(0)
+            self.diagnostics = new Diagnostics.DiagnosticBag()
+        }
+
+        load(entryPath:string) -> ModuleGraph {
+            local path = entryPath
+            if entryPath.length == 0 {
+                self.reportPath(entryPath, "Entry path cannot be empty")
+                return new ModuleGraph(null, self.modules, self.diagnostics)
+            }
+            if entryPath[0] != 47 { path = self.sourceRoot + "/" + entryPath }
+            local entry = self.loadModule(path, null)
+            return new ModuleGraph(entry, self.modules, self.diagnostics)
+        }
+
+        loadModule(path:string, importSpan:Compiler.SourceSpan?) -> Module? {
+            local existing = self.find(path)
+            if existing != null {
+                if existing!.loading { self.report(path, "Circular import involving '" + path + "'", importSpan) }
+                return existing
+            }
+            local source = Compiler.loadSource(path)
+            if source == null {
+                self.report(path, "Cannot load source file; OS error " + System.lastError().toString(), importSpan)
+                return null
+            }
+            local tokenizer = new Compiler.Tokenizer(source!)
+            local tokens = tokenizer.tokenize()
+            if tokenizer.error != null {
+                self.diagnostics.add(new Diagnostics.Diagnostic(1, tokenizer.error!, tokenizer.errorSpan!))
+                return null
+            }
+            local parser = new Parsing.Parser(tokens)
+            local program = parser.parse()
+            if parser.error != null {
+                self.diagnostics.add(new Diagnostics.Diagnostic(1, parser.error!, parser.errorSpan!))
+                return null
+            }
+            local loaded = new Module(path, source!, program)
+            self.modules.append(loaded)
+            local index:i64 = 0
+            while index < program.imports.length {
+                local declaration = program.imports[index]
+                local importedPath = System.resolvePath(self.sourceRoot, path, declaration.path)
+                local imported = self.loadModule(importedPath, declaration.span)
+                if imported != null {
+                    if loaded.hasImport(declaration.name) {
+                        self.diagnostics.add(new Diagnostics.Diagnostic(1, "Duplicate import '" + declaration.name + "'", declaration.span))
+                    } else {
+                        loaded.imports.append(new ModuleImport(declaration.name, declaration, imported!))
+                    }
+                }
+                index = index + 1
+            }
+            loaded.loading = false
+            return loaded
+        }
+
+        find(path:string) -> Module? {
+            local index:i64 = 0
+            while index < self.modules.length {
+                if self.modules[index].path == path { return self.modules[index] }
+                index = index + 1
+            }
+            return null
+        }
+
+        report(path:string, message:string, span:Compiler.SourceSpan?) -> void {
+            if span != null {
+                self.diagnostics.add(new Diagnostics.Diagnostic(1, message, span!))
+                return
+            }
+            self.reportPath(path, message)
+        }
+
+        reportPath(path:string, message:string) -> void {
+            local source = new Compiler.SourceFile(path, "")
+            local span = new Compiler.SourceSpan(source, 0, 0, 1, 1)
+            self.diagnostics.add(new Diagnostics.Diagnostic(1, message, span))
+        }
+    }}
+}}

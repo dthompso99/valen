@@ -1,0 +1,12 @@
+{
+  "name": "argon-bootstrap",
+  "version": "0.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test/pipeline.test.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "type": "module"
+}

@@ -1,0 +1,52 @@
+entry {{
+    member entryValue:i64 = 9
+
+    Defaults {{
+        member unsigned8:u8
+        member signed8:i8
+        member unsigned16:u16
+        member signed16:i16
+        member unsigned32:u32
+        member signed32:i32
+        member unsigned64:u64
+        member signed64:i64
+        member enabled:bool
+        member text:string?
+        member values:Array<i64>?
+        member child:Defaults?
+    }}
+
+    Initialized {{
+        member seed:i64 = 41
+        member values:Array<i64> = new Array<i64>(0)
+        member constructorSawInitializers:bool
+
+        __() -> void {
+            self.values.append(self.seed + 1)
+            self.constructorSawInitializers = self.values.length == 1 && self.values[0] == 42
+        }
+    }}
+
+    __() -> i64 {
+        if self.entryValue != 9 {
+            return 3
+        }
+        local defaults = new Defaults()
+        if defaults.unsigned8 != 0 || defaults.signed8 != 0 || defaults.unsigned16 != 0 || defaults.signed16 != 0 || defaults.unsigned32 != 0 || defaults.signed32 != 0 || defaults.unsigned64 != 0 || defaults.signed64 != 0 {
+            return 1
+        }
+        if defaults.enabled || defaults.text != null || defaults.values != null || defaults.child != null {
+            return 2
+        }
+        local initialized = new Initialized()
+        if !initialized.constructorSawInitializers {
+            return 4
+        }
+        local alias = initialized
+        local separate = new Initialized()
+        if initialized !== alias || initialized === separate {
+            return 5
+        }
+        return 0
+    }
+}}

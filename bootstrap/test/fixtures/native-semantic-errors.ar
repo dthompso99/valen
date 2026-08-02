@@ -1,0 +1,6 @@
+entry {{
+    __() -> i32 {
+        local flag:bool = 1
+        return missing
+    }
+}}

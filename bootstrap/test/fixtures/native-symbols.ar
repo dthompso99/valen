@@ -1,0 +1,22 @@
+import Compiler from '/src/libCompiler.ar'
+import Symbols from '/src/libSymbols.ar'
+
+entry {{
+    __() -> i32 {
+        local source = new Compiler.SourceFile("symbols.ar", "")
+        local span = new Compiler.SourceSpan(source, 0, 0, 1, 1)
+        local root = new Symbols.Scope("root", null)
+        local outer = new Symbols.Symbol("Local", "value", "root.value", span)
+        if !root.define(outer) || root.define(outer) { return 1 }
+
+        local child = new Symbols.Scope("child", root)
+        local inherited = child.lookup("value")
+        if inherited == null || inherited! !== outer { return 2 }
+
+        local inner = new Symbols.Symbol("Local", "value", "child.value", span)
+        if !child.define(inner) { return 3 }
+        local shadowed = child.lookup("value")
+        if shadowed == null || shadowed! !== inner { return 4 }
+        return 0
+    }
+}}

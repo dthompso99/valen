@@ -1,0 +1,786 @@
+import Ast from 'libAst.ar'
+import Symbols from 'libSymbols.ar'
+import Semantics from 'libSemantic.ar'
+
+library Ir {{
+    Value {{
+        member kind:string
+        member name:string
+        member typeName:string
+
+        __(kind:string, name:string, typeName:string) -> void {
+            self.kind = kind
+            self.name = name
+            self.typeName = typeName
+        }
+    }}
+
+    Instruction {{
+        member op:string
+        member result:Value?
+        member first:Value?
+        member second:Value?
+        member third:Value?
+        member arguments:Array<Value>
+        member name:string?
+        member target:string?
+        member alternateTarget:string?
+        member operator:string?
+        member typeName:string?
+        member ownerType:string?
+        member elementType:string?
+        member text:string?
+
+        __(op:string) -> void {
+            self.op = op
+            self.result = null
+            self.first = null
+            self.second = null
+            self.third = null
+            self.arguments = new Array<Value>(0)
+            self.name = null
+            self.target = null
+            self.alternateTarget = null
+            self.operator = null
+            self.typeName = null
+            self.ownerType = null
+            self.elementType = null
+            self.text = null
+        }
+    }}
+
+    Block {{
+        member label:string
+        member instructions:Array<Instruction>
+
+        __(label:string) -> void {
+            self.label = label
+            self.instructions = new Array<Instruction>(0)
+        }
+    }}
+
+    Parameter {{
+        member name:string
+        member typeName:string
+
+        __(name:string, typeName:string) -> void {
+            self.name = name
+            self.typeName = typeName
+        }
+    }}
+
+    Function {{
+        member name:string
+        member displayName:string
+        member ownerType:string
+        member parameters:Array<Parameter>
+        member returnType:string
+        member blocks:Array<Block>
+
+        __(name:string, displayName:string, ownerType:string, returnType:string) -> void {
+            self.name = name
+            self.displayName = displayName
+            self.ownerType = ownerType
+            self.parameters = new Array<Parameter>(0)
+            self.returnType = returnType
+            self.blocks = new Array<Block>(0)
+        }
+    }}
+
+    ExternalFunction {{
+        member name:string
+        member displayName:string
+        member runtimeName:string
+        member parameters:Array<Parameter>
+        member returnType:string
+
+        __(name:string, displayName:string, runtimeName:string, returnType:string) -> void {
+            self.name = name
+            self.displayName = displayName
+            self.runtimeName = runtimeName
+            self.parameters = new Array<Parameter>(0)
+            self.returnType = returnType
+        }
+    }}
+
+    Field {{
+        member name:string
+        member qualifiedName:string
+        member typeName:string
+        member index:i64
+
+        __(name:string, qualifiedName:string, typeName:string, index:i64) -> void {
+            self.name = name
+            self.qualifiedName = qualifiedName
+            self.typeName = typeName
+            self.index = index
+        }
+    }}
+
+    Type {{
+        member name:string
+        member displayName:string
+        member initializer:string?
+        member fields:Array<Field>
+
+        __(name:string, displayName:string) -> void {
+            self.name = name
+            self.displayName = displayName
+            self.initializer = null
+            self.fields = new Array<Field>(0)
+        }
+    }}
+
+    Program {{
+        member types:Array<Type>
+        member functions:Array<Function>
+        member externals:Array<ExternalFunction>
+        member entry:string?
+
+        __() -> void {
+            self.types = new Array<Type>(0)
+            self.functions = new Array<Function>(0)
+            self.externals = new Array<ExternalFunction>(0)
+            self.entry = null
+        }
+
+        blockCount() -> i64 {
+            local count:i64 = 0
+            local index:i64 = 0
+            while index < self.functions.length {
+                count = count + self.functions[index].blocks.length
+                index = index + 1
+            }
+            return count
+        }
+
+        instructionCount() -> i64 {
+            local count:i64 = 0
+            local functionIndex:i64 = 0
+            while functionIndex < self.functions.length {
+                local blocks = self.functions[functionIndex].blocks
+                local blockIndex:i64 = 0
+                while blockIndex < blocks.length {
+                    count = count + blocks[blockIndex].instructions.length
+                    blockIndex = blockIndex + 1
+                }
+                functionIndex = functionIndex + 1
+            }
+            return count
+        }
+    }}
+
+    Binding {{
+        member symbol:Symbols.Symbol
+        member value:Value
+
+        __(symbol:Symbols.Symbol, value:Value) -> void {
+            self.symbol = symbol
+            self.value = value
+        }
+    }}
+
+    Loop {{
+        member breakTarget:string
+        member continueTarget:string
+
+        __(breakTarget:string, continueTarget:string) -> void {
+            self.breakTarget = breakTarget
+            self.continueTarget = continueTarget
+        }
+    }}
+
+    Generator {{
+        member analysis:Semantics.Analysis
+        member program:Program
+        member currentFunction:Function?
+        member currentBlock:Block?
+        member bindings:Array<Binding>
+        member loops:Array<Loop>
+        member breakTarget:string?
+        member continueTarget:string?
+        member nextLocal:i64
+        member nextTemporary:i64
+        member nextBlock:i64
+
+        __(analysis:Semantics.Analysis) -> void {
+            self.analysis = analysis
+            self.program = new Program()
+            self.currentFunction = null
+            self.currentBlock = null
+            self.bindings = new Array<Binding>(0)
+            self.loops = new Array<Loop>(0)
+            self.breakTarget = null
+            self.continueTarget = null
+            self.nextLocal = 0
+            self.nextTemporary = 0
+            self.nextBlock = 0
+        }
+
+        generate() -> Program {
+            local moduleIndex:i64 = 0
+            while moduleIndex < self.analysis.graph.modules.length {
+                local declarations = self.analysis.graph.modules[moduleIndex].program.declarations
+                local index:i64 = 0
+                while index < declarations.length {
+                    self.declareContainer(declarations[index])
+                    index = index + 1
+                }
+                moduleIndex = moduleIndex + 1
+            }
+            moduleIndex = 0
+            while moduleIndex < self.analysis.graph.modules.length {
+                local declarations = self.analysis.graph.modules[moduleIndex].program.declarations
+                local index:i64 = 0
+                while index < declarations.length {
+                    self.lowerContainer(declarations[index])
+                    index = index + 1
+                }
+                moduleIndex = moduleIndex + 1
+            }
+            return self.program
+        }
+
+        declareContainer(declaration:Ast.Declaration) -> void {
+            if declaration.kind == "Object" { self.declareObject(declaration.name, declaration.members, declaration.symbol!) }
+            local index:i64 = 0
+            while index < declaration.members.length {
+                local memberNode = declaration.members[index]
+                if memberNode.kind == "Object" { self.declareNestedObject(memberNode) }
+                index = index + 1
+            }
+        }
+
+        declareNestedObject(declaration:Ast.MemberDeclaration) -> void {
+            self.declareObject(declaration.name, declaration.members, declaration.symbol!)
+            local index:i64 = 0
+            while index < declaration.members.length {
+                if declaration.members[index].kind == "Object" { self.declareNestedObject(declaration.members[index]) }
+                index = index + 1
+            }
+        }
+
+        declareObject(name:string, members:Array<Ast.MemberDeclaration>, symbol:Symbols.Symbol) -> void {
+            local typeNode = new Type(symbol.qualifiedName, symbol.qualifiedName)
+            local fieldIndex:i64 = 0
+            local index:i64 = 0
+            while index < members.length {
+                local memberNode = members[index]
+                if memberNode.kind == "Field" {
+                    typeNode.fields.append(new Field(memberNode.name, memberNode.symbol!.qualifiedName, memberNode.symbol!.typeName!, fieldIndex))
+                    fieldIndex = fieldIndex + 1
+                    if memberNode.initializer != null { typeNode.initializer = symbol.qualifiedName + ".$initialize" }
+                }
+                index = index + 1
+            }
+            self.program.types.append(typeNode)
+        }
+
+        lowerContainer(declaration:Ast.Declaration) -> void {
+            if declaration.kind == "Object" { self.lowerFieldInitializers(declaration.members, declaration.symbol!) }
+            self.lowerMembers(declaration.members, declaration.symbol!)
+        }
+
+        lowerMembers(members:Array<Ast.MemberDeclaration>, owner:Symbols.Symbol) -> void {
+            local index:i64 = 0
+            while index < members.length {
+                local memberNode = members[index]
+                if memberNode.kind == "Method" { self.lowerMethod(memberNode, owner) }
+                if memberNode.kind == "Object" {
+                    self.lowerFieldInitializers(memberNode.members, memberNode.symbol!)
+                    self.lowerMembers(memberNode.members, memberNode.symbol!)
+                }
+                index = index + 1
+            }
+        }
+
+        lowerFieldInitializers(members:Array<Ast.MemberDeclaration>, owner:Symbols.Symbol) -> void {
+            local count:i64 = 0
+            local index:i64 = 0
+            while index < members.length { if members[index].kind == "Field" { if members[index].initializer != null { count = count + 1 } }; index = index + 1 }
+            if count == 0 { return }
+            self.beginFunction(owner.qualifiedName + ".$initialize", owner.qualifiedName + ".$initialize", owner.qualifiedName, "void")
+            self.currentFunction!.parameters.append(new Parameter("self", owner.qualifiedName))
+            local instance = new Value("parameter", "self", owner.qualifiedName)
+            index = 0
+            while index < members.length {
+                local field = members[index]
+                if field.kind == "Field" {
+                    if field.initializer != null {
+                        local value = self.lowerExpression(field.initializer!)
+                        local instruction = new Instruction("store_field")
+                        instruction.first = instance
+                        instruction.second = value
+                        instruction.name = field.symbol!.qualifiedName
+                        self.emit(instruction)
+                    }
+                }
+                index = index + 1
+            }
+            self.emit(new Instruction("return"))
+            self.finishFunction()
+        }
+
+        lowerMethod(method:Ast.MemberDeclaration, owner:Symbols.Symbol) -> void {
+            local symbol = method.symbol!
+            if method.isNative {
+                local external = new ExternalFunction(symbol.qualifiedName, symbol.qualifiedName, self.runtimeName(symbol), symbol.returnType!)
+                local parameterIndex:i64 = 0
+                while parameterIndex < symbol.parameters.length {
+                    local parameter = symbol.parameters[parameterIndex]
+                    external.parameters.append(new Parameter(parameter.name, parameter.typeName!))
+                    parameterIndex = parameterIndex + 1
+                }
+                self.program.externals.append(external)
+                return
+            }
+            self.beginFunction(symbol.qualifiedName, symbol.qualifiedName, owner.qualifiedName, symbol.returnType!)
+            if owner.kind == "Object" { self.currentFunction!.parameters.append(new Parameter("self", owner.qualifiedName)) }
+            local index:i64 = 0
+            while index < symbol.parameters.length {
+                local parameter = symbol.parameters[index]
+                self.currentFunction!.parameters.append(new Parameter(parameter.name, parameter.typeName!))
+                self.bindings.append(new Binding(parameter, new Value("parameter", parameter.name, parameter.typeName!)))
+                index = index + 1
+            }
+            if method.body != null { self.lowerBlock(method.body!) }
+            if symbol.returnType! == "void" {
+                if !self.isTerminated() { self.emit(new Instruction("return")) }
+            }
+            if owner.name == "entry" && method.name == "__" { self.program.entry = symbol.qualifiedName }
+            self.finishFunction()
+        }
+
+        beginFunction(name:string, displayName:string, ownerType:string, returnType:string) -> void {
+            self.currentFunction = new Function(name, displayName, ownerType, returnType)
+            self.currentBlock = new Block("entry")
+            self.currentFunction!.blocks.append(self.currentBlock!)
+            self.bindings = new Array<Binding>(0)
+            self.loops = new Array<Loop>(0)
+            self.breakTarget = null
+            self.continueTarget = null
+            self.nextLocal = 0
+            self.nextTemporary = 0
+            self.nextBlock = 0
+        }
+
+        finishFunction() -> void {
+            self.program.functions.append(self.currentFunction!)
+            self.currentFunction = null
+            self.currentBlock = null
+        }
+
+        lowerBlock(block:Ast.Block) -> void {
+            local index:i64 = 0
+            while index < block.statements.length {
+                if self.isTerminated() { return }
+                self.lowerStatement(block.statements[index])
+                index = index + 1
+            }
+        }
+
+        lowerStatement(statement:Ast.Statement) -> void {
+            if statement.kind == "Local" {
+                local value:Value? = null
+                if statement.expression != null { value = self.lowerExpression(statement.expression!) }
+                local localName = statement.name! + "#" + self.nextLocal.toString()
+                self.nextLocal = self.nextLocal + 1
+                local localValue = new Value("local", localName, statement.symbol!.typeName!)
+                self.bindings.append(new Binding(statement.symbol!, localValue))
+                local instruction = new Instruction("declare_local")
+                instruction.name = localName
+                instruction.typeName = localValue.typeName
+                instruction.first = value
+                self.emit(instruction)
+                return
+            }
+            if statement.kind == "Return" {
+                local instruction = new Instruction("return")
+                if statement.expression != null { instruction.first = self.lowerExpression(statement.expression!) }
+                self.emit(instruction)
+                return
+            }
+            if statement.kind == "If" { self.lowerIf(statement); return }
+            if statement.kind == "While" { self.lowerWhile(statement); return }
+            if statement.kind == "Break" {
+                local instruction = new Instruction("jump")
+                instruction.target = self.breakTarget
+                self.emit(instruction)
+                return
+            }
+            if statement.kind == "Continue" {
+                local instruction = new Instruction("jump")
+                instruction.target = self.continueTarget
+                self.emit(instruction)
+                return
+            }
+            if statement.kind == "Block" { self.lowerBlock(statement.body!); return }
+            if statement.expression != null { self.lowerExpression(statement.expression!) }
+        }
+
+        lowerIf(statement:Ast.Statement) -> void {
+            local condition = self.lowerExpression(statement.condition!)
+            local thenBlock = self.newBlock("if_then")
+            local elseBlock:Block? = null
+            if statement.alternate != null { elseBlock = self.newBlock("if_else") }
+            local endBlock = self.newBlock("if_end")
+            local branch = new Instruction("branch")
+            branch.first = condition
+            branch.target = thenBlock.label
+            branch.alternateTarget = endBlock.label
+            if elseBlock != null { branch.alternateTarget = elseBlock!.label }
+            self.emit(branch)
+            self.currentBlock = thenBlock
+            self.lowerBlock(statement.body!)
+            self.jumpIfOpen(endBlock.label)
+            if elseBlock != null {
+                self.currentBlock = elseBlock
+                self.lowerBlock(statement.alternate!)
+                self.jumpIfOpen(endBlock.label)
+            }
+            self.currentBlock = endBlock
+        }
+
+        lowerWhile(statement:Ast.Statement) -> void {
+            local conditionBlock = self.newBlock("while_condition")
+            local bodyBlock = self.newBlock("while_body")
+            local endBlock = self.newBlock("while_end")
+            self.jumpIfOpen(conditionBlock.label)
+            self.currentBlock = conditionBlock
+            local branch = new Instruction("branch")
+            branch.first = self.lowerExpression(statement.condition!)
+            branch.target = bodyBlock.label
+            branch.alternateTarget = endBlock.label
+            self.emit(branch)
+            self.currentBlock = bodyBlock
+            local previousBreak = self.breakTarget
+            local previousContinue = self.continueTarget
+            self.breakTarget = endBlock.label
+            self.continueTarget = conditionBlock.label
+            self.lowerBlock(statement.body!)
+            self.breakTarget = previousBreak
+            self.continueTarget = previousContinue
+            self.jumpIfOpen(conditionBlock.label)
+            self.currentBlock = endBlock
+        }
+
+        jumpIfOpen(target:string) -> void {
+            if self.isTerminated() { return }
+            local instruction = new Instruction("jump")
+            instruction.target = target
+            self.emit(instruction)
+        }
+
+        newBlock(prefix:string) -> Block {
+            local block = new Block(prefix + "_" + self.nextBlock.toString())
+            self.nextBlock = self.nextBlock + 1
+            self.currentFunction!.blocks.append(block)
+            return block
+        }
+
+        isTerminated() -> bool {
+            if self.currentBlock!.instructions.length == 0 { return false }
+            local op = self.currentBlock!.instructions[self.currentBlock!.instructions.length - 1].op
+            return op == "return" || op == "jump" || op == "branch"
+        }
+
+        emit(instruction:Instruction) -> void { self.currentBlock!.instructions.append(instruction) }
+
+        temporary(op:string, typeName:string) -> Instruction {
+            local instruction = new Instruction(op)
+            instruction.result = new Value("temporary", "%" + self.nextTemporary.toString(), typeName)
+            instruction.typeName = typeName
+            self.nextTemporary = self.nextTemporary + 1
+            self.emit(instruction)
+            return instruction
+        }
+
+        runtimeName(symbol:Symbols.Symbol) -> string {
+            return "argon_" + symbol.owner!.name + "_" + symbol.name
+        }
+
+        lowerExpression(expression:Ast.Expression) -> Value {
+            if expression.kind == "Integer" { return self.constant(expression.text!, expression.inferredType!) }
+            if expression.kind == "Boolean" {
+                if expression.text! == "true" { return self.constant("1", "bool") }
+                return self.constant("0", "bool")
+            }
+            if expression.kind == "Null" { return self.constant("0", expression.inferredType!) }
+            if expression.kind == "String" {
+                local instruction = self.temporary("string_constant", "string")
+                instruction.text = expression.text
+                return instruction.result!
+            }
+            if expression.kind == "Identifier" { return self.lowerIdentifier(expression) }
+            if expression.kind == "Member" { return self.lowerMember(expression) }
+            if expression.kind == "Index" { return self.lowerIndex(expression) }
+            if expression.kind == "Assignment" { return self.lowerAssignment(expression) }
+            if expression.kind == "Unary" {
+                local operand = self.lowerExpression(expression.left!)
+                local instruction = self.temporary("unary", expression.inferredType!)
+                instruction.operator = expression.operator
+                instruction.first = operand
+                return instruction.result!
+            }
+            if expression.kind == "Binary" { return self.lowerBinary(expression) }
+            if expression.kind == "Conversion" {
+                local value = self.lowerExpression(expression.left!)
+                local instruction = self.temporary("convert", expression.inferredType!)
+                instruction.first = value
+                return instruction.result!
+            }
+            if expression.kind == "Unwrap" {
+                local value = self.lowerExpression(expression.left!)
+                local instruction = self.temporary("unwrap", expression.inferredType!)
+                instruction.first = value
+                return instruction.result!
+            }
+            if expression.kind == "Propagate" { return self.lowerPropagation(expression) }
+            if expression.kind == "Call" { return self.lowerCall(expression) }
+            if expression.kind == "New" { return self.lowerNew(expression) }
+            return new Value("error", "", "error")
+        }
+
+        constant(textValue:string, typeName:string) -> Value {
+            local instruction = self.temporary("constant", typeName)
+            instruction.text = textValue
+            return instruction.result!
+        }
+
+        lowerIdentifier(expression:Ast.Expression) -> Value {
+            local symbol = expression.symbol!
+            if symbol.name == "self" { return new Value("parameter", "self", expression.inferredType!) }
+            if symbol.kind == "Field" {
+                local instruction = self.temporary("load_field", expression.inferredType!)
+                instruction.first = new Value("parameter", "self", symbol.owner!.qualifiedName)
+                instruction.name = symbol.qualifiedName
+                return instruction.result!
+            }
+            local binding = self.findBinding(symbol)
+            if binding == null { return new Value("symbol", symbol.qualifiedName, expression.inferredType!) }
+            if binding!.value.kind == "parameter" { return binding!.value }
+            local instruction = self.temporary("load_local", binding!.value.typeName)
+            instruction.name = binding!.value.name
+            return instruction.result!
+        }
+
+        lowerMember(expression:Ast.Expression) -> Value {
+            if expression.name! == "length" {
+                local owner = self.lowerExpression(expression.left!)
+                local op = "array_length"
+                if owner.typeName == "string" { op = "string_length" }
+                if owner.typeName == "StringBuilder" { op = "builder_length" }
+                local instruction = self.temporary(op, expression.inferredType!)
+                instruction.first = owner
+                return instruction.result!
+            }
+            if expression.symbol != null {
+                if expression.symbol!.kind == "Field" {
+                    local owner = self.lowerExpression(expression.left!)
+                    local instruction = self.temporary("load_field", expression.inferredType!)
+                    instruction.first = owner
+                    instruction.name = expression.symbol!.qualifiedName
+                    return instruction.result!
+                }
+            }
+            return new Value("symbol", expression.name!, expression.inferredType!)
+        }
+
+        lowerIndex(expression:Ast.Expression) -> Value {
+            local container = self.lowerExpression(expression.left!)
+            local indexValue = self.lowerExpression(expression.right!)
+            local op = "array_load"
+            if container.typeName == "string" { op = "string_load" }
+            local instruction = self.temporary(op, expression.inferredType!)
+            instruction.first = container
+            instruction.second = indexValue
+            instruction.elementType = expression.inferredType
+            return instruction.result!
+        }
+
+        lowerAssignment(expression:Ast.Expression) -> Value {
+            local value = self.lowerExpression(expression.right!)
+            local target = expression.left!
+            if target.kind == "Index" {
+                local instruction = new Instruction("array_store")
+                instruction.first = self.lowerExpression(target.left!)
+                instruction.second = self.lowerExpression(target.right!)
+                instruction.third = value
+                instruction.elementType = target.inferredType
+                self.emit(instruction)
+                return value
+            }
+            local symbol = target.symbol!
+            if symbol.kind == "Field" {
+                local instruction = new Instruction("store_field")
+                if target.kind == "Member" { instruction.first = self.lowerExpression(target.left!) } else { instruction.first = new Value("parameter", "self", symbol.owner!.qualifiedName) }
+                instruction.second = value
+                instruction.name = symbol.qualifiedName
+                self.emit(instruction)
+                return value
+            }
+            local binding = self.findBinding(symbol)
+            local instruction = new Instruction("store_local")
+            instruction.name = binding!.value.name
+            instruction.first = value
+            self.emit(instruction)
+            return value
+        }
+
+        lowerBinary(expression:Ast.Expression) -> Value {
+            local left = self.lowerExpression(expression.left!)
+            local right = self.lowerExpression(expression.right!)
+            local op = "binary"
+            if left.typeName == "string" {
+                if expression.operator! == "+" { op = "string_concat" } else { op = "string_equal" }
+            }
+            local instruction = self.temporary(op, expression.inferredType!)
+            instruction.first = left
+            instruction.second = right
+            instruction.operator = expression.operator
+            return instruction.result!
+        }
+
+        lowerCall(expression:Ast.Expression) -> Value {
+            local callee = expression.left!
+            local name = ""
+            if callee.kind == "Member" { name = callee.name! }
+            if callee.symbol != null { name = callee.symbol!.name }
+            if name == "append" || name == "appendByte" {
+                local op = "array_append"
+                if callee.left!.inferredType! == "StringBuilder" {
+                    if name == "appendByte" { op = "builder_append_byte" } else { op = "builder_append_string" }
+                }
+                local instruction = new Instruction(op)
+                instruction.first = self.lowerExpression(callee.left!)
+                local appended = self.lowerExpression(expression.arguments[0])
+                if op == "builder_append_string" {
+                    if appended.typeName != "string" {
+                        local conversion = self.temporary("integer_to_string", "string")
+                        conversion.first = appended
+                        appended = conversion.result!
+                    }
+                }
+                instruction.second = appended
+                instruction.elementType = expression.arguments[0].inferredType
+                self.emit(instruction)
+                return new Value("void", "", "void")
+            }
+            if name == "slice" || name == "toString" || name == "build" {
+                local op = "string_slice"
+                if name == "toString" { op = "integer_to_string" }
+                if name == "build" { op = "builder_build" }
+                local owner = self.lowerExpression(callee.left!)
+                local loweredArguments = new Array<Value>(0)
+                local index:i64 = 0
+                while index < expression.arguments.length { loweredArguments.append(self.lowerExpression(expression.arguments[index])); index = index + 1 }
+                local instruction = self.temporary(op, expression.inferredType!)
+                instruction.first = owner
+                index = 0
+                while index < loweredArguments.length { instruction.arguments.append(loweredArguments[index]); index = index + 1 }
+                return instruction.result!
+            }
+            local instruction = new Instruction("call")
+            if callee.symbol != null { instruction.target = callee.symbol!.qualifiedName }
+            if callee.kind == "Member" {
+                if callee.symbol != null {
+                    if callee.symbol!.owner!.kind == "Object" { instruction.arguments.append(self.lowerExpression(callee.left!)) }
+                }
+            } else {
+                if callee.symbol != null {
+                    if callee.symbol!.owner!.kind == "Object" { instruction.arguments.append(new Value("parameter", "self", callee.symbol!.owner!.qualifiedName)) }
+                }
+            }
+            local index:i64 = 0
+            while index < expression.arguments.length { instruction.arguments.append(self.lowerExpression(expression.arguments[index])); index = index + 1 }
+            if expression.inferredType! == "void" { self.emit(instruction); return new Value("void", "", "void") }
+            instruction.result = new Value("temporary", "%" + self.nextTemporary.toString(), expression.inferredType!)
+            instruction.typeName = expression.inferredType
+            self.nextTemporary = self.nextTemporary + 1
+            self.emit(instruction)
+            return instruction.result!
+        }
+
+        lowerNew(expression:Ast.Expression) -> Value {
+            local typeName = expression.inferredType!
+            if typeName == "StringBuilder" {
+                local builder = self.temporary("builder_new", typeName)
+                return builder.result!
+            }
+            if self.isArray(typeName) {
+                local length = self.lowerExpression(expression.arguments[0])
+                local instruction = self.temporary("array_new", typeName)
+                instruction.first = length
+                instruction.elementType = typeName.slice(6, typeName.length - 7)
+                return instruction.result!
+            }
+            local instruction = self.temporary("allocate", typeName)
+            instruction.ownerType = typeName
+            local instance = instruction.result!
+            local typeNode = self.findType(typeName)
+            if typeNode != null {
+                if typeNode!.initializer != null {
+                    local initialize = new Instruction("call")
+                    initialize.target = typeNode!.initializer
+                    initialize.arguments.append(instance)
+                    self.emit(initialize)
+                }
+            }
+            local constructor = self.findMethod(expression.symbol!, "__")
+            if constructor != null {
+                local call = new Instruction("call")
+                call.target = constructor!.qualifiedName
+                call.arguments.append(instance)
+                local index:i64 = 0
+                while index < expression.arguments.length { call.arguments.append(self.lowerExpression(expression.arguments[index])); index = index + 1 }
+                self.emit(call)
+            }
+            return instance
+        }
+
+        lowerPropagation(expression:Ast.Expression) -> Value {
+            local value = self.lowerExpression(expression.left!)
+            local nullBlock = self.newBlock("propagate_null")
+            local valueBlock = self.newBlock("propagate_value")
+            local branch = new Instruction("branch")
+            branch.first = value
+            branch.target = valueBlock.label
+            branch.alternateTarget = nullBlock.label
+            self.emit(branch)
+            self.currentBlock = nullBlock
+            local returnInstruction = new Instruction("return")
+            returnInstruction.first = value
+            self.emit(returnInstruction)
+            self.currentBlock = valueBlock
+            return new Value(value.kind, value.name, expression.inferredType!)
+        }
+
+        findBinding(symbol:Symbols.Symbol) -> Binding? {
+            local index = self.bindings.length
+            while index > 0 {
+                index = index - 1
+                if self.bindings[index].symbol === symbol { return self.bindings[index] }
+            }
+            return null
+        }
+
+        findType(name:string) -> Type? {
+            local index:i64 = 0
+            while index < self.program.types.length { if self.program.types[index].name == name { return self.program.types[index] }; index = index + 1 }
+            return null
+        }
+
+        findMethod(owner:Symbols.Symbol, name:string) -> Symbols.Symbol? {
+            if owner.memberScope == null { return null }
+            local symbol = owner.memberScope!.lookupLocal(name)
+            if symbol != null { if symbol!.kind == "Method" { return symbol } }
+            return null
+        }
+
+        isArray(name:string) -> bool {
+            if name.length <= 7 { return false }
+            if name.slice(0, 6) != "Array<" { return false }
+            return name[name.length - 1] == 62
+        }
+    }}
+}}

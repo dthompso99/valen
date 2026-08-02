@@ -1,0 +1,72 @@
+import System from 'libSystem.ar'
+import Compiler from 'libCompiler.ar'
+
+library Diagnostics {{
+    Diagnostic {{
+        member severity:u8
+        member message:string
+        member span:Compiler.SourceSpan
+
+        __(severity:u8, message:string, span:Compiler.SourceSpan) -> void {
+            self.severity = severity
+            self.message = message
+            self.span = span
+        }
+    }}
+
+    DiagnosticBag {{
+        member diagnostics:Array<Diagnostic>
+
+        __() -> void {
+            self.diagnostics = new Array<Diagnostic>(0)
+        }
+
+        add(diagnostic:Diagnostic) -> void {
+            self.diagnostics.append(diagnostic)
+        }
+
+        length() -> i64 {
+            return self.diagnostics.length
+        }
+
+        hasErrors() -> bool {
+            local index:i64 = 0
+            while index < self.diagnostics.length {
+                if self.diagnostics[index].severity == 1 {
+                    return true
+                }
+                index = index + 1
+            }
+            return false
+        }
+    }}
+
+    severityName(severity:u8) -> string {
+        if severity == 1 { return "error" }
+        if severity == 2 { return "warning" }
+        return "note"
+    }
+
+    format(diagnostic:Diagnostic) -> string {
+        local builder = new StringBuilder()
+        builder.append(diagnostic.span.source.path)
+        builder.append(":")
+        builder.append(diagnostic.span.line)
+        builder.append(":")
+        builder.append(diagnostic.span.column)
+        builder.append(": ")
+        builder.append(severityName(diagnostic.severity))
+        builder.append(": ")
+        builder.append(diagnostic.message)
+        return builder.build()
+    }
+
+    write(bag:DiagnosticBag) -> void {
+        local index:i64 = 0
+        while index < bag.diagnostics.length {
+            System.writeError(format(bag.diagnostics[index]))
+            System.writeError("\n")
+            index = index + 1
+        }
+    }
+}}

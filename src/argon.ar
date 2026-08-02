@@ -1,0 +1,78 @@
+import System from 'libSystem.ar'
+import Compiler from 'libCompiler.ar'
+import Ast from 'libAst.ar'
+import Parsing from 'libParser.ar'
+import Diagnostics from 'libDiagnostics.ar'
+import ModuleLoading from 'libModuleLoader.ar'
+import Semantics from 'libSemantic.ar'
+import Ir from 'libIr.ar'
+import X86_64 from 'libX86_64.ar'
+
+entry {{
+    __() -> i32 {
+        local arguments = System.arguments()
+        if arguments.length != 2 && arguments.length != 3 {
+            System.writeError("usage: argon <source-file> [assembly-output]\n")
+            return 64
+        }
+
+        local cwd = System.currentDirectory()
+        if cwd == null {
+            System.writeError("argon: could not determine current directory\n")
+            return 74
+        }
+        local loader = new ModuleLoading.ModuleLoader(cwd!)
+        local graph = loader.load(arguments[1])
+        if graph.diagnostics.hasErrors() {
+            Diagnostics.write(graph.diagnostics)
+            return 65
+        }
+        local analyzer = new Semantics.Analyzer(graph)
+        local analysis = analyzer.analyze()
+        if !analysis.success() {
+            Diagnostics.write(analysis.diagnostics)
+            return 65
+        }
+        local generator = new Ir.Generator(analysis)
+        local ir = generator.generate()
+        if arguments.length == 3 {
+            local backend = new X86_64.Backend(ir)
+            local assembly = backend.generate()
+            local output = System.openWrite(arguments[2])
+            if output == null {
+                System.writeError("argon: could not open assembly output\n")
+                return 74
+            }
+            local written = System.writeFile(output!, assembly)
+            local closeResult = System.close(output!)
+            if written != assembly.length || closeResult != 0 {
+                System.writeError("argon: could not write assembly output\n")
+                return 74
+            }
+            return 0
+        }
+        local program = graph.entry!.program
+        System.write("modules ")
+        System.write(graph.modules.length.toString())
+        System.write("\n")
+        System.write("declarations ")
+        System.write(program.declarations.length.toString())
+        System.write("\n")
+        System.write("IR types ")
+        System.write(ir.types.length.toString())
+        System.write("\n")
+        System.write("IR functions ")
+        System.write(ir.functions.length.toString())
+        System.write("\n")
+        System.write("IR externals ")
+        System.write(ir.externals.length.toString())
+        System.write("\n")
+        System.write("IR blocks ")
+        System.write(ir.blockCount().toString())
+        System.write("\n")
+        System.write("IR instructions ")
+        System.write(ir.instructionCount().toString())
+        System.write("\n")
+        return 0
+    }
+}}

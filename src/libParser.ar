@@ -1,0 +1,418 @@
+import Compiler from 'libCompiler.ar'
+import Ast from 'libAst.ar'
+
+library Parsing {{
+    Parser {{
+        member tokens:Array<Compiler.Token>
+        member current:i64
+        member error:string?
+        member errorSpan:Compiler.SourceSpan?
+
+        __(tokens:Array<Compiler.Token>) -> void {
+            self.tokens = tokens
+            self.current = 0
+            self.error = null
+            self.errorSpan = null
+        }
+
+        parse() -> Ast.Program {
+            local imports = new Array<Ast.ImportDeclaration>(0)
+            local declarations = new Array<Ast.Declaration>(0)
+            self.skipSeparators()
+            while !self.check("EOF") {
+                if self.error != null { break }
+                if self.check("IMPORT") {
+                    imports.append(self.parseImport())
+                } else {
+                    if self.check("LIBRARY") {
+                        declarations.append(self.parseDeclaration("Library"))
+                    } else {
+                        declarations.append(self.parseDeclaration("Object"))
+                    }
+                }
+                self.skipSeparators()
+            }
+            return new Ast.Program(imports, declarations, self.span(self.tokens[0].span, self.peek(0).span))
+        }
+
+        parseImport() -> Ast.ImportDeclaration {
+            local start = self.consume("IMPORT", "Expected 'import'")
+            local name = self.consume("IDENTIFIER", "Expected a library name")
+            self.consume("FROM", "Expected 'from' after imported name")
+            local path = self.consume("STRING_LITERAL", "Expected an imported path")
+            return new Ast.ImportDeclaration(name.lexeme, self.decodeString(path.lexeme), self.span(start.span, path.span))
+        }
+
+        parseDeclaration(kind:string) -> Ast.Declaration {
+            local start = self.peek(0)
+            if kind == "Library" { start = self.consume("LIBRARY", "Expected 'library'") }
+            local name = self.consume("IDENTIFIER", "Expected a declaration name")
+            self.consume("LEFT_BRACE", "Expected '{{' after declaration name")
+            self.consume("LEFT_BRACE", "Expected '{{' after declaration name")
+            local members = new Array<Ast.MemberDeclaration>(0)
+            self.skipSeparators()
+            while !self.atDeclarationEnd() {
+                if self.error != null { break }
+                members.append(self.parseMember(kind == "Library"))
+                self.skipSeparators()
+            }
+            self.consume("RIGHT_BRACE", "Expected '}}' after declaration")
+            local end = self.consume("RIGHT_BRACE", "Expected '}}' after declaration")
+            return new Ast.Declaration(kind, name.lexeme, members, self.span(start.span, end.span))
+        }
+
+        parseMember(inLibrary:bool) -> Ast.MemberDeclaration {
+            if self.check("IDENTIFIER") && self.peek(1).kind == "LEFT_BRACE" && self.peek(2).kind == "LEFT_BRACE" {
+                local declaration = self.parseDeclaration("Object")
+                local nested = new Ast.MemberDeclaration("Object", declaration.name, declaration.span)
+                nested.members = declaration.members
+                return nested
+            }
+            if self.match("MEMBER") {
+                local start = self.previous()
+                local name = self.consume("IDENTIFIER", "Expected a field name")
+                self.consume("COLON", "Expected ':' after field name")
+                local field = new Ast.MemberDeclaration("Field", name.lexeme, self.span(start.span, name.span))
+                field.declaredType = self.parseTypeReference()
+                if self.match("EQUAL") { field.initializer = self.parseExpression() }
+                field.span = self.span(start.span, self.previous().span)
+                return field
+            }
+            local isNative = self.match("NATIVE")
+            local start = self.peek(0)
+            if isNative { start = self.previous() }
+            local name = self.consume("IDENTIFIER", "Expected a method name")
+            local method = new Ast.MemberDeclaration("Method", name.lexeme, self.span(start.span, name.span))
+            method.isNative = isNative
+            self.consume("LEFT_PAREN", "Expected '(' after method name")
+            if !self.check("RIGHT_PAREN") {
+                local more:bool = true
+                while more {
+                    local parameterName = self.consume("IDENTIFIER", "Expected a parameter name")
+                    self.consume("COLON", "Expected ':' after parameter name")
+                    local parameterType = self.parseTypeReference()
+                    method.parameters.append(new Ast.Parameter(
+                        parameterName.lexeme,
+                        parameterType,
+                        self.span(parameterName.span, self.previous().span)
+                    ))
+                    more = self.match("COMMA")
+                }
+            }
+            self.consume("RIGHT_PAREN", "Expected ')' after parameters")
+            self.consume("ARROW", "Expected '->' after parameters")
+            method.returnType = self.parseTypeReference()
+            if !isNative { method.body = self.parseBlock() }
+            method.span = self.span(start.span, self.previous().span)
+            return method
+        }
+
+        parseTypeReference() -> Ast.TypeReference {
+            local start = self.consume("IDENTIFIER", "Expected a type name")
+            local name = start.lexeme
+            while self.match("DOT") {
+                local part = self.consume("IDENTIFIER", "Expected a qualified type name")
+                name = name + "." + part.lexeme
+            }
+            local arguments = new Array<Ast.TypeReference>(0)
+            if self.match("LESS") {
+                local more:bool = true
+                while more {
+                    arguments.append(self.parseTypeReference())
+                    more = self.match("COMMA")
+                }
+                self.consume("GREATER", "Expected '>' after type arguments")
+            }
+            local optional = self.match("QUESTION")
+            return new Ast.TypeReference(name, arguments, optional, self.span(start.span, self.previous().span))
+        }
+
+        parseBlock() -> Ast.Block {
+            local start = self.consume("LEFT_BRACE", "Expected '{'")
+            local statements = new Array<Ast.Statement>(0)
+            self.skipSeparators()
+            while !self.check("RIGHT_BRACE") {
+                if self.check("EOF") { break }
+                if self.error != null { break }
+                statements.append(self.parseStatement())
+                if !self.atSeparator() {
+                    if !self.check("RIGHT_BRACE") { self.fail("Expected a statement delimiter") }
+                }
+                self.skipSeparators()
+            }
+            local end = self.consume("RIGHT_BRACE", "Expected '}' after block")
+            return new Ast.Block(statements, self.span(start.span, end.span))
+        }
+
+        parseStatement() -> Ast.Statement {
+            if self.match("RETURN") {
+                local start = self.previous()
+                local statement = new Ast.Statement("Return", start.span)
+                if !self.atSeparator() {
+                    if !self.check("RIGHT_BRACE") { statement.expression = self.parseExpression() }
+                }
+                statement.span = self.span(start.span, self.previous().span)
+                return statement
+            }
+            if self.match("IF") {
+                local start = self.previous()
+                local statement = new Ast.Statement("If", start.span)
+                statement.condition = self.parseExpression()
+                statement.body = self.parseBlock()
+                local saved = self.current
+                self.skipNewlines()
+                if self.match("ELSE") { statement.alternate = self.parseBlock() } else { self.current = saved }
+                statement.span = self.span(start.span, self.previous().span)
+                return statement
+            }
+            if self.match("WHILE") {
+                local start = self.previous()
+                local statement = new Ast.Statement("While", start.span)
+                statement.condition = self.parseExpression()
+                statement.body = self.parseBlock()
+                statement.span = self.span(start.span, self.previous().span)
+                return statement
+            }
+            if self.match("BREAK") { return new Ast.Statement("Break", self.previous().span) }
+            if self.match("CONTINUE") { return new Ast.Statement("Continue", self.previous().span) }
+            if self.match("LOCAL") {
+                local start = self.previous()
+                local name = self.consume("IDENTIFIER", "Expected a local name")
+                local statement = new Ast.Statement("Local", self.span(start.span, name.span))
+                statement.name = name.lexeme
+                if self.match("COLON") { statement.declaredType = self.parseTypeReference() }
+                if self.match("EQUAL") { statement.expression = self.parseExpression() }
+                statement.span = self.span(start.span, self.previous().span)
+                return statement
+            }
+            if self.check("LEFT_BRACE") {
+                local block = self.parseBlock()
+                local statement = new Ast.Statement("Block", block.span)
+                statement.body = block
+                return statement
+            }
+            local expression = self.parseExpression()
+            local statement = new Ast.Statement("Expression", expression.span)
+            statement.expression = expression
+            return statement
+        }
+
+        parseExpression() -> Ast.Expression { return self.parseAssignment() }
+
+        parseAssignment() -> Ast.Expression {
+            local target = self.parseBinary(1)
+            if !self.match("EQUAL") { return target }
+            local expression = new Ast.Expression("Assignment", self.span(target.span, self.peek(0).span))
+            expression.left = target
+            expression.right = self.parseAssignment()
+            expression.span = self.span(target.span, expression.right!.span)
+            return expression
+        }
+
+        parseBinary(minimum:i64) -> Ast.Expression {
+            local left = self.parseUnary()
+            while self.precedence(self.peek(0).kind) >= minimum {
+                local operator = self.advanceToken()
+                local right = self.parseBinary(self.precedence(operator.kind) + 1)
+                local expression = new Ast.Expression("Binary", self.span(left.span, right.span))
+                expression.operator = operator.lexeme
+                expression.left = left
+                expression.right = right
+                left = expression
+            }
+            return left
+        }
+
+        parseUnary() -> Ast.Expression {
+            if self.match("BANG") || self.match("MINUS") {
+                local operator = self.previous()
+                local operand = self.parseUnary()
+                local expression = new Ast.Expression("Unary", self.span(operator.span, operand.span))
+                expression.operator = operator.lexeme
+                expression.left = operand
+                return expression
+            }
+            if self.match("NEW") { return self.parseNew(self.previous()) }
+            local expression = self.parsePostfix()
+            while self.match("AS") {
+                local converted = new Ast.Expression("Conversion", self.span(expression.span, self.peek(0).span))
+                converted.left = expression
+                converted.typeArguments.append(self.parseTypeReference())
+                converted.span = self.span(expression.span, self.previous().span)
+                expression = converted
+            }
+            return expression
+        }
+
+        parseNew(start:Compiler.Token) -> Ast.Expression {
+            local expression = new Ast.Expression("New", start.span)
+            expression.left = self.parsePrimary()
+            while self.match("DOT") {
+                local memberToken = self.consume("IDENTIFIER", "Expected a member name")
+                local access = new Ast.Expression("Member", self.span(expression.left!.span, memberToken.span))
+                access.left = expression.left
+                access.name = memberToken.lexeme
+                expression.left = access
+            }
+            if self.match("LESS") {
+                local more:bool = true
+                while more {
+                    expression.typeArguments.append(self.parseTypeReference())
+                    more = self.match("COMMA")
+                }
+                self.consume("GREATER", "Expected '>' after constructed type")
+            }
+            self.consume("LEFT_PAREN", "Expected '(' after constructed type")
+            self.parseArguments(expression.arguments)
+            expression.span = self.span(start.span, self.previous().span)
+            return expression
+        }
+
+        parsePostfix() -> Ast.Expression {
+            local expression = self.parsePrimary()
+            local scanning:bool = true
+            while scanning {
+                if self.match("LEFT_PAREN") {
+                    local call = new Ast.Expression("Call", expression.span)
+                    call.left = expression
+                    self.parseArguments(call.arguments)
+                    call.span = self.span(expression.span, self.previous().span)
+                    expression = call
+                } else {
+                    if self.match("DOT") {
+                        local memberToken = self.consume("IDENTIFIER", "Expected a member name")
+                        local access = new Ast.Expression("Member", self.span(expression.span, memberToken.span))
+                        access.left = expression
+                        access.name = memberToken.lexeme
+                        expression = access
+                    } else {
+                        if self.match("LEFT_BRACKET") {
+                            local access = new Ast.Expression("Index", expression.span)
+                            access.left = expression
+                            access.right = self.parseExpression()
+                            local end = self.consume("RIGHT_BRACKET", "Expected ']' after index")
+                            access.span = self.span(expression.span, end.span)
+                            expression = access
+                        } else {
+                            if self.match("BANG") {
+                                local unwrap = new Ast.Expression("Unwrap", self.span(expression.span, self.previous().span))
+                                unwrap.left = expression
+                                expression = unwrap
+                            } else {
+                                if self.match("QUESTION") {
+                                    local propagate = new Ast.Expression("Propagate", self.span(expression.span, self.previous().span))
+                                    propagate.left = expression
+                                    expression = propagate
+                                } else { scanning = false }
+                            }
+                        }
+                    }
+                }
+            }
+            return expression
+        }
+
+        parseArguments(arguments:Array<Ast.Expression>) -> void {
+            self.skipNewlines()
+            if !self.check("RIGHT_PAREN") {
+                local more:bool = true
+                while more {
+                    self.skipNewlines()
+                    arguments.append(self.parseExpression())
+                    self.skipNewlines()
+                    more = self.match("COMMA")
+                }
+            }
+            self.consume("RIGHT_PAREN", "Expected ')' after arguments")
+        }
+
+        parsePrimary() -> Ast.Expression {
+            local token = self.advanceToken()
+            local kind:string? = null
+            if token.kind == "NULL" { kind = "Null" }
+            if token.kind == "TRUE" || token.kind == "FALSE" { kind = "Boolean" }
+            if token.kind == "INTEGER_LITERAL" { kind = "Integer" }
+            if token.kind == "STRING_LITERAL" { kind = "String" }
+            if token.kind == "IDENTIFIER" { kind = "Identifier" }
+            if token.kind == "LEFT_PAREN" {
+                local expression = self.parseExpression()
+                self.consume("RIGHT_PAREN", "Expected ')' after expression")
+                return expression
+            }
+            if kind == null {
+                self.fail("Expected an expression")
+                return new Ast.Expression("Error", token.span)
+            }
+            local expression = new Ast.Expression(kind!, token.span)
+            if token.kind == "IDENTIFIER" { expression.name = token.lexeme }
+            if token.kind == "STRING_LITERAL" { expression.text = self.decodeString(token.lexeme) } else { expression.text = token.lexeme }
+            return expression
+        }
+
+        decodeString(lexeme:string) -> string {
+            local builder = new StringBuilder()
+            local index:i64 = 1
+            while index < lexeme.length - 1 {
+                local character = lexeme[index]
+                if character == 92 {
+                    index = index + 1
+                    character = lexeme[index]
+                    if character == 110 { character = 10 }
+                    if character == 114 { character = 13 }
+                    if character == 116 { character = 9 }
+                }
+                builder.appendByte(character)
+                index = index + 1
+            }
+            return builder.build()
+        }
+
+        precedence(kind:string) -> i64 {
+            if kind == "OR" { return 1 }
+            if kind == "AND" { return 2 }
+            if kind == "EQUAL_EQUAL" || kind == "BANG_EQUAL" || kind == "EQUAL_EQUAL_EQUAL" || kind == "BANG_EQUAL_EQUAL" { return 3 }
+            if kind == "LESS" || kind == "LESS_EQUAL" || kind == "GREATER" || kind == "GREATER_EQUAL" { return 4 }
+            if kind == "PLUS" || kind == "MINUS" { return 5 }
+            if kind == "STAR" || kind == "SLASH" { return 6 }
+            return 0
+        }
+
+        atDeclarationEnd() -> bool {
+            return self.check("RIGHT_BRACE") && self.peek(1).kind == "RIGHT_BRACE"
+        }
+        atSeparator() -> bool { return self.check("NEWLINE") || self.check("SEMICOLON") }
+        skipSeparators() -> void { while self.match("NEWLINE") || self.match("SEMICOLON") {} }
+        skipNewlines() -> void { while self.match("NEWLINE") {} }
+        match(kind:string) -> bool {
+            if !self.check(kind) { return false }
+            self.current = self.current + 1
+            return true
+        }
+        check(kind:string) -> bool { return self.peek(0).kind == kind }
+        consume(kind:string, message:string) -> Compiler.Token {
+            if self.check(kind) { return self.advanceToken() }
+            self.fail(message)
+            return self.peek(0)
+        }
+        advanceToken() -> Compiler.Token {
+            local token = self.peek(0)
+            if token.kind != "EOF" { self.current = self.current + 1 }
+            return token
+        }
+        peek(distance:i64) -> Compiler.Token {
+            local index = self.current + distance
+            if index >= self.tokens.length { index = self.tokens.length - 1 }
+            return self.tokens[index]
+        }
+        previous() -> Compiler.Token { return self.tokens[self.current - 1] }
+        span(first:Compiler.SourceSpan, last:Compiler.SourceSpan) -> Compiler.SourceSpan {
+            return new Compiler.SourceSpan(first.source, first.start, last.end, first.line, first.column)
+        }
+        fail(message:string) -> void {
+            if self.error != null { return }
+            local token = self.peek(0)
+            self.error = message
+            self.errorSpan = token.span
+        }
+    }}
+}}
