@@ -29,13 +29,13 @@ Timing values are reported but do not fail CI because shared-runner speed varies
 
 ## Generation 2
 
-Generation-2 compiler construction is currently memory-intensive and is therefore opt-in:
+Generation-2 compiler construction remains opt-in for local benchmark runs:
 
 ```sh
 node scripts/benchmark.mjs --generation2 --json generation2-results.json
 ```
 
-This records generation-1 building generation 2 but does not impose a budget. Issue #52 owns defining and reaching that threshold.
+This records generation 1 building generation 2, then uses generation 2 to compile and execute the workload. CI enforces the supported 3 GiB peak-RSS ceiling; ordinary local runs omit it for speed.
 
 ## Benchmark rules
 

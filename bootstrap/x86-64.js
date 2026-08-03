@@ -55,6 +55,7 @@ export class X86_64Backend {
             'argon_System_currentDirectory',
             'argon_System_environmentVariable',
             'argon_System_collectGarbage',
+            'argon_System_enableProcessArena',
             'argon_System_link',
             'argon_System_memoryCopy',
             'argon_System_memoryCompare',
@@ -104,6 +105,7 @@ export class X86_64Backend {
         if (runtimeSymbols.has('argon_System_currentDirectory')) lines.push(...this.currentDirectoryRuntime());
         if (runtimeSymbols.has('argon_System_environmentVariable')) lines.push(...this.environmentVariableRuntime());
         if (runtimeSymbols.has('argon_System_collectGarbage')) lines.push('.globl argon_System_collectGarbage', 'argon_System_collectGarbage:', '    jmp argon_gc_collect', '');
+        if (runtimeSymbols.has('argon_System_enableProcessArena')) lines.push('.globl argon_System_enableProcessArena', 'argon_System_enableProcessArena:', '    mov DWORD PTR [rip+argon_arena_enabled], 1', '    ret', '');
         if (runtimeSymbols.has('argon_System_link')) lines.push(...this.linkRuntime());
         if (runtimeSymbols.has('argon_System_memoryCopy')) lines.push(...this.memoryCopyRuntime());
         if (runtimeSymbols.has('argon_System_memoryCompare')) lines.push(...this.memoryCompareRuntime());
@@ -1566,7 +1568,8 @@ export class X86_64Backend {
     }
 
     allocationRuntime() {
-        // Anonymous mmap is the bootstrap allocator and guarantees zero-filled storage.
+        // Raw strings and buffers live for the process. Suballocate them from large
+        // anonymous mappings so a tiny value does not consume an entire page.
         return [
             '.globl argon_alloc',
             'argon_alloc:',
@@ -1574,6 +1577,50 @@ export class X86_64Backend {
             '    jnz .Lalloc_size',
             '    mov edi, 1',
             '.Lalloc_size:',
+            '    cmp DWORD PTR [rip+argon_arena_enabled], 0',
+            '    je .Lalloc_direct',
+            '    push r12',
+            // Keep a zeroed sentinel after raw data. Native path/environment calls
+            // consume string bytes as C strings at the runtime boundary.
+            '    lea r12, [rdi+15]',
+            '    and r12, -8',
+            '.Lalloc_lock:',
+            '    xor eax, eax',
+            '    mov edx, 1',
+            '    lock cmpxchg DWORD PTR [rip+argon_arena_lock], edx',
+            '    je .Lalloc_locked',
+            '    pause',
+            '    jmp .Lalloc_lock',
+            '.Lalloc_locked:',
+            '    cmp QWORD PTR [rip+argon_arena_remaining], r12',
+            '    jb .Lalloc_refill',
+            '    mov rax, QWORD PTR [rip+argon_arena_cursor]',
+            '    add QWORD PTR [rip+argon_arena_cursor], r12',
+            '    sub QWORD PTR [rip+argon_arena_remaining], r12',
+            '    mov DWORD PTR [rip+argon_arena_lock], 0',
+            '    pop r12',
+            '    ret',
+            '.Lalloc_refill:',
+            '    mov rsi, 1048576',
+            '    cmp r12, rsi',
+            '    cmova rsi, r12',
+            '    xor edi, edi',
+            '    mov edx, 3',
+            '    mov r10d, 34',
+            '    mov r8, -1',
+            '    xor r9d, r9d',
+            '    mov eax, 9',
+            '    syscall',
+            '    cmp rax, -4095',
+            '    jae .Lallocation_error',
+            '    lea rcx, [rax+r12]',
+            '    mov QWORD PTR [rip+argon_arena_cursor], rcx',
+            '    sub rsi, r12',
+            '    mov QWORD PTR [rip+argon_arena_remaining], rsi',
+            '    mov DWORD PTR [rip+argon_arena_lock], 0',
+            '    pop r12',
+            '    ret',
+            '.Lalloc_direct:',
             '    mov rsi, rdi',
             '    xor edi, edi',
             '    mov edx, 3',
@@ -1631,8 +1678,9 @@ export class X86_64Backend {
             '    mov rax, r13', '    cmp rax, 4', '    jae .Lgc_array_capacity', '    mov eax, 4', '.Lgc_array_capacity:',
             '    mov QWORD PTR [rbx], r13', '    mov QWORD PTR [rbx+8], rax', '    mov QWORD PTR [rbx+24], r12', '    mov QWORD PTR [rbx+32], 1', '    imul rax, r12', '    mov rdi, rax', '    call argon_alloc', '    mov QWORD PTR [rbx+16], rax', '    mov rax, rbx',
             '    add rsp, 8', '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    pop rbx', '    leave', '    ret', '',
-            'argon_gc_array_finalize:', '    mov rsi, QWORD PTR [rdi+8]', '    imul rsi, QWORD PTR [rdi+24]', '    test rsi, rsi', '    jne .Lgc_array_finalize_size', '    mov esi, 1',
-            '.Lgc_array_finalize_size:', '    mov rdi, QWORD PTR [rdi+16]', '    mov eax, 11', '    syscall', '    ret', ''
+            'argon_gc_array_finalize:', '    cmp DWORD PTR [rip+argon_arena_enabled], 0', '    jne .Lgc_array_finalize_done',
+            '    mov rsi, QWORD PTR [rdi+8]', '    imul rsi, QWORD PTR [rdi+24]', '    test rsi, rsi', '    jne .Lgc_array_finalize_size', '    mov esi, 1',
+            '.Lgc_array_finalize_size:', '    mov rdi, QWORD PTR [rdi+16]', '    mov eax, 11', '    syscall', '.Lgc_array_finalize_done:', '    ret', ''
         ];
     }
 
@@ -1686,7 +1734,9 @@ export class X86_64Backend {
     }
 
     gcData() {
-        return ['.section .bss', '.align 8', 'argon_gc_roots:', '    .zero 8', 'argon_gc_heap:', '    .zero 8', 'argon_gc_bytes:', '    .zero 8', '.section .data', '.align 8', 'argon_gc_threshold:', '    .quad 1048576', '.text'];
+        return ['.section .bss', '.align 8', 'argon_gc_roots:', '    .zero 8', 'argon_gc_heap:', '    .zero 8', 'argon_gc_bytes:', '    .zero 8',
+            'argon_arena_cursor:', '    .zero 8', 'argon_arena_remaining:', '    .zero 8', 'argon_arena_lock:', '    .zero 4', 'argon_arena_enabled:', '    .zero 4',
+            '.section .data', '.align 8', 'argon_gc_threshold:', '    .quad 1048576', '.text'];
     }
 
     gcTraceLabel(typeName) { return `${this.typeLabel(typeName)}_gc_trace`; }

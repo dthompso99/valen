@@ -386,6 +386,12 @@ test('runtime paths, filesystem errors, allocation checks, and memory operations
         assert.match(assembly, new RegExp(`argon_System_${symbol}:`));
     }
     assert.match(assembly, /\.Lallocation_error:/);
+    assert.match(assembly, /argon_arena_cursor:/);
+    assert.match(assembly, /argon_System_enableProcessArena:/);
+    assert.match(assembly, /mov rsi, 1048576/);
+    assert.match(assembly, /lea r12, \[rdi\+15\]/);
+    assert.match(assembly, /argon_gc_array_finalize:\n    cmp DWORD PTR \[rip\+argon_arena_enabled\], 0/);
+    assert.match(assembly, /\.Lalloc_direct:/);
 });
 
 test('stack arguments, runtime errors, division checks, and symbol mangling are backend-safe', () => {

@@ -11,7 +11,7 @@ Argon is developed through two compiler implementations:
 
 The bootstrap compiler does not need every language feature. It needs the subset required to compile the current native compiler source. If `src/` begins using a new feature, generation 0 must understand that feature before the bootstrap remains valid.
 
-Building generation 2 within the target memory budget and comparing generation-1/2 output are **WIP**.
+Generation 1 builds a working generation-2 compiler within a 3 GiB peak-RSS budget. Comparing normalized generation-1/2 output remains **WIP**.
 
 ## Compilation pipeline
 

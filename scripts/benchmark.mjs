@@ -105,6 +105,8 @@ try {
     const argonProgram = path.join(directory, 'integer-loop-argon');
     const cO0Program = path.join(directory, 'integer-loop-c-o0');
     const cO2Program = path.join(directory, 'integer-loop-c-o2');
+    const stage2 = path.join(directory, 'argon-stage2');
+    const stage2Program = path.join(directory, 'integer-loop-stage2');
     const workloadAr = path.join(root, 'benchmarks/workloads/integer-loop.ar');
     const workloadC = path.join(root, 'benchmarks/workloads/integer-loop.c');
 
@@ -119,7 +121,9 @@ try {
     runRepeated('c_o2_run_integer_loop', cO2Program, expectedOutput);
 
     if (includeGeneration2) {
-        measured('stage1_compile_stage2', stage1, [path.join(root, 'src/argon.ar'), '-o', path.join(directory, 'argon-stage2')]);
+        measured('stage1_compile_stage2', stage1, [path.join(root, 'src/argon.ar'), '-o', stage2]);
+        measured('stage2_compile_workload', stage2, [workloadAr, '-o', stage2Program]);
+        runRepeated('stage2_run_integer_loop', stage2Program, expectedOutput);
     }
 
     const commit = spawnSync('git', ['rev-parse', '--short', 'HEAD'], {cwd: root, encoding: 'utf8'}).stdout.trim() || 'unknown';
@@ -151,7 +155,8 @@ try {
             argonAssemblyBytes: fileSize(`${argonProgram}.s`),
             argonExecutableBytes: fileSize(argonProgram),
             cO0ExecutableBytes: fileSize(cO0Program),
-            cO2ExecutableBytes: fileSize(cO2Program)
+            cO2ExecutableBytes: fileSize(cO2Program),
+            ...(includeGeneration2 ? {stage2CompilerBytes: fileSize(stage2), stage2ExecutableBytes: fileSize(stage2Program)} : {})
         },
         budgets,
         budgetFailures

@@ -92,7 +92,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 ## 7. Compiler and generated-code efficiency
 
 - [ ] Replace linear compiler symbol collections where profiling justifies it
-- [ ] Add a process-lifetime arena for compiler allocations
+- [x] Add a process-lifetime arena for compiler allocations
 - [ ] Reduce temporary immutable-string allocation during assembly generation
 - [x] Add IR validation and canonicalization passes
 - [ ] Add dead-block, dead-value, and constant-folding passes
@@ -109,7 +109,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 - [x] Generation 0 compiles the example programs
 - [x] Generation 0 compiles the Argon compiler source
 - [x] Generation 1 passes the compiler test suite
-- [ ] Generation 1 builds generation 2 within the supported memory budget
+- [x] Generation 1 builds generation 2 within the supported 3 GiB peak-RSS budget
 - [ ] Generations 1 and 2 produce semantically equivalent IR
 - [ ] Invalid programs produce consistent diagnostics across generations
 - [ ] Remove the final JavaScript runtime dependency

@@ -11,6 +11,7 @@ import X86_64 from 'libX86_64.ar'
 
 entry {{
     __() -> i32 {
+        System.enableProcessArena()
         local arguments = System.arguments()
         if arguments.length == 2 {
             if (arguments[1] == "--help") {

@@ -42,7 +42,7 @@ Platforms without native threads are intended to use `InlineExecutor`; only x86-
 
 ## WIP: compiler and tooling
 
-- **WIP:** generation 2 within the supported memory budget
+- Generation 1 builds a working generation-2 compiler within the supported 3 GiB peak-RSS budget.
 - **WIP:** generation-1/2 equivalence checks
 - **WIP:** removing the final JavaScript bootstrap dependency
 - **WIP:** formatter and language server

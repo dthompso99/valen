@@ -42,7 +42,7 @@ jobs:
         run: npm test
 
       - name: Benchmark compiler and generated code
-        run: node scripts/benchmark.mjs --json benchmark-results.json --markdown benchmark-results.md --check-budgets
+        run: node scripts/benchmark.mjs --generation2 --json benchmark-results.json --markdown benchmark-results.md --check-budgets
 
       - name: Publish benchmark summary
         if: always()
