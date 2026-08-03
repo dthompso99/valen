@@ -1,0 +1,14 @@
+import Http from 'libHttp.ar'
+
+entry {{
+    __() -> i32 {
+        local input = "GET /ws HTTP/1.1\r\nHost: localhost\r\nsEc-WeBsOcKeT-kEy: example\r\nContent-Length: 5\r\n\r\nhello"
+        if !Http.complete(input) { return 1 }
+        local request = Http.parse(input)
+        if request == null { return 2 }
+        if request!.method != "GET" || request!.target != "/ws" || request!.body != "hello" { return 3 }
+        local key = request!.header("Sec-WebSocket-Key")
+        if key == null || key! != "example" { return 4 }
+        return 0
+    }
+}}

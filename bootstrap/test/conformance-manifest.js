@@ -9,6 +9,7 @@ export const validPrograms = [
     {name: 'integer bitwise operators', source: 'bootstrap/test/fixtures/bitwise.ar'},
     {name: 'WebSocket handshake', source: 'bootstrap/test/fixtures/websocket-handshake.ar'},
     {name: 'WebSocket framing', source: 'bootstrap/test/fixtures/websocket-frames.ar'},
+    {name: 'HTTP header parsing', source: 'bootstrap/test/fixtures/http-headers.ar'},
     {name: 'floating point', source: 'bootstrap/test/fixtures/floating-point.ar'},
     {name: 'default arguments', source: 'bootstrap/test/fixtures/default-arguments.ar'},
     {name: 'collection ownership', source: 'bootstrap/test/fixtures/collection-ownership.ar'},

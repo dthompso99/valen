@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clippy
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: clippy
+  template:
+    metadata:
+      labels:
+        app: clippy
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: clippy
+          image: gitea.hallrd.click/dthompson/clippy:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PORT
+              value: "3000"
+            - name: VALEN_MAX_MESSAGE_BYTES
+              value: "104857600"
+          ports:
+            - name: http
+              containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clippy
+spec:
+  selector:
+    app: clippy
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http

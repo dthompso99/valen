@@ -1,0 +1,165 @@
+import Network from 'libNetwork.ar'
+import EventLoop from 'libEventLoop.ar'
+import System from 'libSystem.ar'
+import Http from 'libHttp.ar'
+import WebSocket from 'libWebSocket.ar'
+import Page from './libPage.ar'
+
+Client {{
+    member connection:Network.Connection?
+    member input:string
+    member output:string
+    member sent:i64
+    member mode:i64
+    member fragmentOpcode:i64
+    member fragments:string
+    member maximumPending:i64
+
+    __(own connection:Network.Connection, maximumPending:i64) -> void {
+        self.connection = connection; self.input = ""; self.output = ""; self.sent = 0; self.mode = 0
+        self.fragmentOpcode = -1; self.fragments = ""; self.maximumPending = maximumPending
+    }
+
+    descriptor() -> i64 { return Network.connectionDescriptor(self.connection!) }
+    interest() -> i64 { if self.sent < self.output.length { return 4 }; return 1 }
+    queue(value:string) -> bool {
+        if self.output.length - self.sent + value.length > self.maximumPending { return false }
+        if self.sent == self.output.length { self.output = value; self.sent = 0 }
+        else { self.output = self.output.slice(self.sent, self.output.length - self.sent) + value; self.sent = 0 }
+        return true
+    }
+    receive(count:i64) -> i64 {
+        local chunk = Network.receive(self.connection!, count)
+        if chunk == null { if Network.lastError() == 11 { return 0 }; return -1 }
+        if chunk!.length == 0 { return -1 }
+        self.input = self.input + chunk!
+        return 1
+    }
+    flush() -> i64 {
+        local written = Network.sendSome(self.connection!, self.output, self.sent, self.output.length - self.sent)
+        if written < 0 { if Network.lastError() == 11 { return 0 }; return -1 }
+        self.sent = self.sent + written
+        if self.sent == self.output.length { self.output = ""; self.sent = 0; return 1 }
+        return 0
+    }
+    close() -> void { if self.connection != null { Network.closeConnection(self.connection!); self.connection = null } }
+}}
+
+entry {{
+    member clients:Array<Client?>
+    member protocol:WebSocket.Protocol
+    member handshake:WebSocket.Handshake
+    member clipboard:string
+    member maximumMessage:i64
+    member rejected:i64
+    member messages:i64
+
+    __() -> i32 {
+        System.enableProcessArena()
+        self.clients = new Array<Client?>(0); self.protocol = new WebSocket.Protocol(); self.handshake = new WebSocket.Handshake()
+        self.clipboard = "{\"type\":\"text\",\"data\":\"\"}"; self.maximumMessage = 104857600; self.rejected = 0; self.messages = 0
+        local configuredMaximum = System.environmentVariable("VALEN_MAX_MESSAGE_BYTES")
+        if configuredMaximum != null { local parsed = System.parseInteger(configuredMaximum!); if !parsed.valid || parsed.value < 1 { return 64 }; self.maximumMessage = parsed.value }
+        local port:i64 = 3000
+        local configuredPort = System.environmentVariable("PORT")
+        if configuredPort != null { local parsed = System.parseInteger(configuredPort!); if !parsed.valid || parsed.value < 1 || parsed.value > 65535 { return 64 }; port = parsed.value }
+        local listener = Network.listen(port as u16, 64)
+        if listener == null || !Network.makeListenerNonblocking(listener!) { return 1 }
+        System.write("clippy: ready on port " + port.toString() + "\n")
+        while true {
+            local descriptors = new Array<i64>(0); local interests = new Array<i64>(0)
+            descriptors.append(Network.listenerDescriptor(listener!)); interests.append(1)
+            local index:i64 = 0
+            while index < self.clients.length { if self.clients[index] != null { descriptors.append(self.clients[index]!.descriptor()); interests.append(self.clients[index]!.interest()) }; index = index + 1 }
+            local ready = EventLoop.wait(descriptors, interests, 1000)
+            if ready == 0 { if !self.accept(listener!) { return 2 } }
+            else { if ready > 0 { local clientIndex = self.clientAt(ready - 1); if clientIndex >= 0 { self.service(clientIndex) } } }
+        }
+        return 0
+    }
+
+    accept(listener:Network.Listener) -> bool {
+        local connection = Network.accept(listener)
+        if connection == null { return Network.lastError() == 11 }
+        if !Network.makeConnectionNonblocking(connection!) { Network.closeConnection(connection!); return false }
+        self.clients.append(new Client(connection!, self.maximumMessage + 4096)); return true
+    }
+    clientAt(active:i64) -> i64 {
+        local seen:i64 = 0; local index:i64 = 0
+        while index < self.clients.length { if self.clients[index] != null { if seen == active { return index }; seen = seen + 1 }; index = index + 1 }
+        return -1
+    }
+    retire(index:i64) -> void { if self.clients[index] != null { self.clients[index]!.close(); self.clients[index] = null } }
+
+    service(index:i64) -> void {
+        local client = self.clients[index]!
+        if client.sent < client.output.length {
+            local flushed = client.flush()
+            if flushed < 0 || (flushed == 1 && client.mode == 2) { self.retire(index) }
+            return
+        }
+        if client.receive(65536) < 0 { self.retire(index); return }
+        if client.mode == 0 { self.http(index); return }
+        self.frames(index)
+    }
+
+    http(index:i64) -> void {
+        local client = self.clients[index]!
+        if client.input.length > 16384 { client.queue((new Http.Response("431 Request Header Fields Too Large", "headers too large\n")).serialize()); client.mode = 2; return }
+        if !Http.complete(client.input) { return }
+        local request = Http.parse(client.input)
+        if request == null { client.queue((new Http.Response("400 Bad Request", "bad request\n")).serialize()); client.mode = 2; return }
+        if request!.method == "GET" && request!.target == "/health" { client.queue((new Http.Response("200 OK", "ok\n")).serialize()); client.mode = 2; return }
+        if request!.method == "GET" && request!.target == "/" { client.queue((new Http.Response("200 OK", Page.html(), "text/html; charset=utf-8")).serialize()); client.mode = 2; return }
+        if request!.method != "GET" || request!.target != "/ws" { client.queue((new Http.Response("404 Not Found", "not found\n")).serialize()); client.mode = 2; return }
+        local upgrade = request!.header("upgrade"); local connection = request!.header("connection")
+        local version = request!.header("sec-websocket-version"); local key = request!.header("sec-websocket-key")
+        if upgrade == null || upgrade! != "websocket" || connection == null || version == null || version! != "13" || key == null {
+            client.queue((new Http.Response("400 Bad Request", "invalid websocket upgrade\n")).serialize()); client.mode = 2; return
+        }
+        local end = Http.headerEnd(client.input)
+        local remainder = client.input.slice(end, client.input.length - end)
+        client.input = remainder; client.mode = 1
+        client.queue("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + self.handshake.accept(key!) + "\r\n\r\n")
+        client.queue(self.protocol.encode(1, self.clipboard))
+    }
+
+    frames(index:i64) -> void {
+        local client = self.clients[index]!
+        while client.input.length > 0 {
+            local decoded = self.protocol.decodeClient(client.input, self.maximumMessage)
+            if decoded.status == 0 { return }
+            if decoded.status != 1 || decoded.frame == null { self.rejected = self.rejected + 1; client.queue(self.protocol.encode(8, "")); client.mode = 2; return }
+            local frame = decoded.frame!
+            client.input = client.input.slice(frame.consumed, client.input.length - frame.consumed)
+            if frame.opcode == 8 { client.queue(self.protocol.encode(8, frame.payload)); client.mode = 2; return }
+            if frame.opcode == 9 { client.queue(self.protocol.encode(10, frame.payload)) }
+            else {
+                if frame.opcode == 1 || frame.opcode == 2 {
+                    if client.fragmentOpcode >= 0 { client.queue(self.protocol.encode(8, "")); client.mode = 2; return }
+                    if frame.fin { self.broadcast(frame.payload) }
+                    else { client.fragmentOpcode = frame.opcode; client.fragments = frame.payload }
+                } else {
+                    if frame.opcode == 0 {
+                        if client.fragmentOpcode < 0 { client.queue(self.protocol.encode(8, "")); client.mode = 2; return }
+                        if client.fragments.length + frame.payload.length > self.maximumMessage { client.queue(self.protocol.encode(8, "")); client.mode = 2; return }
+                        client.fragments = client.fragments + frame.payload
+                        if frame.fin { self.broadcast(client.fragments); client.fragmentOpcode = -1; client.fragments = "" }
+                    }
+                }
+            }
+        }
+    }
+
+    broadcast(message:string) -> void {
+        self.clipboard = message; self.messages = self.messages + 1
+        local frame = self.protocol.encode(1, message)
+        local index:i64 = 0
+        while index < self.clients.length {
+            if self.clients[index] != null {
+                if self.clients[index]!.mode == 1 { if !self.clients[index]!.queue(frame) { self.retire(index) } }
+            }
+            index = index + 1
+        }
+    }
+}}

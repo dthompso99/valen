@@ -1,0 +1,96 @@
+import System from 'libSystem.ar'
+
+library Http {{
+    Request {{
+        member method:string
+        member target:string
+        member headers:string
+        member body:string
+
+        __(method:string, target:string, headers:string, body:string) -> void {
+            self.method = method; self.target = target; self.headers = headers; self.body = body
+        }
+
+        header(name:string) -> string? {
+            local index:i64 = 0
+            while index < self.headers.length {
+                local end = index
+                while end < self.headers.length && self.headers[end] != 13 { end = end + 1 }
+                local colon = index
+                while colon < end && self.headers[colon] != 58 { colon = colon + 1 }
+                if colon < end && self.nameEquals(index, colon, name) {
+                    local start = colon + 1
+                    while start < end && (self.headers[start] == 32 || self.headers[start] == 9) { start = start + 1 }
+                    return self.headers.slice(start, end - start)
+                }
+                index = end + 2
+            }
+            return null
+        }
+
+        nameEquals(start:i64, end:i64, name:string) -> bool {
+            if end - start != name.length { return false }
+            local index:i64 = 0
+            while index < name.length {
+                local left = self.headers[start + index]
+                local right = name[index]
+                if left >= 65 && left <= 90 { left = left + 32 }
+                if right >= 65 && right <= 90 { right = right + 32 }
+                if left != right { return false }
+                index = index + 1
+            }
+            return true
+        }
+    }}
+
+    Response {{
+        member status:string
+        member contentType:string
+        member body:string
+        __(status:string, body:string, contentType:string="text/plain; charset=utf-8") -> void {
+            self.status = status; self.contentType = contentType; self.body = body
+        }
+        serialize() -> string {
+            return "HTTP/1.1 " + self.status + "\r\nContent-Type: " + self.contentType + "\r\nContent-Length: " + self.body.length.toString() + "\r\nConnection: close\r\n\r\n" + self.body
+        }
+    }}
+
+    headerEnd(input:string) -> i64 {
+        local index:i64 = 0
+        while index + 3 < input.length {
+            if input[index] == 13 && input[index + 1] == 10 && input[index + 2] == 13 && input[index + 3] == 10 { return index + 4 }
+            index = index + 1
+        }
+        return -1
+    }
+
+    parse(input:string) -> Request? {
+        local bodyStart = Http.headerEnd(input)
+        if bodyStart < 0 { return null }
+        local lineEnd:i64 = 0
+        while lineEnd + 1 < input.length && !(input[lineEnd] == 13 && input[lineEnd + 1] == 10) { lineEnd = lineEnd + 1 }
+        local methodEnd:i64 = 0
+        while methodEnd < lineEnd && input[methodEnd] != 32 { methodEnd = methodEnd + 1 }
+        local targetEnd = methodEnd + 1
+        while targetEnd < lineEnd && input[targetEnd] != 32 { targetEnd = targetEnd + 1 }
+        if methodEnd == 0 || targetEnd <= methodEnd + 1 || targetEnd == lineEnd { return null }
+        return new Request(
+            input.slice(0, methodEnd),
+            input.slice(methodEnd + 1, targetEnd - methodEnd - 1),
+            input.slice(lineEnd + 2, bodyStart - lineEnd - 4),
+            input.slice(bodyStart, input.length - bodyStart)
+        )
+    }
+
+    complete(input:string) -> bool {
+        local bodyStart = Http.headerEnd(input)
+        if bodyStart < 0 { return false }
+        local request = Http.parse(input)
+        if request == null { return true }
+        local header = request!.header("content-length")
+        if header == null { return true }
+        local parsed = System.parseInteger(header!)
+        if !parsed.valid || parsed.value < 0 { return true }
+        return input.length - bodyStart >= parsed.value
+    }
+}}
