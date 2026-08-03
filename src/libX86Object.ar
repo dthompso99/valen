@@ -39,6 +39,13 @@ library X86Object {{
         }
     }}
 
+    Common {{
+        member name:string
+        member size:i64
+        member alignment:i64
+        __(name:string, size:i64, alignment:i64) -> void { self.name = name; self.size = size; self.alignment = alignment }
+    }}
+
     Section {{
         member name:string
         member bytes:Elf.Bytes
@@ -71,7 +78,7 @@ library X86Object {{
             if w { value = value + 8 }
             if value != 64 || force { self.byte(value) }
         }
-        rmBase(operand:Operand) -> i64 { if operand.kind == "memory" { if operand.base < 0 { return 0 }; return operand.base }; return operand.code }
+        rmBase(operand:Operand) -> i64 { if operand.kind == "memory" { if operand.base < 0 || operand.base == 16 { return 0 }; return operand.base }; return operand.code }
         rmIndex(operand:Operand) -> i64 { if operand.kind == "memory" { if operand.index < 0 { return 0 }; return operand.index }; return 0 }
 
         relocation(symbol:string, type:i64, addend:i64) -> void {
@@ -102,6 +109,7 @@ library X86Object {{
             local mod:i64 = 0
             if displacementSize == 1 { mod = 1 }
             if displacementSize == 4 { mod = 2 }
+            if base < 0 { mod = 0 }
             local rm = baseLow
             if needsSib { rm = 4 }
             self.byte(mod * 64 + (regCode - regCode / 8 * 8) * 8 + rm)
@@ -132,13 +140,29 @@ library X86Object {{
             self.rex(size == 8, source.code, index, base, size == 1 && (source.code >= 4 || base >= 4))
             self.byte(opcode); self.modRm(source.code, destination)
         }
+        regRm2(opcode:i64, destination:Operand, source:Operand, size:i64) -> void {
+            self.operandPrefix(size)
+            local base = self.rmBase(source); local index = self.rmIndex(source)
+            self.rex(size == 8, destination.code, index, base, size == 1 && (destination.code >= 4 || base >= 4))
+            self.byte(15); self.byte(opcode); self.modRm(destination.code, source)
+        }
+        rmReg2(opcode:i64, destination:Operand, source:Operand, size:i64) -> void {
+            self.operandPrefix(size)
+            local base = self.rmBase(destination); local index = self.rmIndex(destination)
+            self.rex(size == 8, source.code, index, base, size == 1 && (source.code >= 4 || base >= 4))
+            self.byte(15); self.byte(opcode); self.modRm(source.code, destination)
+        }
         immediateRm(destination:Operand, extension:i64, value:i64, size:i64, byteOpcode:i64, opcode:i64) -> void {
             self.operandPrefix(size)
             local base = self.rmBase(destination); local index = self.rmIndex(destination)
             self.rex(size == 8, 0, index, base, size == 1 && base >= 4)
             if size == 1 { self.byte(byteOpcode) } else { self.byte(opcode) }
             self.modRm(extension, destination)
-            if size == 1 { self.little(value, 1) } else { self.little(value, 4) }
+            local immediateSize:i64 = 4; if size == 1 { immediateSize = 1 }; if size == 2 { immediateSize = 2 }
+            if destination.kind == "memory" && destination.base == 16 && destination.symbol != null {
+                local fixup = self.fixups[self.fixups.length - 1]; fixup.addend = fixup.addend - immediateSize
+            }
+            self.little(value, immediateSize)
         }
         size(left:Operand, right:Operand) -> i64 { if left.size > 0 { return left.size }; return right.size }
 
@@ -153,6 +177,37 @@ library X86Object {{
             if right.kind == "immediate" { self.immediateRm(left, extension, right.value, width, 128, 129); return }
             if left.kind == "register" { if width == 1 { self.regRm(base + 2, left, right, width) } else { self.regRm(base + 3, left, right, width) }; return }
             if width == 1 { self.rmReg(base, left, right, width) } else { self.rmReg(base + 1, left, right, width) }
+        }
+
+        condition(mnemonic:string) -> i64 {
+            if mnemonic == "jo" || mnemonic == "seto" { return 0 }
+            if mnemonic == "jno" || mnemonic == "setno" { return 1 }
+            if mnemonic == "jb" || mnemonic == "jc" || mnemonic == "setb" || mnemonic == "setc" || mnemonic == "cmovb" { return 2 }
+            if mnemonic == "jae" || mnemonic == "setae" || mnemonic == "cmovae" { return 3 }
+            if mnemonic == "je" || mnemonic == "jz" || mnemonic == "sete" || mnemonic == "setz" || mnemonic == "cmove" { return 4 }
+            if mnemonic == "jne" || mnemonic == "jnz" || mnemonic == "setne" || mnemonic == "setnz" || mnemonic == "cmovne" || mnemonic == "cmovnz" { return 5 }
+            if mnemonic == "jbe" || mnemonic == "setbe" || mnemonic == "cmovbe" { return 6 }
+            if mnemonic == "ja" || mnemonic == "seta" || mnemonic == "cmova" { return 7 }
+            if mnemonic == "js" || mnemonic == "sets" { return 8 }
+            if mnemonic == "jns" || mnemonic == "setns" { return 9 }
+            if mnemonic == "jp" || mnemonic == "setp" { return 10 }
+            if mnemonic == "jnp" || mnemonic == "setnp" { return 11 }
+            if mnemonic == "jl" || mnemonic == "setl" || mnemonic == "cmovl" { return 12 }
+            if mnemonic == "jge" || mnemonic == "setge" || mnemonic == "cmovge" { return 13 }
+            if mnemonic == "jle" || mnemonic == "setle" || mnemonic == "cmovle" { return 14 }
+            if mnemonic == "jg" || mnemonic == "setg" || mnemonic == "cmovg" { return 15 }
+            return -1
+        }
+
+        sseRegRm(prefix:i64, opcode:i64, destination:Operand, source:Operand, w:bool) -> void {
+            if prefix >= 0 { self.byte(prefix) }
+            self.rex(w, destination.code, self.rmIndex(source), self.rmBase(source), false)
+            self.byte(15); self.byte(opcode); self.modRm(destination.code, source)
+        }
+        sseRmReg(prefix:i64, opcode:i64, destination:Operand, source:Operand, w:bool) -> void {
+            if prefix >= 0 { self.byte(prefix) }
+            self.rex(w, source.code, self.rmIndex(destination), self.rmBase(destination), false)
+            self.byte(15); self.byte(opcode); self.modRm(source.code, destination)
         }
 
         instruction(mnemonic:string, operands:Array<Operand>) -> bool {
@@ -189,7 +244,88 @@ library X86Object {{
                 if mnemonic == "push" { self.byte(80 + operand.code - operand.code / 8 * 8) } else { self.byte(88 + operand.code - operand.code / 8 * 8) }
                 return true
             }
+            if mnemonic == "call" || mnemonic == "jmp" {
+                local target = operands[0]
+                if target.kind == "symbol" {
+                    if mnemonic == "call" { self.byte(232) } else { self.byte(233) }
+                    local type:i64 = 2
+                    if mnemonic == "call" { type = 4 }
+                    local field = self.offset + self.bytes.length()
+                    self.fixups.append(new Fixup(self.section, field, target.name, field + 4, type, -4)); self.little(0, 4); return true
+                }
+                self.rex(true, 0, self.rmIndex(target), self.rmBase(target), false); self.byte(255)
+                if mnemonic == "call" { self.modRm(2, target) } else { self.modRm(4, target) }; return true
+            }
+            local condition = self.condition(mnemonic)
+            if condition >= 0 {
+                if self.starts(mnemonic, "j") {
+                    self.byte(15); self.byte(128 + condition)
+                    local field = self.offset + self.bytes.length()
+                    self.fixups.append(new Fixup(self.section, field, operands[0].name, field + 4, 2, -4)); self.little(0, 4); return true
+                }
+                if self.starts(mnemonic, "set") {
+                    local target = operands[0]; local base = self.rmBase(target)
+                    self.rex(false, 0, self.rmIndex(target), base, base >= 4); self.byte(15); self.byte(144 + condition); self.modRm(0, target); return true
+                }
+                if self.starts(mnemonic, "cmov") { self.regRm2(64 + condition, operands[0], operands[1], operands[0].size); return true }
+            }
+            if mnemonic == "cmpxchg" || mnemonic == "xadd" || mnemonic == "xchg" {
+                local left = operands[0]; local right = operands[1]; local width = self.size(left, right)
+                if mnemonic == "cmpxchg" { self.rmReg2(177, left, right, width); return true }
+                if mnemonic == "xadd" { self.rmReg2(193, left, right, width); return true }
+                if width == 1 { self.rmReg(134, left, right, width) } else { self.rmReg(135, left, right, width) }; return true
+            }
+            if mnemonic == "neg" || mnemonic == "div" || mnemonic == "idiv" || mnemonic == "inc" || mnemonic == "dec" {
+                local target = operands[0]; local extension:i64 = 3
+                if mnemonic == "div" { extension = 6 }; if mnemonic == "idiv" { extension = 7 }
+                if mnemonic == "inc" { extension = 0 }; if mnemonic == "dec" { extension = 1 }
+                self.operandPrefix(target.size); self.rex(target.size == 8, 0, self.rmIndex(target), self.rmBase(target), false)
+                if mnemonic == "inc" || mnemonic == "dec" { self.byte(255) } else { self.byte(247) }; self.modRm(extension, target); return true
+            }
+            if mnemonic == "shl" || mnemonic == "shr" || mnemonic == "rol" {
+                local target = operands[0]; local extension:i64 = 4
+                if mnemonic == "shr" { extension = 5 }; if mnemonic == "rol" { extension = 0 }
+                self.operandPrefix(target.size); self.rex(target.size == 8, 0, self.rmIndex(target), self.rmBase(target), false)
+                self.byte(193); self.modRm(extension, target); self.byte(operands[1].value); return true
+            }
+            if mnemonic == "imul" {
+                local left = operands[0]
+                if operands.length == 1 { self.rex(true, 0, self.rmIndex(left), self.rmBase(left), false); self.byte(247); self.modRm(5, left); return true }
+                if operands.length == 3 { self.regRm(105, left, operands[1], left.size); self.little(operands[2].value, 4); return true }
+                self.regRm2(175, left, operands[1], left.size); return true
+            }
+            if mnemonic == "movsxd" { self.regRm(99, operands[0], operands[1], 8); return true }
+            if mnemonic == "movzx" || mnemonic == "movsx" {
+                local opcode:i64 = 182
+                if operands[1].size == 2 { opcode = 183 }
+                if mnemonic == "movsx" { if operands[1].size == 1 { opcode = 190 } else { opcode = 191 } }
+                self.regRm2(opcode, operands[0], operands[1], operands[0].size); return true
+            }
+            if mnemonic == "movsd" || mnemonic == "movss" {
+                local prefix:i64 = 242; if mnemonic == "movss" { prefix = 243 }
+                if operands[0].kind == "xmm" { self.sseRegRm(prefix, 16, operands[0], operands[1], false) }
+                else { self.sseRmReg(prefix, 17, operands[0], operands[1], false) }; return true
+            }
+            if mnemonic == "addsd" || mnemonic == "subsd" || mnemonic == "mulsd" || mnemonic == "divsd" {
+                local opcode:i64 = 88; if mnemonic == "subsd" { opcode = 92 }; if mnemonic == "mulsd" { opcode = 89 }; if mnemonic == "divsd" { opcode = 94 }
+                self.sseRegRm(242, opcode, operands[0], operands[1], false); return true
+            }
+            if mnemonic == "ucomisd" { self.sseRegRm(102, 46, operands[0], operands[1], false); return true }
+            if mnemonic == "ucomiss" { self.sseRegRm(-1, 46, operands[0], operands[1], false); return true }
+            if mnemonic == "cvtsi2sd" { self.sseRegRm(242, 42, operands[0], operands[1], operands[1].size == 8); return true }
+            if mnemonic == "cvttsd2si" { self.sseRegRm(242, 44, operands[0], operands[1], operands[0].size == 8); return true }
+            if mnemonic == "cvtsd2ss" { self.sseRegRm(242, 90, operands[0], operands[1], false); return true }
+            if mnemonic == "cvtss2sd" { self.sseRegRm(243, 90, operands[0], operands[1], false); return true }
+            if mnemonic == "movd" || mnemonic == "movq" {
+                local w = mnemonic == "movq"
+                if operands[0].kind == "xmm" { self.sseRegRm(102, 110, operands[0], operands[1], w) }
+                else { self.sseRmReg(102, 126, operands[0], operands[1], w) }; return true
+            }
             return false
+        }
+
+        starts(value:string, prefix:string) -> bool {
+            if value.length < prefix.length { return false }; return value.slice(0, prefix.length) == prefix
         }
     }}
 
@@ -226,6 +362,45 @@ library X86Object {{
             }
             if negative { return 0 - result }
             return result
+        }
+
+        floating(value:string, size:i64) -> i64 {
+            local negative:bool = false; local index:i64 = 0
+            if value.length > 0 { if value[0] == 45 { negative = true; index = 1 } }
+            local number:f64 = 0.0; local fraction:f64 = 0.1; local afterPoint:bool = false
+            while index < value.length {
+                local byte = value[index]
+                if byte == 46 { afterPoint = true; index = index + 1 } else {
+                    if byte == 101 || byte == 69 { break }
+                    local digit = (byte as i64 - 48) as f64
+                    if afterPoint { number = number + digit * fraction; fraction = fraction / 10.0 } else { number = number * 10.0 + digit }
+                    index = index + 1
+                }
+            }
+            if index < value.length {
+                index = index + 1; local exponentNegative:bool = false
+                if index < value.length { if value[index] == 45 { exponentNegative = true; index = index + 1 } else { if value[index] == 43 { index = index + 1 } } }
+                local exponent:i64 = 0
+                while index < value.length { exponent = exponent * 10 + value[index] as i64 - 48; index = index + 1 }
+                while exponent > 0 { if exponentNegative { number = number / 10.0 } else { number = number * 10.0 }; exponent = exponent - 1 }
+            }
+            if number == 0.0 { return 0 }
+            local binaryExponent:i64 = 0; local normalized = number
+            while normalized >= 2.0 { normalized = normalized / 2.0; binaryExponent = binaryExponent + 1 }
+            while normalized < 1.0 { normalized = normalized * 2.0; binaryExponent = binaryExponent - 1 }
+            local bits:i64 = 0
+            if size == 4 {
+                local fractionBits = ((normalized - 1.0) * 8388608.0 + 0.5) as i64
+                if fractionBits == 8388608 { fractionBits = 0; binaryExponent = binaryExponent + 1 }
+                bits = (binaryExponent + 127) * 8388608 + fractionBits
+                if negative { bits = bits + 2147483648 }
+                return bits
+            }
+            local fractionBits = ((normalized - 1.0) * 4503599627370496.0 + 0.5) as i64
+            if fractionBits == 4503599627370496 { fractionBits = 0; binaryExponent = binaryExponent + 1 }
+            bits = (binaryExponent + 1023) * 4503599627370496 + fractionBits
+            if negative { bits = bits + -9223372036854775808 }
+            return bits
         }
 
         register(value:string) -> Operand? {
@@ -323,6 +498,194 @@ library X86Object {{
             local index:i64 = 0
             while index < value.length { if value[index] == byte { return index }; index = index + 1 }
             return -1
+        }
+    }}
+
+    Assembler {{
+        member parser:Parser
+        member sections:Array<Section>
+        member labels:Array<Label>
+        member globals:Array<string>
+        member externals:Array<string>
+        member commons:Array<Common>
+        member fixups:Array<Fixup>
+        member numericNames:Array<string>
+        member numericCounts:Array<i64>
+        member error:string
+
+        __() -> void {
+            self.parser = new Parser(); self.sections = new Array<Section>(0); self.labels = new Array<Label>(0)
+            self.globals = new Array<string>(0); self.externals = new Array<string>(0); self.commons = new Array<Common>(0)
+            self.fixups = new Array<Fixup>(0); self.numericNames = new Array<string>(0); self.numericCounts = new Array<i64>(0); self.error = ""
+        }
+
+        assemble(source:string) -> Array<u8>? {
+            self.section(".text")
+            local current = ".text"
+            local start:i64 = 0
+            while start <= source.length {
+                local end = start
+                while end < source.length { if source[end] == 10 { break }; end = end + 1 }
+                local line = self.parser.trim(source.slice(start, end - start))
+                if line.length > 0 {
+                    local result = self.line(line, current)
+                    if result == "!unsupported" { self.error = line; return null }
+                    if self.parser.starts(result, "!section:") { current = result.slice(9, result.length - 9) }
+                }
+                if end == source.length { break }; start = end + 1
+            }
+            return self.build()
+        }
+
+        line(line:string, current:string) -> string {
+            if line == ".intel_syntax noprefix" || line == ".note.GNU-stack,\"\",@progbits" { return "" }
+            if line == ".text" || line == ".data" || line == ".bss" { self.section(line); return "!section:" + line }
+            if self.parser.starts(line, ".section ") {
+                local value = line.slice(9, line.length - 9); local comma = self.parser.find(value, 44)
+                if comma >= 0 { value = value.slice(0, comma) }
+                self.section(value); return "!section:" + value
+            }
+            if self.parser.starts(line, ".globl ") { self.addUnique(self.globals, self.parser.trim(line.slice(7, line.length - 7))); return "" }
+            if self.parser.starts(line, ".extern ") { self.addUnique(self.externals, self.parser.trim(line.slice(8, line.length - 8))); return "" }
+            if self.parser.starts(line, ".comm ") {
+                local values = self.operands(line.slice(6, line.length - 6))
+                self.commons.append(new Common(values[0], self.parser.integer(values[1]), self.parser.integer(values[2]))); return ""
+            }
+            if line[line.length - 1] == 58 {
+                local name = line.slice(0, line.length - 1)
+                if self.numeric(name) { name = self.numericLabel(name, true) }
+                self.labels.append(new Label(name, current, self.section(current).offset())); return ""
+            }
+            local target = self.section(current)
+            if self.parser.starts(line, ".align ") { self.align(target, self.parser.integer(line.slice(7, line.length - 7))); return "" }
+            if self.parser.starts(line, ".zero ") { self.zeros(target, self.parser.integer(line.slice(6, line.length - 6))); return "" }
+            if self.parser.starts(line, ".byte ") {
+                local values = self.operands(line.slice(6, line.length - 6)); local index:i64 = 0
+                while index < values.length { target.bytes.byte(self.parser.integer(values[index])); index = index + 1 }; return ""
+            }
+            if self.parser.starts(line, ".quad ") {
+                local value = self.parser.trim(line.slice(6, line.length - 6)); local offset = target.offset()
+                if self.parser.isNumber(value) { target.bytes.u64(self.parser.integer(value)) }
+                else { target.bytes.u64(0); self.fixups.append(new Fixup(current, offset, value, 0, 1, 0)) }; return ""
+            }
+            if self.parser.starts(line, ".asciz ") || self.parser.starts(line, ".ascii ") {
+                local zero = self.parser.starts(line, ".asciz "); local value = line.slice(7, line.length - 7)
+                if !self.quoted(target.bytes, value, zero) { return "!unsupported" }; return ""
+            }
+            if self.parser.starts(line, ".float ") { target.bytes.u32(self.parser.floating(self.parser.trim(line.slice(7, line.length - 7)), 4)); return "" }
+            if self.parser.starts(line, ".double ") { target.bytes.u64(self.parser.floating(self.parser.trim(line.slice(8, line.length - 8)), 8)); return "" }
+            local instruction = line; local prefix:string? = null
+            if self.parser.starts(instruction, "lock ") { prefix = "lock"; instruction = instruction.slice(5, instruction.length - 5) }
+            if self.parser.starts(instruction, "rep ") { prefix = "rep"; instruction = instruction.slice(4, instruction.length - 4) }
+            if self.parser.starts(instruction, "repe ") { prefix = "repe"; instruction = instruction.slice(5, instruction.length - 5) }
+            local space = self.parser.find(instruction, 32); local mnemonic = instruction; local parsed = new Array<Operand>(0)
+            if space >= 0 {
+                mnemonic = instruction.slice(0, space); local values = self.operands(instruction.slice(space + 1, instruction.length - space - 1)); local index:i64 = 0
+                while index < values.length {
+                    local value = values[index]
+                    if value.length > 1 { local suffix = value[value.length - 1]; local number = value.slice(0, value.length - 1); if self.numeric(number) && (suffix == 102 || suffix == 98) { value = self.numericReference(number, suffix == 102) } }
+                    parsed.append(self.parser.operand(value)); index = index + 1
+                }
+            }
+            local encoder = new Encoder(current, target.offset())
+            if prefix != null { if prefix! == "lock" { encoder.byte(240) } else { encoder.byte(243) } }
+            if !encoder.instruction(mnemonic, parsed) { return "!unsupported" }
+            target.bytes.raw(encoder.bytes.values)
+            local fixupIndex:i64 = 0
+            while fixupIndex < encoder.fixups.length { self.fixups.append(copy encoder.fixups[fixupIndex]); fixupIndex = fixupIndex + 1 }
+            return ""
+        }
+
+        build() -> Array<u8> {
+            local object = new Elf.Object()
+            local bss = self.findSection(".bss")
+            local bssSize:i64 = 0
+            if bss != null { bssSize = bss!.logicalSize }
+            local commonIndex:i64 = 0
+            while commonIndex < self.commons.length {
+                local common = self.commons[commonIndex]
+                while bssSize - (bssSize / common.alignment) * common.alignment != 0 { bssSize = bssSize + 1 }
+                self.labels.append(new Label(common.name, ".bss", bssSize)); bssSize = bssSize + common.size; commonIndex = commonIndex + 1
+            }
+            local index:i64 = 0
+            while index < self.sections.length {
+                local section = self.sections[index]
+                if section.name == ".bss" { if bssSize > 0 { object.addBss(bssSize, section.alignment) } }
+                else {
+                    local flags:i64 = 0
+                    if section.name == ".text" { flags = 6 }
+                    if section.name == ".rodata" || self.parser.starts(section.name, ".rodata.") { flags = 2 }
+                    if section.name == ".data" || self.parser.starts(section.name, ".data.") { flags = 3 }
+                    object.addSection(section.name, section.bytes.values, 1, flags, section.alignment)
+                }
+                index = index + 1
+            }
+            index = 0
+            while index < self.fixups.length {
+                local fixup = self.fixups[index]; local label = self.findLabel(fixup.symbol)
+                if fixup.end > 0 && label != null && label!.section == fixup.section {
+                    self.section(fixup.section).bytes.patch32(fixup.offset, label!.offset - fixup.end)
+                } else { object.addRelocation(fixup.section, fixup.offset, fixup.symbol, fixup.relocationType, fixup.addend) }
+                index = index + 1
+            }
+            index = 0
+            while index < self.labels.length {
+                local label = self.labels[index]; local binding:i64 = 0; if self.contains(self.globals, label.name) { binding = 1 }
+                local type:i64 = 1; if label.section == ".text" { type = 2 }
+                object.addSymbol(label.name, label.section, label.offset, 0, binding, type); index = index + 1
+            }
+            index = 0
+            while index < self.externals.length { if self.findLabel(self.externals[index]) == null { object.addSymbol(self.externals[index], null, 0, 0, 1, 0) }; index = index + 1 }
+            index = 0
+            while index < self.fixups.length {
+                local name = self.fixups[index].symbol
+                if self.findLabel(name) == null && !self.contains(self.externals, name) { object.addSymbol(name, null, 0, 0, 1, 0); self.externals.append(name) }
+                index = index + 1
+            }
+            return object.build()
+        }
+
+        section(name:string) -> ref Section {
+            local found = self.findSection(name); if found != null { return found! }
+            local type:i64 = 1; local flags:i64 = 0; local alignment:i64 = 8
+            if name == ".text" { flags = 6; alignment = 16 }
+            if name == ".bss" { type = 8; flags = 3 }
+            self.sections.append(new Section(name, type, flags, alignment)); return self.sections[self.sections.length - 1]
+        }
+        findSection(name:string) -> ref Section? { local index:i64 = 0; while index < self.sections.length { if self.sections[index].name == name { return self.sections[index] }; index = index + 1 }; return null }
+        findLabel(name:string) -> ref Label? { local index:i64 = 0; while index < self.labels.length { if self.labels[index].name == name { return self.labels[index] }; index = index + 1 }; return null }
+        align(section:Section, alignment:i64) -> void { if alignment > section.alignment { section.alignment = alignment }; while section.offset() - (section.offset() / alignment) * alignment != 0 { self.zeros(section, 1) } }
+        zeros(section:Section, count:i64) -> void { if section.type == 8 { section.logicalSize = section.logicalSize + count } else { section.bytes.zeros(count) } }
+        addUnique(values:Array<string>, value:string) -> void { if !self.contains(values, value) { values.append(value) } }
+        contains(values:Array<string>, value:string) -> bool { local index:i64 = 0; while index < values.length { if values[index] == value { return true }; index = index + 1 }; return false }
+        numeric(value:string) -> bool { if value.length == 0 { return false }; local index:i64 = 0; while index < value.length { if value[index] < 48 || value[index] > 57 { return false }; index = index + 1 }; return true }
+        numericIndex(name:string) -> i64 { local index:i64 = 0; while index < self.numericNames.length { if self.numericNames[index] == name { return index }; index = index + 1 }; self.numericNames.append(name); self.numericCounts.append(0); return self.numericNames.length - 1 }
+        numericLabel(name:string, increment:bool) -> string { local index = self.numericIndex(name); if increment { self.numericCounts[index] = self.numericCounts[index] + 1 }; return ".Lnumeric_" + name + "_" + self.numericCounts[index].toString() }
+        numericReference(name:string, forward:bool) -> string { local index = self.numericIndex(name); local sequence = self.numericCounts[index]; if forward { sequence = sequence + 1 }; return ".Lnumeric_" + name + "_" + sequence.toString() }
+
+        operands(value:string) -> Array<string> {
+            local result = new Array<string>(0); local start:i64 = 0; local depth:i64 = 0; local index:i64 = 0
+            while index <= value.length {
+                local split = index == value.length
+                if !split { if value[index] == 91 { depth = depth + 1 }; if value[index] == 93 { depth = depth - 1 }; split = value[index] == 44 && depth == 0 }
+                if split { local part = self.parser.trim(value.slice(start, index - start)); if part.length > 0 { result.append(part) }; start = index + 1 }
+                index = index + 1
+            }
+            return result
+        }
+
+        quoted(output:Elf.Bytes, value:string, zero:bool) -> bool {
+            if value.length < 2 || value[0] != 34 || value[value.length - 1] != 34 { return false }
+            local index:i64 = 1
+            while index < value.length - 1 {
+                local byte = value[index]
+                if byte == 92 {
+                    index = index + 1; if index >= value.length - 1 { return false }; byte = value[index]
+                    if byte == 110 { byte = 10 }; if byte == 114 { byte = 13 }; if byte == 116 { byte = 9 }; if byte == 48 { byte = 0 }
+                }
+                output.byte(byte as i64); index = index + 1
+            }
+            if zero { output.byte(0) }; return true
         }
     }}
 }}

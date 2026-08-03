@@ -47,5 +47,32 @@ test X86ObjectParserTests {{
         expect(relative.fixups[0].offset == 23)
         expect(relative.fixups[0].relocationType == 2)
         expect(relative.fixups[0].addend == -4)
+
+        local indexed = new X86Object.Encoder(".text", 0)
+        local address = new Array<X86Object.Operand>(0)
+        address.append(parser.operand("rdi")); address.append(parser.operand("[r12*8]"))
+        expect(indexed.instruction("lea", address))
+        expect(indexed.bytes.values[0] == 74 && indexed.bytes.values[1] == 141)
+        expect(indexed.bytes.values[2] == 60 && indexed.bytes.values[3] == 229)
+
+        local immediateRelative = new X86Object.Encoder(".text", 0)
+        local compare = new Array<X86Object.Operand>(0)
+        compare.append(parser.operand("DWORD PTR [rip+lock_word]")); compare.append(parser.operand("0"))
+        expect(immediateRelative.instruction("cmp", compare))
+        expect(immediateRelative.fixups[0].addend == -8)
+
+        local wordImmediate = new X86Object.Encoder(".text", 0)
+        local storeWord = new Array<X86Object.Operand>(0)
+        storeWord.append(parser.operand("WORD PTR [rbx+6]")); storeWord.append(parser.operand("0"))
+        expect(wordImmediate.instruction("mov", storeWord))
+        expect(wordImmediate.bytes.length() == 6)
+    }
+
+    assemblesRelocatableElf() -> void {
+        local assembler = new X86Object.Assembler()
+        local object = assembler.assemble(".intel_syntax noprefix\n.text\n.globl _start\n_start:\n    mov eax, 60\n    xor edi, edi\n    syscall\n.section .note.GNU-stack,\"\",@progbits\n")
+        expect(object != null)
+        expect(object!.length > 64)
+        expect(object![0] == 127 && object![1] == 69 && object![2] == 76 && object![3] == 70)
     }
 }}

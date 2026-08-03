@@ -143,7 +143,8 @@ The active post-bootstrap roadmap is maintained in [`language_checklist.md`](lan
 - [ ] Visibility and encapsulation modifiers
 - [ ] Fine-grained deallocation or garbage collection
 - [ ] Optimization and register allocation
-- [ ] Direct ELF emission without the system assembler/linker
+- [x] Direct ELF object emission without the system assembler
+- [ ] Integrated ELF executable linking without the system linker
 - [ ] Unicode code-point and grapheme-aware string operations
 - [ ] Bulk-copy builder optimizations and `Array<u8>` conversion APIs
 - [ ] String interpolation and richer formatting

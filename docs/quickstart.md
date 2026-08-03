@@ -6,7 +6,7 @@ Argon currently targets x86-64 Linux. You need:
 
 - Node.js 20 or newer for the bootstrap compiler
 - a C compiler available as `cc`
-- the system assembler and linker normally installed with the C toolchain
+- the system linker normally installed with the C toolchain
 
 Other architectures and operating systems are **WIP**.
 
@@ -44,6 +44,12 @@ The compiler also provides a semantic-check-only mode:
 
 ```sh
 ./argon --check examples/simple/simple.ar
+```
+
+To stop at a relocatable ELF object without selecting a linker:
+
+```sh
+./argon --emit-object examples/simple/simple.ar -o simple.o
 ```
 
 ## Create a program

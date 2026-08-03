@@ -139,7 +139,7 @@ function encodeModRm(sink, regCode, operand) {
     let displacementSize = 0;
     if (base === undefined || operand.symbol) displacementSize = 4;
     else if (operand.displacement !== 0n || (base & 7) === 5) displacementSize = operand.displacement >= -128n && operand.displacement <= 127n ? 1 : 4;
-    const mod = displacementSize === 0 ? 0 : displacementSize === 1 ? 1 : 2;
+    const mod = base === undefined ? 0 : displacementSize === 0 ? 0 : displacementSize === 1 ? 1 : 2;
     sink.emit((mod << 6) | ((regCode & 7) << 3) | (needsSib ? 4 : base & 7));
     if (needsSib) {
         const scale = {1: 0, 2: 1, 4: 2, 8: 3}[operand.scale];
@@ -185,7 +185,7 @@ function encodeImmediateRm(sink, destination, extension, value, size, byteOpcode
     rex(sink, {w: size === 8, ...bits, force: size === 1 && bits.b >= 4});
     sink.emit(size === 1 ? byteOpcode : opcode);
     encodeModRm(sink, extension, destination);
-    const immediateSize = size === 1 ? 1 : 4;
+    const immediateSize = size === 1 ? 1 : size === 2 ? 2 : 4;
     if (!sink.sizing && destination.kind === 'mem' && destination.base?.name === 'rip' && destination.symbol) {
         sink.relocations[sink.relocations.length - 1].addend -= immediateSize;
     }
@@ -275,12 +275,14 @@ function encodeInstruction(sink, mnemonic, operands) {
     if (mnemonic === 'movsb') { sink.emit(0xa4); return; }
     if (mnemonic === 'cmpsb') { sink.emit(0xa6); return; }
     if (mnemonic === 'cmpxchg') return encodeRmReg(sink, [0x0f, 0xb1], left, right, operandSize(left, right));
+    if (mnemonic === 'xadd') return encodeRmReg(sink, [0x0f, 0xc1], left, right, operandSize(left, right));
+    if (mnemonic === 'xchg') return encodeRmReg(sink, operandSize(left, right) === 1 ? 0x86 : 0x87, left, right, operandSize(left, right));
     if (mnemonic === 'neg' || mnemonic === 'div' || mnemonic === 'idiv' || mnemonic === 'inc' || mnemonic === 'dec') {
         const extension = {neg: 3, div: 6, idiv: 7, inc: 0, dec: 1}[mnemonic];
         const bits = rmRexBits(left); operandPrefix(sink, left.size); rex(sink, {w: left.size === 8, ...bits}); sink.emit(mnemonic === 'inc' || mnemonic === 'dec' ? 0xff : 0xf7); encodeModRm(sink, extension, left); return;
     }
-    if (mnemonic === 'shl' || mnemonic === 'shr') {
-        const bits = rmRexBits(left); operandPrefix(sink, left.size); rex(sink, {w: left.size === 8, ...bits}); sink.emit(0xc1); encodeModRm(sink, mnemonic === 'shl' ? 4 : 5, left); sink.emit(Number(right.value & 255n)); return;
+    if (mnemonic === 'shl' || mnemonic === 'shr' || mnemonic === 'rol') {
+        const bits = rmRexBits(left); operandPrefix(sink, left.size); rex(sink, {w: left.size === 8, ...bits}); sink.emit(0xc1); encodeModRm(sink, mnemonic === 'rol' ? 0 : mnemonic === 'shl' ? 4 : 5, left); sink.emit(Number(right.value & 255n)); return;
     }
     if (mnemonic === 'imul') {
         if (!right) { const bits = rmRexBits(left); rex(sink, {w: true, ...bits}); sink.emit(0xf7); encodeModRm(sink, 5, left); return; }
@@ -297,6 +299,10 @@ function encodeInstruction(sink, mnemonic, operands) {
         if (left.kind === 'xmm') return encodeSseRegRm(sink, 0xf2, 0x10, left, right);
         return encodeSseRmReg(sink, 0xf2, 0x11, left, right);
     }
+    if (mnemonic === 'movss') {
+        if (left.kind === 'xmm') return encodeSseRegRm(sink, 0xf3, 0x10, left, right);
+        return encodeSseRmReg(sink, 0xf3, 0x11, left, right);
+    }
     if (mnemonic === 'addsd' || mnemonic === 'subsd' || mnemonic === 'mulsd' || mnemonic === 'divsd') {
         return encodeSseRegRm(sink, 0xf2, {addsd: 0x58, subsd: 0x5c, mulsd: 0x59, divsd: 0x5e}[mnemonic], left, right);
     }
@@ -305,6 +311,7 @@ function encodeInstruction(sink, mnemonic, operands) {
     if (mnemonic === 'cvtsi2sd') return encodeSseRegRm(sink, 0xf2, 0x2a, left, right, right.size === 8);
     if (mnemonic === 'cvttsd2si') return encodeSseRegRm(sink, 0xf2, 0x2c, left, right, left.size === 8);
     if (mnemonic === 'cvtsd2ss') return encodeSseRegRm(sink, 0xf2, 0x5a, left, right);
+    if (mnemonic === 'cvtss2sd') return encodeSseRegRm(sink, 0xf3, 0x5a, left, right);
     if (mnemonic === 'movd' || mnemonic === 'movq') {
         const w = mnemonic === 'movq';
         if (left.kind === 'xmm') return encodeSseRegRm(sink, 0x66, 0x6e, left, right, w);
@@ -352,6 +359,9 @@ export class X86Assembler {
             if (line.startsWith('.quad ')) { program.items.push({kind: 'quad', section, value: line.slice(6).trim()}); continue; }
             if (line.startsWith('.double ')) {
                 const data = Buffer.alloc(8); data.writeDoubleLE(Number(line.slice(8))); program.items.push({kind: 'bytes', section, bytes: [...data]}); continue;
+            }
+            if (line.startsWith('.float ')) {
+                const data = Buffer.alloc(4); data.writeFloatLE(Number(line.slice(7))); program.items.push({kind: 'bytes', section, bytes: [...data]}); continue;
             }
             if (line.startsWith('.asciz ')) {
                 const text = JSON.parse(line.slice(7)); program.items.push({kind: 'bytes', section, bytes: [...Buffer.from(`${text}\0`)]}); continue;

@@ -48,6 +48,8 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             assert.equal(cold.status, 0, cold.stderr);
             assert.match(cold.stderr, /argon: cache miss/);
             assert.match(cold.stderr, /argon: cache stored/);
+            assert.equal(fs.existsSync(path.join(directory, 'cache-cold.o')), true, 'native compiler did not emit a relocatable object');
+            assert.equal(fs.existsSync(path.join(directory, 'cache-cold.s')), false, 'native compiler unexpectedly fell back to assembly');
 
             const warm = compile(sourcePath, 'cache-warm');
             assert.equal(warm.status, 0, warm.stderr);
@@ -103,6 +105,8 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             encoding: 'utf8', env: environment, cwd: projectRoot, maxBuffer: 64 * 1024 * 1024
         });
         assert.equal(build.status, 0, build.stderr || build.stdout);
+        assert.equal(fs.existsSync(`${generation2Path}.o`), true, 'generation 2 was not built from a native object');
+        assert.equal(fs.existsSync(`${generation2Path}.s`), false, 'generation 2 unexpectedly required an assembler');
 
         await t.test('generation 1 and 2 produce equivalent normalized IR', async t => {
             for (const fixture of validPrograms) {

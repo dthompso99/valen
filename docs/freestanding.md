@@ -81,6 +81,8 @@ one route must not remove the others.
 ## Current implementation status
 
 - The parser, semantic model, ownership checks, and target-independent IR are reusable.
+- Generation 0 and the self-hosted compiler directly encode ELF64 relocatable objects; executable
+  linking remains a separate selectable policy.
 - The only implemented executable target is hosted x86-64 Linux.
 - Ordinary x86-64 Linux executables provide `_start`, link with `-nostdlib`, and have no implicit
   shared-library dependency. Target-native symbols are validated before linking.

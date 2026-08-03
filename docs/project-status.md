@@ -59,7 +59,8 @@ and embedded targets.
 - **WIP:** richer diagnostics with notes, fixes, and multiple spans
 - **WIP:** package metadata, versioning, and compiled libraries
 - **WIP:** optimization levels, register allocation, and peephole optimization
-- **WIP:** direct ELF object emission and an integrated linker
+- Generation 0 and the self-hosted compiler emit ELF64 relocatable objects without a system assembler.
+- **WIP:** an integrated linker
 - Repeatable compiler and generated-code benchmarks report compile time, memory, executable size, and runtime speed; expanding the workload corpus remains **WIP**.
 
 ## Maturity

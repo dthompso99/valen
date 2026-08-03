@@ -8,6 +8,7 @@ import Semantics from 'libSemantic.ar'
 import Ir from 'libIr.ar'
 import IrValidation from 'libIrValidation.ar'
 import X86_64 from 'libX86_64.ar'
+import X86Object from 'libX86Object.ar'
 import CompilerCache from 'libCompilerCache.ar'
 
 entry {{
@@ -25,6 +26,7 @@ entry {{
         local outputPath:string? = null
         local checkOnly:bool = false
         local emitIr:bool = false
+        local emitObjectOnly:bool = false
         if arguments.length == 2 {
             sourcePath = arguments[1]
         } else {
@@ -43,6 +45,12 @@ entry {{
                     if arguments[2] == "-o" {
                         sourcePath = arguments[1]
                         outputPath = arguments[3]
+                    }
+                } else {
+                    if arguments.length == 5 {
+                        if arguments[1] == "--emit-object" && arguments[3] == "-o" {
+                            emitObjectOnly = true; sourcePath = arguments[2]; outputPath = arguments[4]
+                        }
                     }
                 }
             }
@@ -67,9 +75,8 @@ entry {{
         if outputPath != null && cache.enabled() {
             local cached = cache.load(graph)
             if cached != null {
-                local cachedAssemblyPath = outputPath! + ".s"
-                if !self.writeAssembly(cachedAssemblyPath, cached!.assembly) { return 74 }
-                local cachedLinkResult = System.link(cachedAssemblyPath, outputPath!, cached!.libraries)
+                if emitObjectOnly { return self.emitObject(cached!.assembly, outputPath!) }
+                local cachedLinkResult = self.link(cached!.assembly, outputPath!, cached!.libraries)
                 if cachedLinkResult != 0 {
                     System.writeError("argon: linker exited with status ")
                     System.writeError(cachedLinkResult.toString())
@@ -119,10 +126,9 @@ entry {{
         }
         local assembly = backend.generate()
         if outputPath != null {
-            local assemblyPath = outputPath! + ".s"
-            if !self.writeAssembly(assemblyPath, assembly) { return 74 }
             cache.store(graph, assembly, ir.foreignLibraries)
-            local linkResult = System.link(assemblyPath, outputPath!, ir.foreignLibraries)
+            if emitObjectOnly { return self.emitObject(assembly, outputPath!) }
+            local linkResult = self.link(assembly, outputPath!, ir.foreignLibraries)
             if linkResult != 0 {
                 System.writeError("argon: linker exited with status ")
                 System.writeError(linkResult.toString())
@@ -133,6 +139,43 @@ entry {{
         }
         System.write(assembly)
         return 0
+    }
+
+    emitObject(assembly:string, objectPath:string) -> i32 {
+        local assembler = new X86Object.Assembler()
+        local object = assembler.assemble(assembly)
+        if object == null {
+            System.writeError("argon: native object encoder does not support generated assembly: "); System.writeError(assembler.error); System.writeError("\n")
+            return 69
+        }
+        if !self.writeObject(objectPath, object!) { return 74 }
+        return 0
+    }
+
+    link(assembly:string, outputPath:string, libraries:Array<string>) -> i64 {
+        local assembler = new X86Object.Assembler()
+        local object = assembler.assemble(assembly)
+        local inputPath = outputPath + ".o"
+        if object != null {
+            if !self.writeObject(inputPath, object!) { return 74 }
+        } else {
+            inputPath = outputPath + ".s"
+            if !self.writeAssembly(inputPath, assembly) { return 74 }
+        }
+        return System.link(inputPath, outputPath, libraries)
+    }
+
+    writeObject(path:string, object:Array<u8>) -> bool {
+        local output = System.openWrite(path)
+        if output == null {
+            System.writeError("argon: could not open object output; OS error "); System.writeError(System.lastError().toString()); System.writeError("\n"); return false
+        }
+        local written = System.writeBytes(output!, object)
+        local closeResult = System.close(output!)
+        if written != object.length || closeResult != 0 {
+            System.writeError("argon: could not write object output; OS error "); System.writeError(System.lastError().toString()); System.writeError("\n"); return false
+        }
+        return true
     }
 
     writeAssembly(path:string, assembly:string) -> bool {
@@ -162,5 +205,6 @@ entry {{
         System.write("  argon <source-file> -o <executable>\n")
         System.write("  argon --check <source-file>\n")
         System.write("  argon --emit-ir <source-file>\n")
+        System.write("  argon --emit-object <source-file> -o <object-file>\n")
     }
 }}

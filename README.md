@@ -48,7 +48,7 @@ Argon is usable as a language-development prototype and self-hosting compiler to
 
 ## Current target
 
-The supported native target is x86-64 Linux using the system C toolchain for assembly and linking. Node.js is required to build generation 0; programs compiled by the native Argon compiler do not require Node.js.
+The supported native target is x86-64 Linux. Both generation 0 and the self-hosted compiler encode ELF64 objects directly, then use the system linker for executables. Node.js is required only to build generation 0; programs compiled by the native Argon compiler do not require Node.js.
 
 The [freestanding profile](docs/freestanding.md) defines the language/runtime boundary for future kernel and embedded targets; freestanding code generation remains **WIP**.
 

@@ -19,7 +19,8 @@ Both implementations follow the same broad stages:
 
 ```text
 source -> tokens -> AST -> module graph -> semantic symbols
-       -> IR -> validation/canonicalization -> x86-64 assembly -> executable
+       -> IR -> validation/canonicalization -> x86-64 assembly
+       -> x86-64 encoding -> ELF object -> linker -> executable
 ```
 
 - Tokenization records source spans for diagnostics.
@@ -28,9 +29,9 @@ source -> tokens -> AST -> module graph -> semantic symbols
 - Semantic analysis binds names, checks types/contracts, and enforces ownership.
 - IR lowering produces target-independent blocks and instructions.
 - Validation rejects malformed IR before backend generation.
-- The x86-64 backend emits a controlled Intel-syntax subset. Generation 0 encodes that subset and
-  writes ELF64 relocatable objects directly; it invokes the system toolchain only for linking.
-  Direct object emission from the self-hosted compiler is **WIP**.
+- The x86-64 backend emits a controlled Intel-syntax subset. Both generation 0 and the self-hosted
+  compiler encode that subset and write ELF64 relocatable objects directly; the system toolchain is
+  invoked only for linking.
 
 Native executable builds can reuse validated backend artifacts by setting
 `ARGON_CACHE_PATH` to an existing writable directory. Cache keys include every loaded module's
@@ -46,7 +47,10 @@ collected from `native ... from` declarations. The future integrated linker will
 provider, not the removal of hosted linking. Generation 0 can stop after object emission with
 `node bootstrap/compiler.js --emit-object <source> <output.o>`.
 
-Direct object-file emission, an integrated linker, register allocation, and optimization levels are **WIP**.
+The self-hosted compiler can stop at the same boundary with
+`argon --emit-object <source> -o <output.o>`.
+
+An integrated linker, register allocation, and optimization levels are **WIP**.
 
 ## Repository map
 
