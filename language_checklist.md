@@ -105,9 +105,9 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 
 ## 8. Bootstrap proof and portability
 
-- [ ] JavaScript bootstrap builds compiler generation 0
-- [ ] Generation 0 compiles the example programs
-- [ ] Generation 0 compiles the Argon compiler source
+- [x] JavaScript bootstrap builds compiler generation 0
+- [x] Generation 0 compiles the example programs
+- [x] Generation 0 compiles the Argon compiler source
 - [x] Generation 1 passes the compiler test suite
 - [ ] Generation 1 builds generation 2 within the supported memory budget
 - [ ] Generations 1 and 2 produce semantically equivalent IR
