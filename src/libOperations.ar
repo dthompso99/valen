@@ -1,4 +1,18 @@
 library Operations {{
+    native threadAvailable() -> bool
+    native threadStart(operation:ThreadOperation) -> bool
+    native threadJoin(operation:ThreadOperation) -> void
+    native mutexLock(mutex:Mutex) -> void
+    native mutexUnlock(mutex:Mutex) -> void
+    native conditionWait(condition:Condition, mutex:Mutex) -> void
+    native conditionNotifyOne(condition:Condition) -> void
+    native conditionNotifyAll(condition:Condition) -> void
+    native atomicLoad(atomic:Atomic) -> i64
+    native atomicStore(atomic:Atomic, value:i64) -> void
+    native atomicExchange(atomic:Atomic, value:i64) -> i64
+    native atomicCompareExchange(atomic:Atomic, expected:i64, replacement:i64) -> bool
+    native atomicAdd(atomic:Atomic, value:i64) -> i64
+
     OperationResult {{
         succeeded() -> bool { return false }
         failed() -> bool { return false }
@@ -70,6 +84,75 @@ library Operations {{
             local terminal = work.run()
             delete work
             return new CompletedOperation(terminal)
+        }
+    }}
+
+    Mutex {{
+        private member state:i32
+
+        __() -> void { self.state = 0 }
+        lock() -> void { Operations.mutexLock(self) }
+        unlock() -> void { Operations.mutexUnlock(self) }
+    }}
+
+    Condition {{
+        private member sequence:i32
+
+        __() -> void { self.sequence = 0 }
+        wait(mutex:Mutex) -> void { Operations.conditionWait(self, mutex) }
+        notifyOne() -> void { Operations.conditionNotifyOne(self) }
+        notifyAll() -> void { Operations.conditionNotifyAll(self) }
+    }}
+
+    Atomic {{
+        private member value:i64
+
+        __(value:i64=0) -> void { self.value = value }
+        load() -> i64 { return Operations.atomicLoad(self) }
+        store(value:i64) -> void { Operations.atomicStore(self, value) }
+        exchange(value:i64) -> i64 { return Operations.atomicExchange(self, value) }
+        compareExchange(expected:i64, replacement:i64) -> bool { return Operations.atomicCompareExchange(self, expected, replacement) }
+        add(value:i64) -> i64 { return Operations.atomicAdd(self, value) }
+    }}
+
+    ThreadOperation implements Operation {{
+        private member work:Work
+        private member terminal:OperationResult?
+        private member handle:i64
+        private member joined:bool
+
+        __(own work:Work) -> void {
+            self.work = work
+            self.terminal = null
+            self.handle = 0
+            self.joined = false
+        }
+
+        private runWorker() -> void { self.terminal = self.work.run() }
+        start() -> bool { return Operations.threadStart(self) }
+        runInline() -> void { self.runWorker(); self.joined = true }
+        complete() -> bool { return self.terminal != null }
+        cancel() -> bool { return false }
+        result() -> ref OperationResult? { return self.terminal }
+        wait() -> ref OperationResult {
+            if !self.joined { Operations.threadJoin(self); self.joined = true }
+            return self.terminal!
+        }
+    }}
+
+    ThreadExecutor implements Executor {{
+        private member weak active:ThreadOperation?
+
+        __() -> void { self.active = null }
+        available() -> bool { return Operations.threadAvailable() }
+
+        submit(own work:Work) -> Operation {
+            local active = self.active
+            if active != null { active!.wait() }
+            local operation = new ThreadOperation(work)
+            self.active = operation
+            if !operation.start() { operation.runInline() }
+            return operation
         }
     }}
 }}

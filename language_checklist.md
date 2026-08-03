@@ -58,8 +58,8 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 - [x] Define an `Executor` contract whose `submit(work)` returns an operation object
 - [x] Implement `InlineExecutor` as the deterministic reference execution policy and non-threaded fallback
 - [x] Specify ownership transfer and retained references for submitted work and operation results
-- [ ] Implement a native single-worker `ThreadExecutor`
-- [ ] Add native mutex, condition, and atomic synchronization objects
+- [x] Implement a native single-worker `ThreadExecutor` with portable inline fallback
+- [x] Add native mutex, condition, and atomic synchronization objects
 - [ ] Add a thread-pool executor after single-worker correctness is established
 - [ ] Add event-loop executors for nonblocking file and network I/O
 - [x] Implement short-circuit lowering for `&&` and `||`

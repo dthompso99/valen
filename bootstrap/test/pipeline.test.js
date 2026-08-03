@@ -557,6 +557,18 @@ test('operation state has stable success, failure, cancellation, and waiting sem
     assert.match(reusedWork.diagnostics[0].message, /Cannot pass borrowed reference 'work'/);
 });
 
+test('native synchronization and single-worker execution lower through the portable operation contracts', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/threading.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    const assembly = new X86_64Backend().generate(ir);
+    assert.match(assembly, /argon_Operations_threadStart:/);
+    assert.match(assembly, /call pthread_create/);
+    assert.match(assembly, /lock cmpxchg DWORD PTR/);
+    assert.match(assembly, /lock xadd QWORD PTR/);
+});
+
 test('members default public while private members stay owner-only and non-virtual', () => {
     const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/visibility.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});

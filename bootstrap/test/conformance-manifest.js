@@ -12,6 +12,7 @@ export const validPrograms = [
     {name: 'garbage collection', source: 'bootstrap/test/fixtures/garbage-collection.ar'},
     {name: 'optional diagnostics', source: 'bootstrap/test/fixtures/diagnostics.ar'},
     {name: 'operation state', source: 'bootstrap/test/fixtures/operation-state.ar'},
+    {name: 'native synchronization and threading', source: 'bootstrap/test/fixtures/threading.ar'},
     {name: 'iterators and for loops', source: 'bootstrap/test/fixtures/for-loops.ar'},
     {name: 'short-circuit control flow', source: 'bootstrap/test/fixtures/short-circuit.ar'},
     {name: 'native test runner', source: 'bootstrap/test/fixtures/native-tests.ar'}

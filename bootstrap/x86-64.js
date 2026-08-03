@@ -57,7 +57,12 @@ export class X86_64Backend {
             'argon_System_collectGarbage',
             'argon_System_link',
             'argon_System_memoryCopy',
-            'argon_System_memoryCompare'
+            'argon_System_memoryCompare',
+            'argon_Operations_threadAvailable', 'argon_Operations_threadStart', 'argon_Operations_threadJoin',
+            'argon_Operations_mutexLock', 'argon_Operations_mutexUnlock',
+            'argon_Operations_conditionWait', 'argon_Operations_conditionNotifyOne', 'argon_Operations_conditionNotifyAll',
+            'argon_Operations_atomicLoad', 'argon_Operations_atomicStore', 'argon_Operations_atomicExchange',
+            'argon_Operations_atomicCompareExchange', 'argon_Operations_atomicAdd'
         ]);
         for (const external of program.externals) {
             if (!external.foreignLibrary && !supportedRuntimeSymbols.has(external.runtimeSymbol)) {
@@ -75,6 +80,7 @@ export class X86_64Backend {
         ].some(symbol => runtimeSymbols.has(symbol));
 
         const lines = ['.intel_syntax noprefix', '.text'];
+        if (runtimeSymbols.has('argon_Operations_threadStart')) lines.push('.extern pthread_create', '.extern pthread_join');
         for (const external of program.externals) {
             if (external.foreignLibrary) lines.push(`.extern ${external.runtimeSymbol}`);
         }
@@ -101,6 +107,7 @@ export class X86_64Backend {
         if (runtimeSymbols.has('argon_System_link')) lines.push(...this.linkRuntime());
         if (runtimeSymbols.has('argon_System_memoryCopy')) lines.push(...this.memoryCopyRuntime());
         if (runtimeSymbols.has('argon_System_memoryCompare')) lines.push(...this.memoryCompareRuntime());
+        if ([...runtimeSymbols].some(symbol => symbol.startsWith('argon_Operations_'))) lines.push(...this.operationsRuntime(runtimeSymbols));
         lines.push(...this.runtimeErrorRuntime());
         lines.push(...this.allocationRuntime());
         lines.push(...this.garbageCollectorRuntime());
@@ -121,6 +128,51 @@ export class X86_64Backend {
         if (this.needsFilesystemState) lines.push(...this.filesystemData());
         lines.push('.section .note.GNU-stack,"",@progbits');
         return `${lines.join('\n')}\n`;
+    }
+
+    operationsRuntime(symbols) {
+        const offset = suffix => {
+            for (const [name, field] of this.fieldOffsets) if (name.endsWith(`::Operations.${suffix}`)) return field.offset;
+            throw new Error(`Operations runtime requires field ${suffix}`);
+        };
+        const mutex = offset('Mutex.state'), condition = offset('Condition.sequence'), atomic = offset('Atomic.value');
+        const handle = offset('ThreadOperation.handle');
+        const worker = this.program.functions.find(fn => fn.displayName === 'Operations.ThreadOperation.runWorker');
+        const lines = [];
+        const has = name => symbols.has(`argon_Operations_${name}`);
+        if (has('threadAvailable')) lines.push('.globl argon_Operations_threadAvailable', 'argon_Operations_threadAvailable:', '    mov eax, 1', '    ret', '');
+        if (has('threadStart')) lines.push(
+            '.globl argon_Operations_threadStart', 'argon_Operations_threadStart:', '    push rbx', '    mov rbx, rdi',
+            `    lea rdi, [rbx+${handle}]`, '    xor esi, esi', '    lea rdx, [rip+argon_thread_worker]', '    mov rcx, rbx',
+            '    call pthread_create', '    test eax, eax', '    sete al', '    movzx eax, al', '    pop rbx', '    ret', '',
+            'argon_thread_worker:', '    push rbx', '    mov rbx, rdi', '    mov rdi, rbx',
+            `    call ${this.functionSymbols.get(worker?.name)}`, '    xor eax, eax', '    pop rbx', '    ret', '');
+        if (has('threadJoin')) lines.push('.globl argon_Operations_threadJoin', 'argon_Operations_threadJoin:', '    push rax',
+            `    mov rdi, QWORD PTR [rdi+${handle}]`, '    xor esi, esi', '    call pthread_join', '    pop rcx', '    ret', '');
+        if (has('mutexLock')) lines.push('.globl argon_Operations_mutexLock', 'argon_Operations_mutexLock:', '    push r12',
+            `    lea r12, [rdi+${mutex}]`, '.Largon_mutex_retry:', '    xor eax, eax', '    mov ecx, 1',
+            '    lock cmpxchg DWORD PTR [r12], ecx', '    je .Largon_mutex_locked', '    mov eax, 202', '    mov rdi, r12',
+            '    xor esi, esi', '    mov edx, 1', '    xor r10d, r10d', '    xor r8d, r8d', '    xor r9d, r9d', '    syscall',
+            '    jmp .Largon_mutex_retry', '.Largon_mutex_locked:', '    pop r12', '    ret', '');
+        if (has('mutexUnlock')) lines.push('.globl argon_Operations_mutexUnlock', 'argon_Operations_mutexUnlock:',
+            `    lea rdi, [rdi+${mutex}]`, '    mov DWORD PTR [rdi], 0', '    mov eax, 202', '    mov esi, 1', '    mov edx, 1',
+            '    xor r10d, r10d', '    xor r8d, r8d', '    xor r9d, r9d', '    syscall', '    ret', '');
+        if (has('conditionWait')) lines.push('.globl argon_Operations_conditionWait', 'argon_Operations_conditionWait:',
+            '    push r12', '    push r13', '    push r14', '    mov r12, rdi', '    mov r13, rsi', `    mov r14d, DWORD PTR [r12+${condition}]`,
+            '    mov rdi, r13', '    call argon_Operations_mutexUnlock', '    mov eax, 202', `    lea rdi, [r12+${condition}]`,
+            '    xor esi, esi', '    mov edx, r14d', '    xor r10d, r10d', '    xor r8d, r8d', '    xor r9d, r9d', '    syscall',
+            '    mov rdi, r13', '    call argon_Operations_mutexLock', '    pop r14', '    pop r13', '    pop r12', '    ret', '');
+        const notify = (name, count) => lines.push(`.globl argon_Operations_${name}`, `argon_Operations_${name}:`,
+            `    lea rdi, [rdi+${condition}]`, '    lock add DWORD PTR [rdi], 1', '    mov eax, 202', '    mov esi, 1', `    mov edx, ${count}`,
+            '    xor r10d, r10d', '    xor r8d, r8d', '    xor r9d, r9d', '    syscall', '    ret', '');
+        if (has('conditionNotifyOne')) notify('conditionNotifyOne', 1);
+        if (has('conditionNotifyAll')) notify('conditionNotifyAll', 2147483647);
+        if (has('atomicLoad')) lines.push('.globl argon_Operations_atomicLoad', 'argon_Operations_atomicLoad:', `    mov rax, QWORD PTR [rdi+${atomic}]`, '    ret', '');
+        if (has('atomicStore')) lines.push('.globl argon_Operations_atomicStore', 'argon_Operations_atomicStore:', `    xchg QWORD PTR [rdi+${atomic}], rsi`, '    ret', '');
+        if (has('atomicExchange')) lines.push('.globl argon_Operations_atomicExchange', 'argon_Operations_atomicExchange:', '    mov rax, rsi', `    xchg QWORD PTR [rdi+${atomic}], rax`, '    ret', '');
+        if (has('atomicCompareExchange')) lines.push('.globl argon_Operations_atomicCompareExchange', 'argon_Operations_atomicCompareExchange:', '    mov rax, rsi', `    lock cmpxchg QWORD PTR [rdi+${atomic}], rdx`, '    sete al', '    movzx eax, al', '    ret', '');
+        if (has('atomicAdd')) lines.push('.globl argon_Operations_atomicAdd', 'argon_Operations_atomicAdd:', '    mov rax, rsi', `    lock xadd QWORD PTR [rdi+${atomic}], rax`, '    add rax, rsi', '    ret', '');
+        return lines;
     }
 
     generateFunction(fn) {

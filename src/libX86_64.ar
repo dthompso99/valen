@@ -89,6 +89,7 @@ library X86_64 {{
                 if self.program.externals[index].foreignLibrary != null { self.writer.line(".extern " + self.program.externals[index].runtimeName) }
                 index = index + 1
             }
+            if self.hasRuntime("argon_Operations_threadStart") { self.writer.line(".extern pthread_create"); self.writer.line(".extern pthread_join") }
             index = 0
             while index < self.program.functions.length {
                 self.generateFunction(self.program.functions[index])
@@ -103,6 +104,7 @@ library X86_64 {{
             self.linkRuntime()
             self.filesystemRuntime()
             self.memoryRuntime()
+            if self.hasRuntime("argon_Operations_threadAvailable") { self.operationsRuntime() }
             self.runtimeCore()
             self.garbageCollectorRuntime()
             self.arrayRuntime()
@@ -120,6 +122,63 @@ library X86_64 {{
             self.writer.line(".comm argon_test_failures,8,8")
             self.writer.line(".section .note.GNU-stack,\"\",@progbits")
             return self.writer.build()
+        }
+
+        hasRuntime(name:string) -> bool {
+            local index:i64 = 0
+            while index < self.program.externals.length {
+                if self.program.externals[index].runtimeName == name { return true }
+                index = index + 1
+            }
+            return false
+        }
+
+        operationsRuntime() -> void {
+            local mutex = ""
+            local condition = ""
+            local atomic = ""
+            local handle = ""
+            local index:i64 = 0
+            while index < self.fields.length {
+                local fieldName = self.fields[index].name
+                if fieldName.length >= 11 { if fieldName.slice(fieldName.length - 11, 11) == "Mutex.state" { mutex = self.fields[index].offset.toString() } }
+                if fieldName.length >= 18 { if fieldName.slice(fieldName.length - 18, 18) == "Condition.sequence" { condition = self.fields[index].offset.toString() } }
+                if fieldName.length >= 12 { if fieldName.slice(fieldName.length - 12, 12) == "Atomic.value" { atomic = self.fields[index].offset.toString() } }
+                if fieldName.length >= 22 { if fieldName.slice(fieldName.length - 22, 22) == "ThreadOperation.handle" { handle = self.fields[index].offset.toString() } }
+                index = index + 1
+            }
+            local worker = ""
+            index = 0
+            while index < self.program.functions.length {
+                local displayName = self.program.functions[index].displayName
+                if displayName.length >= 10 {
+                    if displayName.slice(displayName.length - 10, 10) == ".runWorker" { worker = self.functionSymbol(self.program.functions[index].name) }
+                }
+                index = index + 1
+            }
+            if mutex.length == 0 || condition.length == 0 || atomic.length == 0 || handle.length == 0 || worker.length == 0 { return }
+
+            self.writer.line(".globl argon_Operations_threadAvailable"); self.writer.line("argon_Operations_threadAvailable:"); self.writer.line("    mov eax, 1"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl argon_Operations_threadStart"); self.writer.line("argon_Operations_threadStart:"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi"); self.writer.line("    lea rdi, [rbx+" + handle + "]"); self.writer.line("    xor esi, esi"); self.writer.line("    lea rdx, [rip+argon_thread_worker]"); self.writer.line("    mov rcx, rbx"); self.writer.line("    call pthread_create"); self.writer.line("    test eax, eax"); self.writer.line("    sete al"); self.writer.line("    movzx eax, al"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line("argon_thread_worker:"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi"); self.writer.line("    mov rdi, rbx"); self.writer.line("    call " + worker); self.writer.line("    xor eax, eax"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl argon_Operations_threadJoin"); self.writer.line("argon_Operations_threadJoin:"); self.writer.line("    push rax"); self.writer.line("    mov rdi, QWORD PTR [rdi+" + handle + "]"); self.writer.line("    xor esi, esi"); self.writer.line("    call pthread_join"); self.writer.line("    pop rcx"); self.writer.line("    ret"); self.writer.line("")
+
+            self.writer.line(".globl argon_Operations_mutexLock"); self.writer.line("argon_Operations_mutexLock:"); self.writer.line("    push r12"); self.writer.line("    lea r12, [rdi+" + mutex + "]"); self.writer.line(".Largon_mutex_retry:"); self.writer.line("    xor eax, eax"); self.writer.line("    mov ecx, 1"); self.writer.line("    lock cmpxchg DWORD PTR [r12], ecx"); self.writer.line("    je .Largon_mutex_locked"); self.writer.line("    mov eax, 202"); self.writer.line("    mov rdi, r12"); self.writer.line("    xor esi, esi"); self.writer.line("    mov edx, 1"); self.writer.line("    xor r10d, r10d"); self.writer.line("    xor r8d, r8d"); self.writer.line("    xor r9d, r9d"); self.writer.line("    syscall"); self.writer.line("    jmp .Largon_mutex_retry"); self.writer.line(".Largon_mutex_locked:"); self.writer.line("    pop r12"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl argon_Operations_mutexUnlock"); self.writer.line("argon_Operations_mutexUnlock:"); self.writer.line("    lea rdi, [rdi+" + mutex + "]"); self.writer.line("    mov DWORD PTR [rdi], 0"); self.writer.line("    mov eax, 202"); self.writer.line("    mov esi, 1"); self.writer.line("    mov edx, 1"); self.writer.line("    xor r10d, r10d"); self.writer.line("    xor r8d, r8d"); self.writer.line("    xor r9d, r9d"); self.writer.line("    syscall"); self.writer.line("    ret"); self.writer.line("")
+
+            self.writer.line(".globl argon_Operations_conditionWait"); self.writer.line("argon_Operations_conditionWait:"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    mov r12, rdi"); self.writer.line("    mov r13, rsi"); self.writer.line("    mov r14d, DWORD PTR [r12+" + condition + "]"); self.writer.line("    mov rdi, r13"); self.writer.line("    call argon_Operations_mutexUnlock"); self.writer.line("    mov eax, 202"); self.writer.line("    lea rdi, [r12+" + condition + "]"); self.writer.line("    xor esi, esi"); self.writer.line("    mov edx, r14d"); self.writer.line("    xor r10d, r10d"); self.writer.line("    xor r8d, r8d"); self.writer.line("    xor r9d, r9d"); self.writer.line("    syscall"); self.writer.line("    mov rdi, r13"); self.writer.line("    call argon_Operations_mutexLock"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl argon_Operations_conditionNotifyOne"); self.writer.line("argon_Operations_conditionNotifyOne:"); self.conditionNotifyRuntime(condition, "1")
+            self.writer.line(".globl argon_Operations_conditionNotifyAll"); self.writer.line("argon_Operations_conditionNotifyAll:"); self.conditionNotifyRuntime(condition, "2147483647")
+
+            self.writer.line(".globl argon_Operations_atomicLoad"); self.writer.line("argon_Operations_atomicLoad:"); self.writer.line("    mov rax, QWORD PTR [rdi+" + atomic + "]"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl argon_Operations_atomicStore"); self.writer.line("argon_Operations_atomicStore:"); self.writer.line("    xchg QWORD PTR [rdi+" + atomic + "], rsi"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl argon_Operations_atomicExchange"); self.writer.line("argon_Operations_atomicExchange:"); self.writer.line("    mov rax, rsi"); self.writer.line("    xchg QWORD PTR [rdi+" + atomic + "], rax"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl argon_Operations_atomicCompareExchange"); self.writer.line("argon_Operations_atomicCompareExchange:"); self.writer.line("    mov rax, rsi"); self.writer.line("    lock cmpxchg QWORD PTR [rdi+" + atomic + "], rdx"); self.writer.line("    sete al"); self.writer.line("    movzx eax, al"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl argon_Operations_atomicAdd"); self.writer.line("argon_Operations_atomicAdd:"); self.writer.line("    mov rax, rsi"); self.writer.line("    lock xadd QWORD PTR [rdi+" + atomic + "], rax"); self.writer.line("    add rax, rsi"); self.writer.line("    ret"); self.writer.line("")
+        }
+
+        conditionNotifyRuntime(offset:string, count:string) -> void {
+            self.writer.line("    lea rdi, [rdi+" + offset + "]"); self.writer.line("    lock add DWORD PTR [rdi], 1"); self.writer.line("    mov eax, 202"); self.writer.line("    mov esi, 1"); self.writer.line("    mov edx, " + count); self.writer.line("    xor r10d, r10d"); self.writer.line("    xor r8d, r8d"); self.writer.line("    xor r9d, r9d"); self.writer.line("    syscall"); self.writer.line("    ret"); self.writer.line("")
         }
 
         layoutTypes() -> void {

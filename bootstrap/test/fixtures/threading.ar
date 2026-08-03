@@ -1,0 +1,33 @@
+import Operations from '../../../src/libOperations.ar'
+
+BackgroundWork implements Operations.Work {{
+    run() -> Operations.OperationResult { return new Operations.Failed(42, "worker complete") }
+}}
+
+entry {{
+    __() -> i32 {
+        local atomic = new Operations.Atomic(4)
+        if atomic.load() != 4 { return 1 }
+        if atomic.add(3) != 7 { return 2 }
+        if !atomic.compareExchange(7, 11) { return 3 }
+        if atomic.exchange(9) != 11 { return 4 }
+        atomic.store(5)
+        if atomic.load() != 5 { return 5 }
+
+        local mutex = new Operations.Mutex()
+        local condition = new Operations.Condition()
+        mutex.lock()
+        mutex.unlock()
+        condition.notifyOne()
+        condition.notifyAll()
+
+        local executor = new Operations.ThreadExecutor()
+        local operation = executor.submit(new BackgroundWork())
+        local result = operation.wait()
+        if !result.failed() { return 6 }
+        if result.code() != 42 { return 7 }
+        if result.detail()! != "worker complete" { return 8 }
+        if result !== operation.result()! { return 9 }
+        return 0
+    }
+}}
