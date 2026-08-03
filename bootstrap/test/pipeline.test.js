@@ -874,6 +874,7 @@ test('managed allocation triggers adaptive collection and native handles use GC 
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
     assert.match(assembly, /valen_gc_alloc:[\s\S]*call valen_gc_maybe_collect/);
+    assert.match(assembly, /valen_gc_alloc:[\s\S]*cmp DWORD PTR \[rip\+valen_arena_enabled\], 0[\s\S]*call valen_alloc[\s\S]*\.Lgc_alloc_direct:/);
     assert.match(assembly, /valen_gc_maybe_collect:[\s\S]*cmp rax, QWORD PTR \[rip\+valen_gc_threshold\][\s\S]*jmp valen_gc_collect/);
     assert.match(assembly, /valen_Network_listen:[\s\S]*call valen_gc_alloc[\s\S]*mov QWORD PTR \[rax\+16\], r12/);
     assert.match(assembly, /valen_gc_native_handle_finalize:[\s\S]*mov QWORD PTR \[r10\+16\], -1/);
