@@ -8,6 +8,7 @@ status zero. Expected-failure cases must compile and then produce their declared
 status and diagnostic output.
 
 Add a fixture to the manifest when it becomes a stable end-to-end language regression.
-Keep bootstrap-only structural assertions in `pipeline.test.js`. Future cross-generation
-IR and invalid-diagnostic comparisons should extend the same manifest rather than create
-independent fixture lists.
+Keep bootstrap-only structural assertions in `pipeline.test.js`. Generation 1 and generation
+2 emit deterministic, length-delimited IR snapshots for every valid manifest entry. Invalid-
+diagnostic comparisons should extend the same manifest rather than create independent fixture
+lists.

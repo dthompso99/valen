@@ -45,6 +45,31 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                 assert.match(run.stderr, fixture.stderr);
             });
         }
+
+        await t.test('generation 1 and 2 produce equivalent normalized IR', async t => {
+            const generation2Path = path.join(directory, 'argon-generation2');
+            const build = spawnSync(compilerPath, [path.join(projectRoot, 'src/argon.ar'), '-o', generation2Path], {
+                encoding: 'utf8', env: environment, cwd: projectRoot, maxBuffer: 64 * 1024 * 1024
+            });
+            assert.equal(build.status, 0, build.stderr || build.stdout);
+
+            for (const fixture of validPrograms) {
+                await t.test(fixture.name, () => {
+                    const sourcePath = path.join(projectRoot, fixture.source);
+                    const generation1 = spawnSync(compilerPath, ['--emit-ir', sourcePath], {
+                        encoding: 'utf8', env: environment, cwd: projectRoot, maxBuffer: 64 * 1024 * 1024
+                    });
+                    const generation2 = spawnSync(generation2Path, ['--emit-ir', sourcePath], {
+                        encoding: 'utf8', env: environment, cwd: projectRoot, maxBuffer: 64 * 1024 * 1024
+                    });
+                    assert.equal(generation1.status, 0, generation1.stderr || generation1.stdout);
+                    assert.equal(generation2.status, 0, generation2.stderr || generation2.stdout);
+                    assert.match(generation1.stdout, /^program\|/);
+                    assert.match(generation1.stdout, /^instruction\|/m);
+                    assert.equal(generation2.stdout, generation1.stdout, `normalized IR differs for ${fixture.source}`);
+                });
+            }
+        });
     } finally {
         fs.rmSync(directory, {recursive: true, force: true});
     }

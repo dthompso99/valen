@@ -23,6 +23,7 @@ entry {{
         local sourcePath:string? = null
         local outputPath:string? = null
         local checkOnly:bool = false
+        local emitIr:bool = false
         if arguments.length == 2 {
             sourcePath = arguments[1]
         } else {
@@ -30,6 +31,11 @@ entry {{
                 if arguments[1] == "--check" {
                     checkOnly = true
                     sourcePath = arguments[2]
+                } else {
+                    if arguments[1] == "--emit-ir" {
+                        emitIr = true
+                        sourcePath = arguments[2]
+                    }
                 }
             } else {
                 if arguments.length == 4 {
@@ -77,6 +83,11 @@ entry {{
             }
             return 70
         }
+        if emitIr {
+            local normalizer = new Ir.Normalizer()
+            System.write(normalizer.format(ir))
+            return 0
+        }
         local backend = new X86_64.Backend(ir)
         local assembly = backend.generate()
         if outputPath != null {
@@ -116,5 +127,6 @@ entry {{
         System.write("  argon <source-file>\n")
         System.write("  argon <source-file> -o <executable>\n")
         System.write("  argon --check <source-file>\n")
+        System.write("  argon --emit-ir <source-file>\n")
     }
 }}

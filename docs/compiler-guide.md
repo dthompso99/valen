@@ -11,7 +11,7 @@ Argon is developed through two compiler implementations:
 
 The bootstrap compiler does not need every language feature. It needs the subset required to compile the current native compiler source. If `src/` begins using a new feature, generation 0 must understand that feature before the bootstrap remains valid.
 
-Generation 1 builds a working generation-2 compiler within a 3 GiB peak-RSS budget. Comparing normalized generation-1/2 output remains **WIP**.
+Generation 1 builds a working generation-2 compiler within a 3 GiB peak-RSS budget. The shared conformance corpus also verifies that generations 1 and 2 emit identical normalized target-independent IR.
 
 ## Compilation pipeline
 
@@ -65,6 +65,16 @@ Run native generation-1 conformance:
 ```sh
 node bootstrap/test/generation1.test.js
 ```
+
+Inspect the deterministic target-independent IR emitted by a native compiler:
+
+```sh
+./argon --emit-ir examples/simple/simple.ar
+```
+
+This length-delimited form includes types, fields, dispatch tables, functions, blocks,
+instructions, operands, externals, and foreign libraries. The conformance suite compares it
+across generations 1 and 2.
 
 Run compiler and generated-code benchmarks:
 

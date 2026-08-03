@@ -208,6 +208,99 @@ library Ir {{
         }
     }}
 
+    Normalizer {{
+        format(program:Program) -> string {
+            local output = new StringBuilder()
+            self.record(output, "program"); self.optional(output, program.entry); self.line(output)
+            self.record(output, "types"); self.number(output, program.types.length); self.line(output)
+            local typeIndex:i64 = 0
+            while typeIndex < program.types.length { self.typeNode(output, program.types[typeIndex]); typeIndex = typeIndex + 1 }
+            self.record(output, "functions"); self.number(output, program.functions.length); self.line(output)
+            local functionIndex:i64 = 0
+            while functionIndex < program.functions.length { self.functionNode(output, program.functions[functionIndex]); functionIndex = functionIndex + 1 }
+            self.record(output, "externals"); self.number(output, program.externals.length); self.line(output)
+            local externalIndex:i64 = 0
+            while externalIndex < program.externals.length { self.externalNode(output, program.externals[externalIndex]); externalIndex = externalIndex + 1 }
+            self.record(output, "libraries"); self.number(output, program.foreignLibraries.length)
+            local libraryIndex:i64 = 0
+            while libraryIndex < program.foreignLibraries.length { self.text(output, program.foreignLibraries[libraryIndex]); libraryIndex = libraryIndex + 1 }
+            self.line(output)
+            return output.build()
+        }
+
+        typeNode(output:StringBuilder, node:Type) -> void {
+            self.record(output, "type"); self.text(output, node.name); self.text(output, node.displayName); self.optional(output, node.baseName); self.optional(output, node.initializer)
+            self.number(output, node.fields.length); self.number(output, node.virtualMethods.length); self.number(output, node.contracts.length); self.line(output)
+            local fieldIndex:i64 = 0
+            while fieldIndex < node.fields.length {
+                local field = node.fields[fieldIndex]
+                self.record(output, "field"); self.text(output, field.name); self.text(output, field.qualifiedName); self.text(output, field.typeName); self.text(output, field.ownership); self.number(output, field.index); self.line(output)
+                fieldIndex = fieldIndex + 1
+            }
+            local virtualIndex:i64 = 0
+            while virtualIndex < node.virtualMethods.length { self.virtualMethod(output, "virtual", node.virtualMethods[virtualIndex]); virtualIndex = virtualIndex + 1 }
+            local contractIndex:i64 = 0
+            while contractIndex < node.contracts.length {
+                local contract = node.contracts[contractIndex]
+                self.record(output, "contract"); self.text(output, contract.name); self.boolean(output, contract.isSelf); self.number(output, contract.methods.length); self.line(output)
+                local methodIndex:i64 = 0
+                while methodIndex < contract.methods.length { self.virtualMethod(output, "contract-method", contract.methods[methodIndex]); methodIndex = methodIndex + 1 }
+                contractIndex = contractIndex + 1
+            }
+        }
+
+        virtualMethod(output:StringBuilder, recordName:string, method:VirtualMethod) -> void {
+            self.record(output, recordName); self.text(output, method.name); self.text(output, method.target); self.line(output)
+        }
+
+        functionNode(output:StringBuilder, node:Function) -> void {
+            self.record(output, "function"); self.text(output, node.name); self.text(output, node.displayName); self.text(output, node.ownerType); self.text(output, node.returnType)
+            self.number(output, node.parameters.length); self.number(output, node.blocks.length); self.line(output); self.parameters(output, node.parameters)
+            local blockIndex:i64 = 0
+            while blockIndex < node.blocks.length {
+                local block = node.blocks[blockIndex]
+                self.record(output, "block"); self.text(output, block.label); self.number(output, block.instructions.length); self.line(output)
+                local instructionIndex:i64 = 0
+                while instructionIndex < block.instructions.length { self.instruction(output, block.instructions[instructionIndex]); instructionIndex = instructionIndex + 1 }
+                blockIndex = blockIndex + 1
+            }
+        }
+
+        externalNode(output:StringBuilder, node:ExternalFunction) -> void {
+            self.record(output, "external"); self.text(output, node.name); self.text(output, node.displayName); self.text(output, node.runtimeName); self.text(output, node.returnType)
+            self.optional(output, node.foreignLibrary); self.number(output, node.parameters.length); self.line(output); self.parameters(output, node.parameters)
+        }
+
+        parameters(output:StringBuilder, values:Array<ref Parameter>) -> void {
+            local index:i64 = 0
+            while index < values.length {
+                self.record(output, "parameter"); self.text(output, values[index].name); self.text(output, values[index].typeName); self.line(output)
+                index = index + 1
+            }
+        }
+
+        instruction(output:StringBuilder, node:Instruction) -> void {
+            self.record(output, "instruction"); self.text(output, node.op); self.value(output, node.result); self.value(output, node.first); self.value(output, node.second); self.value(output, node.third)
+            self.number(output, node.arguments.length)
+            local argumentIndex:i64 = 0
+            while argumentIndex < node.arguments.length { self.value(output, node.arguments[argumentIndex]); argumentIndex = argumentIndex + 1 }
+            self.optional(output, node.name); self.optional(output, node.target); self.optional(output, node.alternateTarget); self.optional(output, node.operator); self.optional(output, node.typeName)
+            self.optional(output, node.ownerType); self.optional(output, node.elementType); self.optional(output, node.elementOwnership); self.optional(output, node.text); self.number(output, node.slot); self.line(output)
+        }
+
+        value(output:StringBuilder, node:Value?) -> void {
+            if node == null { output.append("N;"); return }
+            output.append("V;"); self.text(output, node!.kind); self.text(output, node!.name); self.text(output, node!.typeName)
+        }
+
+        record(output:StringBuilder, name:string) -> void { output.append(name); output.append("|") }
+        text(output:StringBuilder, value:string) -> void { output.append("S"); output.append(value.length.toString()); output.append(":"); output.append(value); output.append(";") }
+        optional(output:StringBuilder, value:string?) -> void { if value == null { output.append("N;"); return }; self.text(output, value!) }
+        number(output:StringBuilder, value:i64) -> void { output.append("I"); output.append(value.toString()); output.append(";") }
+        boolean(output:StringBuilder, value:bool) -> void { if value { output.append("B1;") } else { output.append("B0;") } }
+        line(output:StringBuilder) -> void { output.append("\n") }
+    }}
+
     Binding {{
         member symbol:Symbols.Symbol
         member value:Value
