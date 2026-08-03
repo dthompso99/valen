@@ -868,6 +868,17 @@ test('managed objects publish precise roots, trace callbacks, and runtime finali
     assert.match(assembly, /valen_System_collectGarbage:/);
 });
 
+test('managed allocation triggers adaptive collection and native handles use GC layout', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/garbage-collection-repeated.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot, libraryPath: path.join(projectRoot, 'lib')});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
+    assert.match(assembly, /valen_gc_alloc:[\s\S]*call valen_gc_maybe_collect/);
+    assert.match(assembly, /valen_gc_maybe_collect:[\s\S]*cmp rax, QWORD PTR \[rip\+valen_gc_threshold\][\s\S]*jmp valen_gc_collect/);
+    assert.match(assembly, /valen_Network_listen:[\s\S]*call valen_gc_alloc[\s\S]*mov QWORD PTR \[rax\+16\], r12/);
+    assert.match(assembly, /valen_gc_native_handle_finalize:[\s\S]*mov QWORD PTR \[r10\+16\], -1/);
+});
+
 test('UTF-8 strings support length, byte indexing, equality, concatenation, and slicing', () => {
     const semantic = new SemanticAnalyzer().analyze(new Parser().parse(stringProgram, 'strings.ar'));
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));

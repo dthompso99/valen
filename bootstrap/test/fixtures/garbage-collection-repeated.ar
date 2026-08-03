@@ -1,0 +1,35 @@
+import System from 'libSystem.ar'
+import Network from 'libNetwork.ar'
+
+Payload {{
+    member value:i64
+}}
+
+NativeOwner {{
+    member listener:Network.Listener?
+}}
+
+entry {{
+    __() -> i64 {
+        local index:i64 = 0
+        while index < 1000 {
+            local payload = new Payload()
+            payload.value = index
+            System.collectGarbage()
+            if payload.value != index { return 1 }
+            index = index + 1
+        }
+        local listener = Network.listen(0, 1)
+        if listener == null { return 2 }
+        local owners = new Array<NativeOwner?>(0)
+        local owner = new NativeOwner()
+        owner.listener = listener
+        owners.append(owner)
+        System.collectGarbage()
+        if Network.listenerDescriptor(owners[0]!.listener!) < 0 { return 3 }
+        Network.closeListener(owners[0]!.listener!)
+        System.collectGarbage()
+        System.collectGarbage()
+        return 0
+    }
+}}

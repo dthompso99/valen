@@ -14,6 +14,7 @@ export const validPrograms = [
     {name: 'default arguments', source: 'bootstrap/test/fixtures/default-arguments.ar'},
     {name: 'collection ownership', source: 'bootstrap/test/fixtures/collection-ownership.ar'},
     {name: 'garbage collection', source: 'bootstrap/test/fixtures/garbage-collection.ar'},
+    {name: 'repeated garbage collection', source: 'bootstrap/test/fixtures/garbage-collection-repeated.ar'},
     {name: 'optional diagnostics', source: 'bootstrap/test/fixtures/diagnostics.ar'},
     {name: 'operation state', source: 'bootstrap/test/fixtures/operation-state.ar'},
     {name: 'native synchronization and threading', source: 'bootstrap/test/fixtures/threading.ar'},

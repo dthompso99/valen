@@ -9,6 +9,15 @@ import {fileURLToPath} from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
+const availablePort = () => new Promise((resolve, reject) => {
+    const listener = net.createServer();
+    listener.once('error', reject);
+    listener.listen(0, '127.0.0.1', () => {
+        const {port} = listener.address();
+        listener.close(error => error ? reject(error) : resolve(port));
+    });
+});
+
 function clientFrame(payload, {opcode = 1, fin = true, masked = true} = {}) {
     const content = Buffer.from(payload);
     const extended = content.length < 126 ? 0 : content.length <= 65535 ? 2 : 8;
@@ -73,7 +82,7 @@ test('Valen Clippy upgrades, broadcasts, fragments, and rejects malformed client
     const executable = path.join(directory, 'clippy');
     const build = spawnSync(process.execPath, [path.join(root, 'bootstrap/compiler.js'), path.join(root, 'examples/clippy/server.ar'), executable], {cwd: root, encoding: 'utf8', env: {...process.env, VALEN_LIBRARY_PATH: path.join(root, 'lib')}});
     assert.equal(build.status, 0, build.stderr || build.stdout);
-    const port = 18321;
+    const port = await availablePort();
     const server = spawn(executable, [], {env: {...process.env, PORT: `${port}`, VALEN_MAX_MESSAGE_BYTES: '1024'}, stdio: ['ignore', 'pipe', 'pipe']});
     t.after(() => { if (server.exitCode == null) server.kill('SIGKILL'); fs.rmSync(directory, {recursive: true, force: true}); });
     await new Promise((resolve, reject) => {

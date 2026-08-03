@@ -55,7 +55,6 @@ entry {{
     member messages:i64
 
     __() -> i32 {
-        System.enableProcessArena()
         self.clients = new Array<Client?>(0); self.protocol = new WebSocket.Protocol(); self.handshake = new WebSocket.Handshake()
         self.clipboard = "{\"type\":\"text\",\"data\":\"\"}"; self.maximumMessage = 104857600; self.rejected = 0; self.messages = 0
         local configuredMaximum = System.environmentVariable("VALEN_MAX_MESSAGE_BYTES")
