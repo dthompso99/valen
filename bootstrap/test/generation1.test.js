@@ -208,6 +208,21 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             assert.equal(spawnSync(path.join(directory, 'cache-foreign-warm')).status, 0);
         });
 
+        await t.test('native optimization flags preserve behavior and reject unsupported levels', () => {
+            const source = path.join(projectRoot, 'bootstrap/test/fixtures/instruction-selection.ar');
+            for (const level of ['-O0', '-O1']) {
+                const executable = path.join(directory, `optimization-${level.slice(2)}`);
+                const compile = spawnSync(compilerPath, [level, source, '-o', executable], {
+                    encoding: 'utf8', env: environment, cwd: projectRoot
+                });
+                assert.equal(compile.status, 0, compile.stderr || compile.stdout);
+                assert.equal(spawnSync(executable).status, 0);
+            }
+            const unsupported = spawnSync(compilerPath, ['-O2', source], {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(unsupported.status, 64);
+            assert.match(unsupported.stderr, /unsupported optimization level '-O2'/);
+        });
+
         let sequence = 0;
         for (const fixture of validPrograms) {
             await t.test(fixture.name, () => {

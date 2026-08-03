@@ -15,8 +15,27 @@ entry {{
     __() -> i32 {
         System.enableProcessArena()
         local arguments = System.arguments()
-        if arguments.length == 2 {
-            if (arguments[1] == "--help") {
+        local compilerArguments = new Array<string>(0)
+        compilerArguments.append(arguments[0])
+        local optimizationLevel:i64 = 1
+        local argumentIndex:i64 = 1
+        while argumentIndex < arguments.length {
+            local argument = arguments[argumentIndex]
+            if argument == "-O0" { optimizationLevel = 0 }
+            else {
+                if argument == "-O1" { optimizationLevel = 1 }
+                else {
+                    if argument.length >= 2 && argument.slice(0, 2) == "-O" {
+                        System.writeError("valen: unsupported optimization level '"); System.writeError(argument); System.writeError("'\n")
+                        return 64
+                    }
+                    compilerArguments.append(argument)
+                }
+            }
+            argumentIndex = argumentIndex + 1
+        }
+        if compilerArguments.length == 2 {
+            if compilerArguments[1] == "--help" {
                 self.writeUsage()
                 return 0
             }
@@ -27,29 +46,29 @@ entry {{
         local checkOnly:bool = false
         local emitIr:bool = false
         local emitObjectOnly:bool = false
-        if arguments.length == 2 {
-            sourcePath = arguments[1]
+        if compilerArguments.length == 2 {
+            sourcePath = compilerArguments[1]
         } else {
-            if arguments.length == 3 {
-                if arguments[1] == "--check" {
+            if compilerArguments.length == 3 {
+                if compilerArguments[1] == "--check" {
                     checkOnly = true
-                    sourcePath = arguments[2]
+                    sourcePath = compilerArguments[2]
                 } else {
-                    if arguments[1] == "--emit-ir" {
+                    if compilerArguments[1] == "--emit-ir" {
                         emitIr = true
-                        sourcePath = arguments[2]
+                        sourcePath = compilerArguments[2]
                     }
                 }
             } else {
-                if arguments.length == 4 {
-                    if arguments[2] == "-o" {
-                        sourcePath = arguments[1]
-                        outputPath = arguments[3]
+                if compilerArguments.length == 4 {
+                    if compilerArguments[2] == "-o" {
+                        sourcePath = compilerArguments[1]
+                        outputPath = compilerArguments[3]
                     }
                 } else {
-                    if arguments.length == 5 {
-                        if arguments[1] == "--emit-object" && arguments[3] == "-o" {
-                            emitObjectOnly = true; sourcePath = arguments[2]; outputPath = arguments[4]
+                    if compilerArguments.length == 5 {
+                        if compilerArguments[1] == "--emit-object" && compilerArguments[3] == "-o" {
+                            emitObjectOnly = true; sourcePath = compilerArguments[2]; outputPath = compilerArguments[4]
                         }
                     }
                 }
@@ -73,7 +92,7 @@ entry {{
             Diagnostics.write(graph.diagnostics)
             return 65
         }
-        local cache = new CompilerCache.Cache()
+        local cache = new CompilerCache.Cache(optimizationLevel)
         if outputPath != null && cache.enabled() {
             local cached = cache.load(graph)
             if cached != null {
@@ -98,7 +117,7 @@ entry {{
         local generator = new Ir.Generator(analysis)
         local ir = generator.generate()
         local irPass = new IrValidation.Pass()
-        local irErrors = irPass.prepare(ir)
+        local irErrors = irPass.prepare(ir, optimizationLevel == 1)
         if irErrors.length > 0 {
             local errorIndex:i64 = 0
             while errorIndex < irErrors.length {
@@ -114,7 +133,7 @@ entry {{
             System.write(normalizer.format(ir))
             return 0
         }
-        local backend = new X86_64.Backend(ir)
+        local backend = new X86_64.Backend(ir, optimizationLevel)
         local runtimeErrors = backend.validateRuntime()
         if runtimeErrors.length > 0 {
             local runtimeErrorIndex:i64 = 0
@@ -203,6 +222,7 @@ entry {{
 
     writeUsage() -> void {
         System.write("usage:\n")
+        System.write("  optimization: -O0 (no optional optimization), -O1 (default)\n")
         System.write("  valen <source-file>\n")
         System.write("  valen <source-file> -o <executable>\n")
         System.write("  valen --check <source-file>\n")

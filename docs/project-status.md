@@ -71,7 +71,7 @@ and embedded targets.
 - Primitive SSA temporaries use conservative linear-scan allocation across `r12`-`r15`, with stack spills and GC-visible managed references.
 - IR canonicalization folds integer/boolean constants, simplifies constant branches, removes unreachable blocks, and eliminates unused pure SSA values without suppressing runtime traps or state changes.
 - Integer instruction selection uses signed 32-bit immediates for arithmetic, bitwise, shift, and comparison operations; generated-function peepholes remove redundant moves and neutral operations.
-- **WIP:** optimization levels with predictable semantics
+- `-O0` performs only mandatory IR cleanup and validation; `-O1` is the default and enables constant folding, dead/unreachable elimination, register allocation, immediate selection, and peepholes. Unsupported levels are rejected.
 - Generation 0 and the self-hosted compiler emit ELF64 relocatable objects without a system assembler.
 - **WIP:** an integrated linker
 - Repeatable compiler and generated-code benchmarks report compile time, memory, executable size, and runtime speed; expanding the workload corpus remains **WIP**.

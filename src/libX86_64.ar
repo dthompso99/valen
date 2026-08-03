@@ -96,8 +96,9 @@ library X86_64 {{
         member usesPrint:bool
         member usesWrite:bool
         member usesWriteError:bool
+        member optimize:bool
 
-        __(program:Ir.Program) -> void {
+        __(program:Ir.Program, optimizationLevel:i64=1) -> void {
             self.program = program
             self.writer = new Writer()
             self.functionSymbols = new Array<FunctionSymbol>(0)
@@ -113,6 +114,7 @@ library X86_64 {{
             self.usesPrint = false
             self.usesWrite = false
             self.usesWriteError = false
+            self.optimize = optimizationLevel == 1
         }
 
         generate() -> string {
@@ -127,7 +129,7 @@ library X86_64 {{
                 index = index + 1
             }
             if self.hasRuntime("valen_Operations_threadStart") { self.writer.line(".extern pthread_create"); self.writer.line(".extern pthread_join") }
-            self.writer.optimize = true
+            self.writer.optimize = self.optimize
             index = 0
             while index < self.program.functions.length {
                 self.generateFunction(self.program.functions[index])
@@ -370,8 +372,9 @@ library X86_64 {{
         generateFunction(function:Ir.Function) -> void {
             self.currentFunctionSymbol = self.functionSymbol(function.name)
             self.slots = new Array<Slot>(0)
-            self.selectImmediateConstants(function)
-            self.allocateRegisters(function)
+            self.immediates = new Array<Immediate>(0)
+            self.allocations = new Array<Allocation>(0)
+            if self.optimize { self.selectImmediateConstants(function); self.allocateRegisters(function) }
             local parameterIndex:i64 = 0
             while parameterIndex < function.parameters.length {
                 self.reserve("name:" + function.parameters[parameterIndex].name, function.parameters[parameterIndex].typeName)

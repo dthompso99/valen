@@ -3,8 +3,10 @@ import {prepareIr} from './ir-validation.js';
 const argumentRegisters = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9'];
 
 export class X86_64Backend {
-    generate(program) {
-        prepareIr(program);
+    generate(program, {optimizationLevel = 1} = {}) {
+        if (![0, 1].includes(optimizationLevel)) throw new Error(`Unsupported optimization level '-O${optimizationLevel}'`);
+        this.optimize = optimizationLevel === 1;
+        prepareIr(program, {optimize: this.optimize});
         this.program = program;
         this.functionSymbols = new Map();
         this.fieldOffsets = new Map();
@@ -309,8 +311,8 @@ export class X86_64Backend {
     generateFunction(fn) {
         this.fn = fn;
         this.slots = new Map();
-        this.immediates = this.selectImmediateConstants(fn);
-        this.registers = this.allocateRegisters(fn);
+        this.immediates = this.optimize ? this.selectImmediateConstants(fn) : new Map();
+        this.registers = this.optimize ? this.allocateRegisters(fn) : new Map();
         const slotTypes = new Map();
         let slotCount = 0;
         const reserve = (key, type = null) => {
@@ -370,7 +372,7 @@ export class X86_64Backend {
             `${rootTraceLabel}:`, '    push rbx', '    mov rbx, rdi');
         for (const [key] of roots) lines.push(`    mov rdi, QWORD PTR [rbx-${this.slots.get(key)}]`, '    call valen_gc_mark');
         lines.push('    pop rbx', '    ret', '');
-        return this.peephole(lines);
+        return this.optimize ? this.peephole(lines) : lines;
     }
 
     selectImmediateConstants(fn) {

@@ -489,6 +489,21 @@ test('instruction selection uses immediate operands and removes redundant moves'
     assert.doesNotMatch(assembly, /^    mov (r(?:ax|bx|cx|dx|si|di|bp|sp|8|9|1[0-5])), \1$/m);
 });
 
+test('optimization levels make O0 conservative and O1 predictably optimized', () => {
+    const source = `entry {{
+        calculate(value:i64) -> i64 { return (value + 7) * 3 }
+        __() -> i64 { return self.calculate(5) }
+    }}`;
+    const analyze = () => new SemanticAnalyzer().analyze(new Parser().parse(source, 'optimization-levels.ar'));
+    const unoptimized = new X86_64Backend().generate(new IrGenerator().generate(analyze()), {optimizationLevel: 0});
+    const optimized = new X86_64Backend().generate(new IrGenerator().generate(analyze()), {optimizationLevel: 1});
+    assert.doesNotMatch(unoptimized, /add rax, 7/);
+    assert.doesNotMatch(unoptimized, /imul rax, 3/);
+    assert.match(optimized, /add rax, 7/);
+    assert.match(optimized, /imul rax, 3/);
+    assert.throws(() => new X86_64Backend().generate(new IrGenerator().generate(analyze()), {optimizationLevel: 2}), /Unsupported optimization level/);
+});
+
 test('contract dispatch preserves register and stack arguments', () => {
     const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/abi-contract-arguments.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});

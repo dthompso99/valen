@@ -98,7 +98,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 - [x] Add dead-block, dead-value, and constant-folding passes
 - [x] Add register allocation
 - [x] Add instruction selection and peephole optimization
-- [ ] Add optimization-level flags with predictable semantics
+- [x] Add optimization-level flags with predictable semantics
 - [x] Measure compile time, peak memory, executable size, and runtime performance
 - [ ] Emit ELF objects directly without requiring the system assembler
 - [ ] Add an integrated linker only after object emission is stable

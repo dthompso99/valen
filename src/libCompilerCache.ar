@@ -16,8 +16,10 @@ library CompilerCache {{
     Cache {{
         member directory:string?
         member trace:bool
+        member optimizationLevel:i64
 
-        __() -> void {
+        __(optimizationLevel:i64=1) -> void {
+            self.optimizationLevel = optimizationLevel
             self.directory = System.environmentVariable("VALEN_CACHE_PATH")
             if self.directory == null { self.directory = System.environmentVariable("ARGON_CACHE_PATH") }
             local traceValue = System.environmentVariable("VALEN_CACHE_TRACE")
@@ -91,7 +93,7 @@ library CompilerCache {{
 
         fingerprint(graph:ModuleLoading.ModuleGraph) -> i64 {
             local value:i64 = 1469598103934665603
-            value = self.mix(value, "valen-cache-v1:x86_64-linux")
+            value = self.mix(value, "valen-cache-v1:x86_64-linux:O" + self.optimizationLevel.toString())
             local index:i64 = 0
             while index < graph.modules.length {
                 local module = graph.modules[index]

@@ -10,12 +10,12 @@ library IrValidation {{
     }}
 
     Pass {{
-        prepare(program:Ir.Program) -> Array<string> {
-            self.canonicalize(program)
+        prepare(program:Ir.Program, optimize:bool=true) -> Array<string> {
+            self.canonicalize(program, optimize)
             return self.validate(program)
         }
 
-        canonicalize(program:Ir.Program) -> void {
+        canonicalize(program:Ir.Program, optimize:bool=true) -> void {
             local functionIndex:i64 = 0
             while functionIndex < program.functions.length {
                 local functionNode = program.functions[functionIndex]
@@ -37,9 +37,11 @@ library IrValidation {{
                     block.instructions = instructions
                     blockIndex = blockIndex + 1
                 }
-                self.foldConstants(functionNode)
-                self.removeUnreachable(functionNode)
-                self.removeDeadValues(functionNode)
+                if optimize {
+                    self.foldConstants(functionNode)
+                    self.removeUnreachable(functionNode)
+                    self.removeDeadValues(functionNode)
+                }
                 functionIndex = functionIndex + 1
             }
         }

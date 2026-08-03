@@ -52,7 +52,7 @@ provider, not the removal of hosted linking. Generation 0 can stop after object 
 The self-hosted compiler can stop at the same boundary with
 `valen --emit-object <source> -o <output.o>`.
 
-An integrated linker and optimization levels are **WIP**. Primitive SSA temporaries currently use conservative linear-scan register allocation with stack spills.
+`-O0` retains mandatory IR cleanup and validation while disabling optional optimizations. `-O1` is the default and enables constant folding, dead/unreachable elimination, conservative linear-scan register allocation, immediate selection, and peepholes. Unsupported levels are rejected instead of silently aliasing another mode. An integrated linker remains **WIP**.
 
 ## Repository map
 

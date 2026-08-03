@@ -18,20 +18,22 @@ export class IrValidationError extends Error {
 }
 
 export class IrCanonicalizer {
-    run(program) {
-        for (const fn of program.functions) this.canonicalizeFunction(fn);
+    run(program, {optimize = true} = {}) {
+        for (const fn of program.functions) this.canonicalizeFunction(fn, optimize);
         return program;
     }
 
-    canonicalizeFunction(fn) {
+    canonicalizeFunction(fn, optimize = true) {
         for (const block of fn.blocks) {
             const terminal = block.instructions.findIndex(instruction => terminators.has(instruction.op));
             if (terminal >= 0) block.instructions.length = terminal + 1;
             if (terminal < 0 && fn.returnType === 'void') block.instructions.push({op: 'return'});
         }
-        this.foldConstants(fn);
-        this.removeUnreachable(fn);
-        this.removeDeadValues(fn);
+        if (optimize) {
+            this.foldConstants(fn);
+            this.removeUnreachable(fn);
+            this.removeDeadValues(fn);
+        }
     }
 
     foldConstants(fn) {
@@ -255,7 +257,7 @@ export class IrValidator {
     }
 }
 
-export function prepareIr(program) {
-    new IrCanonicalizer().run(program);
+export function prepareIr(program, {optimize = true} = {}) {
+    new IrCanonicalizer().run(program, {optimize});
     return new IrValidator().validate(program);
 }
