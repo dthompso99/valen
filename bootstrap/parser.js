@@ -48,6 +48,7 @@ export class Parser {
         while (!this.check('EOF')) {
             if (this.check('IMPORT')) imports.push(this.parseImport());
             else if (this.check('LIBRARY')) libraries.push(this.parseLibrary());
+            else if (this.check('TEST')) libraries.push(this.parseTest());
             else objects.push(this.parseObject());
             this.skipSeparators();
         }
@@ -98,6 +99,24 @@ export class Parser {
         this.consume('RIGHT_BRACE', `Expected '}}' after library ${name.value}`);
         const end = this.consume('RIGHT_BRACE', `Expected '}}' after library ${name.value}`);
         return new LibraryDeclaration(name.value, members, this.span(start, end));
+    }
+
+    parseTest() {
+        const start = this.consume('TEST', "Expected 'test'");
+        const name = this.consume('IDENTIFIER', 'Expected a test suite name');
+        this.consume('LEFT_BRACE', `Expected '{{' after test suite ${name.value}`);
+        this.consume('LEFT_BRACE', `Expected '{{' after test suite ${name.value}`);
+        const members = [];
+        this.skipSeparators();
+        while (!(this.check('RIGHT_BRACE') && this.peek(1).type === 'RIGHT_BRACE') && !this.check('EOF')) {
+            members.push(this.parseMethod(false));
+            this.skipSeparators();
+        }
+        this.consume('RIGHT_BRACE', `Expected '}}' after test suite ${name.value}`);
+        const end = this.consume('RIGHT_BRACE', `Expected '}}' after test suite ${name.value}`);
+        const declaration = new LibraryDeclaration(name.value, members, this.span(start, end));
+        declaration.isTest = true;
+        return declaration;
     }
 
     parseObject(visibility = 'public') {

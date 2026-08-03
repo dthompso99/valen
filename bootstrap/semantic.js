@@ -281,6 +281,10 @@ export class SemanticAnalyzer {
                 ownership: parameter.owning ? 'owned' : 'borrowed',
                 owner: method
             }));
+            if (object.declaration.isTest) {
+                if (method.parameters.length) this.report(method.declaration.span, `Test '${method.qualifiedName}' cannot declare parameters`);
+                if (method.returnType !== VOID) this.report(method.declaration.returnType.span, `Test '${method.qualifiedName}' must return void`);
+            }
             let sawDefault = false;
             for (const parameter of method.parameters) {
                 if (parameter.owning && !this.isOwnedReferenceType(parameter.type)) {
@@ -978,6 +982,16 @@ export class SemanticAnalyzer {
                 break;
             }
             case 'CallExpression': {
+                if (expression.callee.kind === 'IdentifierExpression' && expression.callee.name === 'expect') {
+                    const argumentTypes = expression.arguments.map(argument => this.analyzeExpression(argument, scope, object));
+                    if (!this.currentMethod?.owner?.declaration?.isTest) this.report(expression.span, "'expect' is only available inside a test suite");
+                    if (argumentTypes.length !== 1) this.report(expression.span, "'expect' requires exactly one argument");
+                    else this.requireAssignable(argumentTypes[0], BOOL, expression.arguments[0].span, expression.arguments[0]);
+                    symbol = {kind: 'TestExpect', name: 'expect', type: VOID, returnType: VOID};
+                    this.annotate(expression.callee, VOID, symbol);
+                    type = VOID;
+                    break;
+                }
                 if (expression.callee.kind === 'MemberExpression' &&
                     expression.callee.object.kind === 'IdentifierExpression' &&
                     expression.callee.object.name === 'super') {

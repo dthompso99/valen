@@ -35,6 +35,9 @@ export class IrGenerator {
             }
         }
 
+        const tests = programs.flatMap(program => program.libraries.filter(declaration => declaration.isTest));
+        if (tests.length) this.lowerTestRunner(tests);
+
         return this.program;
     }
 
@@ -509,6 +512,11 @@ export class IrGenerator {
             if (argument.ownership === 'consume') this.consumeLifetime(argument);
         }
 
+        if (method.kind === 'TestExpect') {
+            this.emit('test_expect', {condition: args[0]});
+            return {kind: 'void', type: 'void'};
+        }
+
         if (method.kind === 'SuperCall') {
             if (method.constructor) {
                 args.unshift({kind: 'parameter', name: 'self', type: method.owner.type});
@@ -584,6 +592,24 @@ export class IrGenerator {
             return {kind: 'void', type: 'void'};
         }
         return this.result(op, expression.inferredType, fields);
+    }
+
+    lowerTestRunner(tests) {
+        const owner = '$argon.test.runner';
+        this.program.types.push({kind: 'IrType', name: owner, displayName: owner, base: null, virtualMethods: [], contracts: [], initializer: null, fields: []});
+        const instructions = [];
+        for (const suite of tests) {
+            for (const method of suite.members.filter(member => member.kind === 'MethodDeclaration')) {
+                instructions.push({op: 'call', target: this.functionName(method.semanticSymbol), arguments: []});
+            }
+        }
+        instructions.push({op: 'test_failures', result: '%0', type: 'i64'});
+        instructions.push({op: 'return', value: {kind: 'temporary', name: '%0', type: 'i64'}});
+        const runner = {kind: 'IrFunction', name: '$argon.test.run', displayName: '$argon.test.run', owner,
+            parameters: [{name: 'self', type: owner}], returnType: 'i64',
+            blocks: [{label: 'entry', instructions}], temporaryCount: 1, localCount: 0};
+        this.program.functions.push(runner);
+        this.program.entry = runner.name;
     }
 
     lowerNew(expression) {

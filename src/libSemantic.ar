@@ -869,6 +869,12 @@ library Semantics {{
 
         analyzeMethod(method:Ast.MemberDeclaration, owner:Symbols.Symbol, moduleScope:Symbols.Scope) -> void {
             if method.isUnsafe && !method.isNative { self.error(method.span, "Only native library methods may be declared 'unsafe'") }
+            if owner.kind == "Test" {
+                if method.name == "__" { self.error(method.span, "Test suites cannot declare constructors") }
+                if method.isNative { self.error(method.span, "Tests cannot be native") }
+                if method.parameters.length > 0 { self.error(method.span, "Tests cannot declare parameters") }
+                if method.symbol!.returnType! != "void" { self.error(method.span, "Tests must return void") }
+            }
             local defaultIndex:i64 = 0
             while defaultIndex < method.parameters.length {
                 if method.parameters[defaultIndex].defaultValue != null {
@@ -1023,6 +1029,21 @@ library Semantics {{
                 return self.typed(expression, foundMember!.returnType!)
             }
             if expression.kind == "Call" {
+                if expression.left!.kind == "Identifier" {
+                    if expression.left!.name! == "expect" {
+                        if self.currentOwner == null || self.currentOwner!.kind != "Test" { self.error(expression.span, "'expect' is only available inside a test suite") }
+                        if expression.arguments.length != 1 {
+                            self.error(expression.span, "'expect' requires exactly one argument")
+                        } else {
+                            local conditionType = self.analyzeExpression(expression.arguments[0], scope, moduleScope)
+                            self.requireCompatible("bool", conditionType, expression.arguments[0].span)
+                        }
+                        local expectSymbol = new Symbols.Symbol("TestExpect", "expect", "expect", expression.span)
+                        expectSymbol.returnType = "void"
+                        expression.left!.symbol = expectSymbol
+                        return self.typed(expression, "void")
+                    }
+                }
                 if expression.left!.kind == "Member" {
                     if expression.left!.left!.kind == "Identifier" {
                         if expression.left!.left!.name! == "super" { return self.analyzeSuperMethodCall(expression, scope, moduleScope) }

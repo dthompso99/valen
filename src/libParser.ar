@@ -27,7 +27,7 @@ library Parsing {{
                     if self.check("LIBRARY") {
                         declarations.append(self.parseDeclaration("Library"))
                     } else {
-                        declarations.append(self.parseDeclaration("Object"))
+                        if self.check("TEST") { declarations.append(self.parseDeclaration("Test")) } else { declarations.append(self.parseDeclaration("Object")) }
                     }
                 }
                 self.skipSeparators()
@@ -46,6 +46,7 @@ library Parsing {{
         parseDeclaration(kind:string) -> Ast.Declaration {
             local start = self.peek(0)
             if kind == "Library" { start = self.consume("LIBRARY", "Expected 'library'") }
+            if kind == "Test" { start = self.consume("TEST", "Expected 'test'") }
             local name = self.consume("IDENTIFIER", "Expected a declaration name")
             local typeParameters = new Array<string>(0)
             if kind == "Object" {
@@ -70,7 +71,7 @@ library Parsing {{
             self.skipSeparators()
             while !self.atDeclarationEnd() {
                 if self.error != null { break }
-                members.append(self.parseMember(kind == "Library"))
+                members.append(self.parseMember(kind == "Library" || kind == "Test"))
                 self.skipSeparators()
             }
             self.consume("RIGHT_BRACE", "Expected '}}' after declaration")

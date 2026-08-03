@@ -1,0 +1,9 @@
+test arithmetic {{
+    addition() -> void {
+        expect(2 + 2 == 4)
+    }
+
+    inequality() -> void {
+        expect(7 != 3)
+    }
+}}

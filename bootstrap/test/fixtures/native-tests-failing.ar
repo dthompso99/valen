@@ -1,0 +1,5 @@
+test arithmetic {{
+    failure() -> void {
+        expect(2 + 2 == 5)
+    }
+}}

@@ -808,6 +808,26 @@ test('optional propagation is restricted to optional-returning methods', () => {
     assert.match(result.diagnostics[0].message, /enclosing method to return an optional type/);
 });
 
+test('test suites lower expectations into a native failure-counting runner', () => {
+    const source = `test arithmetic {{
+        passing() -> void { expect(2 + 2 == 4) }
+        failing() -> void { expect(2 + 2 == 5) }
+    }}`;
+    const semantic = new SemanticAnalyzer().analyze(new Parser().parse(source, 'tests.ar'));
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    assert.equal(ir.entry, '$argon.test.run');
+    assert.equal(ir.functions.filter(fn => fn.name.startsWith('arithmetic.')).length, 2);
+    assert.ok(ir.functions.flatMap(fn => fn.blocks).flatMap(block => block.instructions).some(instruction => instruction.op === 'test_expect'));
+    assert.match(new X86_64Backend().generate(ir), /argon_test_failures/);
+});
+
+test('expect is rejected outside test suites', () => {
+    const result = new SemanticAnalyzer().analyze(new Parser().parse('entry {{ __() -> void { expect(true) } }}', 'invalid-expect.ar'));
+    assert.equal(result.success, false);
+    assert.match(result.diagnostics[0].message, /only available inside a test suite/);
+});
+
 test('generated primitive executable returns success', t => {
     const semantic = new SemanticAnalyzer().analyze(new Parser().parse(primitiveProgram, 'primitives.ar'));
     const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));

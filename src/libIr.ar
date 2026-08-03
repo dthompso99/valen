@@ -274,7 +274,52 @@ library Ir {{
                 }
                 moduleIndex = moduleIndex + 1
             }
+            self.lowerTestRunner()
             return self.program
+        }
+
+        lowerTestRunner() -> void {
+            local testCount:i64 = 0
+            local moduleIndex:i64 = 0
+            while moduleIndex < self.analysis.graph.modules.length {
+                local declarations = self.analysis.graph.modules[moduleIndex].program.declarations
+                local index:i64 = 0
+                while index < declarations.length { if declarations[index].kind == "Test" { testCount = testCount + 1 }; index = index + 1 }
+                moduleIndex = moduleIndex + 1
+            }
+            if testCount == 0 { return }
+            local owner = "$argon.test.runner"
+            self.program.types.append(new Type(owner, owner))
+            self.beginFunction("$argon.test.run", "$argon.test.run", owner, "i64")
+            self.currentFunction!.parameters.append(new Parameter("self", owner))
+            moduleIndex = 0
+            while moduleIndex < self.analysis.graph.modules.length {
+                local declarations = self.analysis.graph.modules[moduleIndex].program.declarations
+                local declarationIndex:i64 = 0
+                while declarationIndex < declarations.length {
+                    local declaration = declarations[declarationIndex]
+                    if declaration.kind == "Test" {
+                        local memberIndex:i64 = 0
+                        while memberIndex < declaration.members.length {
+                            local method = declaration.members[memberIndex]
+                            if method.kind == "Method" {
+                                local call = new Instruction("call")
+                                call.target = method.symbol!.qualifiedName
+                                self.emit(call)
+                            }
+                            memberIndex = memberIndex + 1
+                        }
+                    }
+                    declarationIndex = declarationIndex + 1
+                }
+                moduleIndex = moduleIndex + 1
+            }
+            local failures = self.temporary("test_failures", "i64")
+            local returned = new Instruction("return")
+            returned.first = failures.result
+            self.emit(returned)
+            self.program.entry = "$argon.test.run"
+            self.finishFunction()
         }
 
         declareContainer(declaration:Ast.Declaration) -> void {
@@ -817,6 +862,14 @@ library Ir {{
             local name = ""
             if callee.kind == "Member" { name = callee.name! }
             if callee.symbol != null { name = callee.symbol!.name }
+            if callee.symbol != null {
+                if callee.symbol!.kind == "TestExpect" {
+                    local expectation = new Instruction("test_expect")
+                    expectation.first = self.lowerExpression(expression.arguments[0])
+                    self.emit(expectation)
+                    return new Value("void", "", "void")
+                }
+            }
             if callee.symbol != null {
                 if callee.symbol!.kind == "Super" {
                     local superCall = new Instruction("call")

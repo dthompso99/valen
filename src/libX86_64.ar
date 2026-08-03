@@ -105,6 +105,10 @@ library X86_64 {{
             self.stringData()
             self.runtimeData()
             self.typeData()
+            self.writer.line(".section .rodata")
+            self.writer.line("argon_test_failure_message:")
+            self.writer.line("    .byte 116,101,115,116,32,102,97,105,108,101,100,10")
+            self.writer.line(".comm argon_test_failures,8,8")
             self.writer.line(".section .note.GNU-stack,\"\",@progbits")
             return self.writer.build()
         }
@@ -492,6 +496,26 @@ library X86_64 {{
             if op == "call" { self.generateCall(instruction); return }
             if op == "virtual_call" { self.generateVirtualCall(instruction); return }
             if op == "contract_call" { self.generateContractCall(instruction); return }
+            if op == "test_expect" {
+                self.load(instruction.first!, "rax")
+                local label = self.nextLabel
+                self.nextLabel = self.nextLabel + 1
+                self.writer.line("    test rax, rax")
+                self.writer.line("    jnz .Ltest_pass_" + label.toString())
+                self.writer.line("    inc QWORD PTR [rip+argon_test_failures]")
+                self.writer.line("    mov eax, 1")
+                self.writer.line("    mov edi, 2")
+                self.writer.line("    lea rsi, [rip+argon_test_failure_message]")
+                self.writer.line("    mov edx, 12")
+                self.writer.line("    syscall")
+                self.writer.line(".Ltest_pass_" + label.toString() + ":")
+                return
+            }
+            if op == "test_failures" {
+                self.writer.line("    mov rax, QWORD PTR [rip+argon_test_failures]")
+                self.storeResult(instruction, "rax")
+                return
+            }
             if op == "type_test" || op == "checked_cast" {
                 local label = self.nextLabel
                 self.nextLabel = self.nextLabel + 1

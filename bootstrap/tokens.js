@@ -39,6 +39,7 @@ export const Tokens = [
     {type: 'MEMBER', value: 'member'},
     {type: 'LOCAL', value: 'local'},
     {type: 'LIBRARY', value: 'library'},
+    {type: 'TEST', value: 'test'},
     {type: 'NATIVE', value: 'native'},
     {type: 'UNSAFE', value: 'unsafe'},
     {type: 'PUBLIC', value: 'public'},

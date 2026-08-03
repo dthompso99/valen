@@ -103,6 +103,10 @@ export class X86_64Backend {
         lines.push(...this.stringData());
         lines.push(...this.typeData());
         lines.push(...this.gcData());
+        if (program.functions.some(fn => fn.name === '$argon.test.run')) {
+            lines.push('.section .rodata', 'argon_test_failure_message:', '    .ascii "test failed\\n"',
+                '.bss', '.align 8', 'argon_test_failures:', '    .zero 8', '.text');
+        }
         if (this.needsProcessArguments) lines.push(...this.processData());
         if (this.needsFilesystemState) lines.push(...this.filesystemData());
         lines.push('.section .note.GNU-stack,"",@progbits');
@@ -363,6 +367,14 @@ export class X86_64Backend {
                 break;
             case 'contract_call':
                 lines.push(...this.contractCall(instruction));
+                break;
+            case 'test_expect':
+                lines.push(...this.load(instruction.condition, 'rax'), '    test rax, rax', '    jnz 1f',
+                    '    inc QWORD PTR [rip+argon_test_failures]', '    mov eax, 1', '    mov edi, 2',
+                    '    lea rsi, [rip+argon_test_failure_message]', '    mov edx, 12', '    syscall', '1:');
+                break;
+            case 'test_failures':
+                lines.push('    mov rax, QWORD PTR [rip+argon_test_failures]', `    mov ${this.temp(instruction.result)}, rax`);
                 break;
             case 'type_test':
             case 'checked_cast': {
