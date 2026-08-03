@@ -30,6 +30,13 @@ source -> tokens -> AST -> module graph -> semantic symbols
 - Validation rejects malformed IR before backend generation.
 - The x86-64 backend emits assembly; the system C toolchain assembles and links it.
 
+Native executable builds can reuse validated backend artifacts by setting
+`ARGON_CACHE_PATH` to an existing writable directory. Cache keys include every loaded module's
+canonical path and source text plus the cache format and target. A changed entry point or
+dependency therefore produces a cold build; a matching build skips semantic analysis, IR
+lowering and validation, and backend generation. Set `ARGON_CACHE_TRACE=1` to report cache hits,
+misses, and writes. Missing, unwritable, or invalid entries fall back to an ordinary build.
+
 Direct object-file emission, an integrated linker, register allocation, and optimization levels are **WIP**.
 
 ## Repository map

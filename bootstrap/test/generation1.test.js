@@ -28,6 +28,51 @@ test('generation 1 passes the native compiler conformance suite', async t => {
         const compilerDynamic = spawnSync('readelf', ['-d', compilerPath], {encoding: 'utf8'});
         assert.equal(compilerDynamic.status, 0, compilerDynamic.stderr);
         assert.doesNotMatch(compilerDynamic.stdout, /NEEDED/, 'generation 1 unexpectedly requires a shared library');
+
+        await t.test('native compiler cache hits, invalidates, and preserves foreign libraries', () => {
+            const cachePath = path.join(directory, 'cache');
+            fs.mkdirSync(cachePath);
+            const cacheEnvironment = {...environment, ARGON_CACHE_PATH: cachePath, ARGON_CACHE_TRACE: '1'};
+            const sourcePath = path.join(directory, 'cached.ar');
+            const writeProgram = status => fs.writeFileSync(sourcePath, `entry {{ __() -> i32 { return ${status} } }}\n`);
+            const compile = (source, name) => spawnSync(compilerPath, [source, '-o', path.join(directory, name)], {
+                encoding: 'utf8', env: cacheEnvironment, cwd: projectRoot
+            });
+
+            writeProgram(0);
+            const cold = compile(sourcePath, 'cache-cold');
+            assert.equal(cold.status, 0, cold.stderr);
+            assert.match(cold.stderr, /argon: cache miss/);
+            assert.match(cold.stderr, /argon: cache stored/);
+
+            const warm = compile(sourcePath, 'cache-warm');
+            assert.equal(warm.status, 0, warm.stderr);
+            assert.match(warm.stderr, /argon: cache hit/);
+            assert.equal(spawnSync(path.join(directory, 'cache-warm')).status, 0);
+
+            const [cacheEntry] = fs.readdirSync(cachePath);
+            fs.writeFileSync(path.join(cachePath, cacheEntry), 'not an Argon cache artifact');
+            const recovered = compile(sourcePath, 'cache-recovered');
+            assert.equal(recovered.status, 0, recovered.stderr);
+            assert.match(recovered.stderr, /argon: cache invalid/);
+            assert.match(recovered.stderr, /argon: cache stored/);
+            assert.equal(spawnSync(path.join(directory, 'cache-recovered')).status, 0);
+
+            writeProgram(7);
+            const changed = compile(sourcePath, 'cache-changed');
+            assert.equal(changed.status, 0, changed.stderr);
+            assert.match(changed.stderr, /argon: cache miss/);
+            assert.equal(spawnSync(path.join(directory, 'cache-changed')).status, 7);
+
+            const foreignSource = path.join(projectRoot, 'bootstrap/test/fixtures/foreign-libc.ar');
+            const foreignCold = compile(foreignSource, 'cache-foreign-cold');
+            assert.equal(foreignCold.status, 0, foreignCold.stderr);
+            const foreignWarm = compile(foreignSource, 'cache-foreign-warm');
+            assert.equal(foreignWarm.status, 0, foreignWarm.stderr);
+            assert.match(foreignWarm.stderr, /argon: cache hit/);
+            assert.equal(spawnSync(path.join(directory, 'cache-foreign-warm')).status, 0);
+        });
+
         let sequence = 0;
         for (const fixture of validPrograms) {
             await t.test(fixture.name, () => {

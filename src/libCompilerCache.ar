@@ -1,0 +1,139 @@
+import System from 'libSystem.ar'
+import Compiler from 'libCompiler.ar'
+import ModuleLoading from 'libModuleLoader.ar'
+
+library CompilerCache {{
+    Artifact {{
+        member assembly:string
+        member libraries:Array<string>
+
+        __(assembly:string, libraries:Array<string>) -> void {
+            self.assembly = assembly
+            self.libraries = libraries
+        }
+    }}
+
+    Cache {{
+        member directory:string?
+        member trace:bool
+
+        __() -> void {
+            self.directory = System.environmentVariable("ARGON_CACHE_PATH")
+            self.trace = System.environmentVariable("ARGON_CACHE_TRACE") != null
+        }
+
+        enabled() -> bool {
+            return self.directory != null
+        }
+
+        path(graph:ModuleLoading.ModuleGraph) -> string? {
+            if self.directory == null { return null }
+            return self.directory! + "/x86_64-linux-" + self.fingerprint(graph).toString() + ".cache"
+        }
+
+        load(graph:ModuleLoading.ModuleGraph) -> Artifact? {
+            local cachePath = self.path(graph)
+            if cachePath == null { return null }
+            local source = Compiler.loadSource(cachePath!)
+            if source == null {
+                self.log("miss", cachePath!)
+                return null
+            }
+            local content = source!.content
+            local header = "ARGON-CACHE-1\n"
+            local footer = "\nARGON-CACHE-END\n"
+            if content.length < header.length + footer.length || content.slice(0, header.length) != header || content.slice(content.length - footer.length, footer.length) != footer {
+                self.log("invalid", cachePath!)
+                return null
+            }
+            local lineEnd = self.findByte(content, header.length, 10)
+            if lineEnd < 0 {
+                self.log("invalid", cachePath!)
+                return null
+            }
+            local libraries = new Array<string>(0)
+            self.parseLibraries(content.slice(header.length, lineEnd - header.length), libraries)
+            self.log("hit", cachePath!)
+            return new Artifact(content.slice(lineEnd + 1, content.length - footer.length - lineEnd - 1), libraries)
+        }
+
+        store(graph:ModuleLoading.ModuleGraph, assembly:string, libraries:Array<string>) -> void {
+            local cachePath = self.path(graph)
+            if cachePath == null { return }
+            local output = System.openWrite(cachePath!)
+            if output == null {
+                self.log("write skipped", cachePath!)
+                return
+            }
+            local builder = new StringBuilder()
+            builder.append("ARGON-CACHE-1\n")
+            local index:i64 = 0
+            while index < libraries.length {
+                if index > 0 { builder.append(",") }
+                builder.append(libraries[index])
+                index = index + 1
+            }
+            builder.append("\n")
+            builder.append(assembly)
+            builder.append("\nARGON-CACHE-END\n")
+            local content = builder.build()
+            local written = System.writeFile(output!, content)
+            local closeResult = System.close(output!)
+            if written == content.length && closeResult == 0 {
+                self.log("stored", cachePath!)
+            } else {
+                self.log("write failed", cachePath!)
+            }
+        }
+
+        fingerprint(graph:ModuleLoading.ModuleGraph) -> i64 {
+            local value:i64 = 1469598103934665603
+            value = self.mix(value, "argon-cache-v1:x86_64-linux")
+            local index:i64 = 0
+            while index < graph.modules.length {
+                local module = graph.modules[index]
+                value = self.mix(value, module.path)
+                value = self.mix(value, module.source.content)
+                index = index + 1
+            }
+            return value
+        }
+
+        mix(initial:i64, input:string) -> i64 {
+            local value = initial
+            local index:i64 = 0
+            value = value * 1099511628211 + input.length
+            while index < input.length {
+                value = value * 1099511628211 + (input[index] as i64)
+                index = index + 1
+            }
+            return value
+        }
+
+        parseLibraries(line:string, output:Array<string>) -> void {
+            local start:i64 = 0
+            local index:i64 = 0
+            while index <= line.length {
+                if index == line.length || line[index] == 44 {
+                    if index > start { output.append(line.slice(start, index - start)) }
+                    start = index + 1
+                }
+                index = index + 1
+            }
+        }
+
+        findByte(input:string, start:i64, value:u8) -> i64 {
+            local index = start
+            while index < input.length {
+                if input[index] == value { return index }
+                index = index + 1
+            }
+            return -1
+        }
+
+        log(action:string, path:string) -> void {
+            if !self.trace { return }
+            System.writeError("argon: cache " + action + " " + path + "\n")
+        }
+    }}
+}}

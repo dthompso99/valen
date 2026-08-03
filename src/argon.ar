@@ -8,6 +8,7 @@ import Semantics from 'libSemantic.ar'
 import Ir from 'libIr.ar'
 import IrValidation from 'libIrValidation.ar'
 import X86_64 from 'libX86_64.ar'
+import CompilerCache from 'libCompilerCache.ar'
 
 entry {{
     __() -> i32 {
@@ -62,6 +63,22 @@ entry {{
             Diagnostics.write(graph.diagnostics)
             return 65
         }
+        local cache = new CompilerCache.Cache()
+        if outputPath != null && cache.enabled() {
+            local cached = cache.load(graph)
+            if cached != null {
+                local cachedAssemblyPath = outputPath! + ".s"
+                if !self.writeAssembly(cachedAssemblyPath, cached!.assembly) { return 74 }
+                local cachedLinkResult = System.link(cachedAssemblyPath, outputPath!, cached!.libraries)
+                if cachedLinkResult != 0 {
+                    System.writeError("argon: linker exited with status ")
+                    System.writeError(cachedLinkResult.toString())
+                    System.writeError("\n")
+                    return 69
+                }
+                return 0
+            }
+        }
         local analyzer = new Semantics.Analyzer(graph)
         local analysis = analyzer.analyze()
         if !analysis.success() {
@@ -103,23 +120,8 @@ entry {{
         local assembly = backend.generate()
         if outputPath != null {
             local assemblyPath = outputPath! + ".s"
-            local output = System.openWrite(assemblyPath)
-            if output == null {
-                System.writeError("argon: could not open '")
-                System.writeError(assemblyPath)
-                System.writeError("' for writing; OS error ")
-                System.writeError(System.lastError().toString())
-                System.writeError("\n")
-                return 74
-            }
-            local written = System.writeFile(output!, assembly)
-            local closeResult = System.close(output!)
-            if written != assembly.length || closeResult != 0 {
-                System.writeError("argon: could not write assembly output; OS error ")
-                System.writeError(System.lastError().toString())
-                System.writeError("\n")
-                return 74
-            }
+            if !self.writeAssembly(assemblyPath, assembly) { return 74 }
+            cache.store(graph, assembly, ir.foreignLibraries)
             local linkResult = System.link(assemblyPath, outputPath!, ir.foreignLibraries)
             if linkResult != 0 {
                 System.writeError("argon: linker exited with status ")
@@ -131,6 +133,27 @@ entry {{
         }
         System.write(assembly)
         return 0
+    }
+
+    writeAssembly(path:string, assembly:string) -> bool {
+        local output = System.openWrite(path)
+        if output == null {
+            System.writeError("argon: could not open '")
+            System.writeError(path)
+            System.writeError("' for writing; OS error ")
+            System.writeError(System.lastError().toString())
+            System.writeError("\n")
+            return false
+        }
+        local written = System.writeFile(output!, assembly)
+        local closeResult = System.close(output!)
+        if written != assembly.length || closeResult != 0 {
+            System.writeError("argon: could not write assembly output; OS error ")
+            System.writeError(System.lastError().toString())
+            System.writeError("\n")
+            return false
+        }
+        return true
     }
 
     writeUsage() -> void {

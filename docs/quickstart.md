@@ -26,6 +26,13 @@ Tell the compiler where the standard source libraries live:
 export ARGON_LIBRARY_PATH="$PWD/lib"
 ```
 
+For repeat native builds, create a cache directory and opt into compiler caching:
+
+```sh
+mkdir -p .argon-cache
+export ARGON_CACHE_PATH="$PWD/.argon-cache"
+```
+
 Now compile and run an example:
 
 ```sh
