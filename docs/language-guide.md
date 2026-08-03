@@ -193,6 +193,8 @@ Store {{
 }}
 ```
 
+An owning field may likewise be passed to an `own` cleanup operation. Resource wrappers should immediately replace a consumed optional field with `null`; assigning `null` also retires an element in an owning optional array.
+
 Use `copy` for a cycle-safe structural copy:
 
 ```valen

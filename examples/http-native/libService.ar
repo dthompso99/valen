@@ -1,0 +1,154 @@
+import Network from 'libNetwork.ar'
+import EventLoop from 'libEventLoop.ar'
+import Http from 'libHttp.ar'
+
+library Service {{
+    Client {{
+        member connection:Network.Connection?
+        member input:string
+        member output:string
+        member sent:i64
+        member deadline:i64
+
+        __(own connection:Network.Connection, deadline:i64) -> void {
+            self.connection = connection
+            self.input = ""
+            self.output = ""
+            self.sent = 0
+            self.deadline = deadline
+        }
+
+        descriptor() -> i64 { return Network.connectionDescriptor(self.connection!) }
+        interest() -> i64 { if self.output.length == 0 { return 1 }; return 4 }
+        expired(now:i64) -> bool { return now >= self.deadline }
+
+        receive(maximum:i64) -> i64 {
+            local chunk = Network.receive(self.connection!, maximum)
+            if chunk == null {
+                if Network.lastError() == 11 { return 0 }
+                return -1
+            }
+            if chunk!.length == 0 {
+                if self.input.length > 0 { return 3 }
+                return -1
+            }
+            if self.input.length + chunk!.length > maximum { return 2 }
+            self.input = self.input + chunk!
+            if Http.complete(self.input) { return 1 }
+            return 0
+        }
+
+        respond(response:Http.Response, maximum:i64) -> void {
+            self.output = response.serialize()
+            if self.output.length > maximum {
+                local fallback = new Http.Response("500 Internal Server Error", "response too large\n")
+                self.output = fallback.serialize()
+            }
+            self.sent = 0
+        }
+
+        flush() -> i64 {
+            local count = self.output.length - self.sent
+            local written = Network.sendSome(self.connection!, self.output, self.sent, count)
+            if written < 0 {
+                if Network.lastError() == 11 { return 0 }
+                return -1
+            }
+            self.sent = self.sent + written
+            if self.sent == self.output.length { return 1 }
+            return 0
+        }
+
+        close() -> void {
+            if self.connection != null {
+                Network.closeConnection(self.connection!)
+                self.connection = null
+            }
+        }
+    }}
+
+    Loop {{
+        member clients:Array<Client?>
+        member timeoutMilliseconds:i64
+        member maximumRequest:i64
+        member maximumResponse:i64
+
+        __(timeoutMilliseconds:i64=300, maximumRequest:i64=4096, maximumResponse:i64=4096) -> void {
+            self.clients = new Array<Client?>(0)
+            self.timeoutMilliseconds = timeoutMilliseconds
+            self.maximumRequest = maximumRequest
+            self.maximumResponse = maximumResponse
+        }
+
+        descriptors(listener:Network.Listener) -> Array<i64> {
+            local values = new Array<i64>(0)
+            values.append(Network.listenerDescriptor(listener))
+            local index:i64 = 0
+            while index < self.clients.length {
+                if self.clients[index] != null { values.append(self.clients[index]!.descriptor()) }
+                index = index + 1
+            }
+            return values
+        }
+
+        interests() -> Array<i64> {
+            local values = new Array<i64>(0)
+            values.append(1)
+            local index:i64 = 0
+            while index < self.clients.length {
+                if self.clients[index] != null { values.append(self.clients[index]!.interest()) }
+                index = index + 1
+            }
+            return values
+        }
+
+        accept(listener:Network.Listener) -> bool {
+            local connection = Network.accept(listener)
+            if connection == null { return Network.lastError() == 11 }
+            if !Network.makeConnectionNonblocking(connection!) {
+                Network.closeConnection(connection!)
+                return false
+            }
+            local deadline = EventLoop.monotonicMilliseconds() + self.timeoutMilliseconds
+            self.clients.append(new Client(connection!, deadline))
+            return true
+        }
+
+        clientAt(active:i64) -> i64 {
+            local seen:i64 = 0
+            local index:i64 = 0
+            while index < self.clients.length {
+                if self.clients[index] != null {
+                    if seen == active { return index }
+                    seen = seen + 1
+                }
+                index = index + 1
+            }
+            return -1
+        }
+
+        close(index:i64) -> void {
+            if index >= 0 && index < self.clients.length {
+                if self.clients[index] != null {
+                    self.clients[index]!.close()
+                    self.clients[index] = null
+                }
+            }
+        }
+
+        expire(now:i64) -> i64 {
+            local expired:i64 = 0
+            local index:i64 = 0
+            while index < self.clients.length {
+                if self.clients[index] != null {
+                    if self.clients[index]!.expired(now) {
+                        self.close(index)
+                        expired = expired + 1
+                    }
+                }
+                index = index + 1
+            }
+            return expired
+        }
+    }}
+}}

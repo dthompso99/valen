@@ -160,11 +160,11 @@ library X86_64 {{
             if name == "valen_Operations_threadAvailable" || name == "valen_Operations_threadStart" || name == "valen_Operations_threadJoin" { return true }
             if name == "valen_Operations_mutexLock" || name == "valen_Operations_mutexUnlock" || name == "valen_Operations_conditionWait" { return true }
             if name == "valen_Operations_conditionNotifyOne" || name == "valen_Operations_conditionNotifyAll" || name == "valen_Operations_atomicLoad" { return true }
-            if name == "valen_Network_listen" || name == "valen_Network_accept" || name == "valen_Network_receive" || name == "valen_Network_send" { return true }
+            if name == "valen_Network_listen" || name == "valen_Network_accept" || name == "valen_Network_receive" || name == "valen_Network_send" || name == "valen_Network_sendSome" { return true }
             if name == "valen_Network_closeListener" || name == "valen_Network_closeConnection" || name == "valen_Network_lastError" { return true }
             if name == "valen_Network_listenerDescriptor" || name == "valen_Network_connectionDescriptor" { return true }
             if name == "valen_Network_makeListenerNonblocking" || name == "valen_Network_makeConnectionNonblocking" { return true }
-            if name == "valen_EventLoop_available" || name == "valen_EventLoop_wait" { return true }
+            if name == "valen_EventLoop_available" || name == "valen_EventLoop_wait" || name == "valen_EventLoop_monotonicMilliseconds" { return true }
             return name == "valen_Operations_atomicStore" || name == "valen_Operations_atomicExchange" || name == "valen_Operations_atomicCompareExchange" || name == "valen_Operations_atomicAdd"
         }
 
@@ -231,6 +231,29 @@ library X86_64 {{
             self.writer.line("    mov rdi, rbx"); self.writer.line("    lea rsi, [r12*8]"); self.writer.line("    mov eax, 11"); self.writer.line("    syscall"); self.writer.line("    mov rax, r13"); self.writer.line("    jmp .Lio_wait_done")
             self.writer.line(".Lio_wait_early:"); self.writer.line("    mov rax, -1"); self.writer.line(".Lio_wait_done:")
             self.writer.line("    pop r15"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_EventLoop_monotonicMilliseconds")
+            self.writer.line("valen_EventLoop_monotonicMilliseconds:")
+            self.writer.line("    sub rsp, 24")
+            self.writer.line("    mov eax, 228")
+            self.writer.line("    mov edi, 1")
+            self.writer.line("    mov rsi, rsp")
+            self.writer.line("    syscall")
+            self.writer.line("    test rax, rax")
+            self.writer.line("    js .Lmonotonic_error")
+            self.writer.line("    mov r8, QWORD PTR [rsp]")
+            self.writer.line("    imul r8, r8, 1000")
+            self.writer.line("    mov rax, QWORD PTR [rsp+8]")
+            self.writer.line("    cqo")
+            self.writer.line("    mov rcx, 1000000")
+            self.writer.line("    idiv rcx")
+            self.writer.line("    add rax, r8")
+            self.writer.line("    add rsp, 24")
+            self.writer.line("    ret")
+            self.writer.line(".Lmonotonic_error:")
+            self.writer.line("    mov rax, -1")
+            self.writer.line("    add rsp, 24")
+            self.writer.line("    ret")
+            self.writer.line("")
         }
 
         conditionNotifyRuntime(offset:string, count:string) -> void {
@@ -1892,6 +1915,41 @@ library X86_64 {{
             self.writer.line("    mov QWORD PTR [rip+valen_network_error], r10")
             self.writer.line("    test r9, r9")
             self.writer.line("    cmovnz rax, r9")
+            self.writer.line("    ret")
+            self.writer.line(".globl valen_Network_sendSome")
+            self.writer.line("valen_Network_sendSome:")
+            self.writer.line("    test rdx, rdx")
+            self.writer.line("    js .Lnetwork_send_some_invalid")
+            self.writer.line("    test rcx, rcx")
+            self.writer.line("    js .Lnetwork_send_some_invalid")
+            self.writer.line("    mov r8, QWORD PTR [rsi+8]")
+            self.writer.line("    cmp rdx, r8")
+            self.writer.line("    ja .Lnetwork_send_some_invalid")
+            self.writer.line("    sub r8, rdx")
+            self.writer.line("    cmp rcx, r8")
+            self.writer.line("    ja .Lnetwork_send_some_invalid")
+            self.writer.line("    mov rdi, QWORD PTR [rdi]")
+            self.writer.line("    add rdx, QWORD PTR [rsi]")
+            self.writer.line("    mov rsi, rdx")
+            self.writer.line("    mov rdx, rcx")
+            self.writer.line(".Lnetwork_send_some_retry:")
+            self.writer.line("    mov eax, 1")
+            self.writer.line("    syscall")
+            self.writer.line("    cmp rax, -4")
+            self.writer.line("    je .Lnetwork_send_some_retry")
+            self.writer.line("    test rax, rax")
+            self.writer.line("    js .Lnetwork_send_some_error")
+            self.writer.line("    mov QWORD PTR [rip+valen_network_error], 0")
+            self.writer.line("    ret")
+            self.writer.line(".Lnetwork_send_some_invalid:")
+            self.writer.line("    mov QWORD PTR [rip+valen_network_error], 22")
+            self.writer.line("    mov rax, -1")
+            self.writer.line("    ret")
+            self.writer.line(".Lnetwork_send_some_error:")
+            self.writer.line("    mov r10, rax")
+            self.writer.line("    neg r10")
+            self.writer.line("    mov QWORD PTR [rip+valen_network_error], r10")
+            self.writer.line("    mov rax, -1")
             self.writer.line("    ret")
             self.writer.line(".globl valen_Network_closeListener")
             self.writer.line("valen_Network_closeListener:")

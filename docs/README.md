@@ -7,6 +7,7 @@ If you are new to the project, read these in order:
 3. [Project status](project-status.md) — see what works and what remains **WIP**.
 4. [HTTP service friction report](service-friction/http-health-config.md) — see what the first real service taught us.
 5. [File-backed service friction report](service-friction/file-backed-value.md) — see what atomic persistence added.
+6. [Concurrent service friction report](service-friction/concurrent-http.md) — see how readiness, cancellation, and backpressure behaved.
 
 For compiler contributors:
 

@@ -1355,7 +1355,7 @@ export class SemanticAnalyzer {
     }
 
     consumeArrayElement(expression) {
-        if (this.isOwningExpression(expression) || expression?.kind === 'CallExpression') return;
+        if (this.isOwningExpression(expression) || expression?.kind === 'CallExpression' || expression?.kind === 'NullLiteral') return;
         const source = expression?.semanticSymbol;
         if (source?.kind === 'Local' || source?.kind === 'Parameter') {
             if (source.ownership !== 'owned') {
@@ -1444,6 +1444,10 @@ export class SemanticAnalyzer {
                 return;
             }
             if (!this.isExternalResourceType(source.type) || !parameter.owner?.isNative) source.ownership = 'borrowed';
+            expression.ownership = 'consume';
+            return;
+        }
+        if (source?.kind === 'Field' && source.ownership === 'member-owned') {
             expression.ownership = 'consume';
             return;
         }

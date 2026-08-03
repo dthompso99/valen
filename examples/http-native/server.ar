@@ -3,6 +3,7 @@ import EventLoop from 'libEventLoop.ar'
 import System from 'libSystem.ar'
 import Http from 'libHttp.ar'
 import State from 'libState.ar'
+import Service from 'libService.ar'
 
 entry {{
     member serviceName:string
@@ -20,6 +21,13 @@ entry {{
             System.writeError("\n")
             return 78
         }
+        local requestLimit:i64 = 4
+        local configuredLimit = System.environmentVariable("VALEN_REQUEST_LIMIT")
+        if configuredLimit != null {
+            local parsedLimit = System.parseInteger(configuredLimit!)
+            if !parsedLimit.valid || parsedLimit.value < 1 { return 64 }
+            requestLimit = parsedLimit.value
+        }
         local listener = Network.listen(18080, 16)
         if listener == null {
             System.writeError("valen-http: listen failed\n")
@@ -31,63 +39,50 @@ entry {{
             return 2
         }
         System.write("valen-http: ready on http://127.0.0.1:18080\n")
-        local descriptors = new Array<i64>(0)
-        local interests = new Array<i64>(0)
-        descriptors.append(Network.listenerDescriptor(listener!))
-        interests.append(1)
-        local served:i64 = 0
-        while served < 4 {
-            if EventLoop.wait(descriptors, interests, -1) != 0 {
-                Network.closeListener(listener!)
-                return 3
+        local loop = new Service.Loop()
+        local completed:i64 = 0
+        while completed < requestLimit {
+            local descriptors = loop.descriptors(listener!)
+            local interests = loop.interests()
+            local ready = EventLoop.wait(descriptors, interests, 50)
+            completed = completed + loop.expire(EventLoop.monotonicMilliseconds())
+            if ready == 0 {
+                if !loop.accept(listener!) { Network.closeListener(listener!); return 3 }
+            } else {
+                if ready > 0 {
+                    local index = loop.clientAt(ready - 1)
+                    if index >= 0 {
+                        local client = loop.clients[index]!
+                        local terminal:bool = false
+                        if client.output.length == 0 {
+                            local received = client.receive(loop.maximumRequest)
+                            if received < 0 { terminal = true }
+                            if received == 2 { client.respond(new Http.Response("413 Content Too Large", "request too large\n"), loop.maximumResponse) }
+                            if received == 3 { client.respond(new Http.Response("400 Bad Request", "bad request\n"), loop.maximumResponse) }
+                            if received == 1 {
+                                local request = Http.parse(client.input)
+                                if request == null { client.respond(new Http.Response("400 Bad Request", "bad request\n"), loop.maximumResponse) }
+                                else { client.respond(self.route(request!), loop.maximumResponse) }
+                            }
+                        } else {
+                            local flushed = client.flush()
+                            if flushed != 0 { terminal = true }
+                        }
+                        if terminal { loop.close(index); completed = completed + 1 }
+                    }
+                }
             }
-            local result = self.serve(listener!)
-            if result != 0 {
-                Network.closeListener(listener!)
-                System.writeError("valen-http: request failed\n")
-                System.print(result)
-                return 4
-            }
-            served = served + 1
         }
+        local index:i64 = 0
+        while index < loop.clients.length { loop.close(index); index = index + 1 }
         Network.closeListener(listener!)
         return 0
     }
 
-    serve(listener:Network.Listener) -> i64 {
-        local connection = Network.accept(listener)
-        if connection == null { return Network.lastError() }
-        local request = Network.receive(connection!, 4096)
-        if request == null {
-            Network.closeConnection(connection!)
-            return Network.lastError()
-        }
-        local parsed = Http.parse(request!)
-        local response:Http.Response
-        if parsed == null {
-            response = new Http.Response("400 Bad Request", "bad request\n")
-        } else {
-            response = self.route(parsed!)
-        }
-        local output = response.serialize()
-        if Network.send(connection!, output) != output.length {
-            Network.closeConnection(connection!)
-            return Network.lastError()
-        }
-        Network.closeConnection(connection!)
-        return 0
-    }
-
     route(request:Http.Request) -> Http.Response {
-        if request.method == "GET" && request.target == "/health" {
-            return new Http.Response("200 OK", "ok\n")
-        }
-        if request.method == "GET" && request.target == "/config" {
-            return new Http.Response("200 OK", "service=" + self.serviceName + "\n")
-        }
-        if request.method == "GET" && request.target == "/value" {
-            return new Http.Response("200 OK", self.store.value.toString() + "\n")
-        }
+        if request.method == "GET" && request.target == "/health" { return new Http.Response("200 OK", "ok\n") }
+        if request.method == "GET" && request.target == "/config" { return new Http.Response("200 OK", "service=" + self.serviceName + "\n") }
+        if request.method == "GET" && request.target == "/value" { return new Http.Response("200 OK", self.store.value.toString() + "\n") }
         if request.method == "PUT" && request.target == "/value" {
             local parsed = System.parseInteger(request.body)
             if !parsed.valid { return new Http.Response("400 Bad Request", "invalid value\n") }

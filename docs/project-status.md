@@ -45,8 +45,10 @@ Platforms without native threads are intended to use `InlineExecutor`; only x86-
 IPv4 TCP listen, accept, receive, send, descriptor access, and nonblocking mode are implemented
 directly with x86-64 Linux syscalls. The native HTTP example uses a persistent readiness loop,
 serves health, configuration, and file-backed value routes, and atomically replaces synchronized
-state files. It has live generation-1/generation-2 TCP and restart coverage without external
-libraries. DNS, TLS, concurrent persistence, and production HTTP parsing remain **WIP**.
+state files. Its readiness-driven connection loop provides monotonic timeouts, disconnect
+cancellation, bounded request/response buffering, and partial nonblocking writes without requiring
+threads. It has live generation-1/generation-2 concurrency and restart coverage without external
+libraries. DNS, TLS, concurrent persistence, graceful shutdown, and production HTTP parsing remain **WIP**.
 
 The freestanding language/runtime capability profile is defined for future kernels, firmware,
 and embedded targets.

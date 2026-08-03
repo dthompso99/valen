@@ -3,6 +3,7 @@ library Network {{
     native accept(listener:Listener) -> Connection?
     native receive(connection:Connection, count:i64) -> string?
     native send(connection:Connection, input:string) -> i64
+    native sendSome(connection:Connection, input:string, offset:i64, count:i64) -> i64
     native closeListener(own listener:Listener) -> i64
     native closeConnection(own connection:Connection) -> i64
     native lastError() -> i64

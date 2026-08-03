@@ -64,6 +64,71 @@ async function runHttpService(executable, environment, statePath, requests) {
     }
 }
 
+async function runConcurrentHttpService(executable, environment, statePath) {
+    const child = spawn(executable, [], {
+        cwd: projectRoot,
+        env: {...environment, VALEN_SERVICE_NAME: 'conformance', VALEN_STATE_PATH: statePath, VALEN_REQUEST_LIMIT: '6'}
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    const exited = new Promise(resolve => child.once('close', (status, signal) => resolve({status, signal})));
+    let slow = null;
+    try {
+        await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error(`concurrent HTTP service did not become ready\n${stderr || stdout}`)), 3000);
+            const inspect = () => {
+                if (!stdout.includes('valen-http: ready')) return;
+                clearTimeout(timeout);
+                resolve();
+            };
+            child.stdout.on('data', inspect);
+            child.once('exit', status => {
+                if (!stdout.includes('valen-http: ready')) {
+                    clearTimeout(timeout);
+                    reject(new Error(`concurrent HTTP service exited before readiness with status ${status}\n${stderr || stdout}`));
+                }
+            });
+            inspect();
+        });
+
+        slow = net.createConnection({host: '127.0.0.1', port: 18080});
+        await new Promise((resolve, reject) => {
+            slow.once('connect', () => { slow.write('GET /health HTTP/1.1\r\nHost: slow'); resolve(); });
+            slow.once('error', reject);
+        });
+        const slowClosed = new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('slow client was not timed out')), 2000);
+            slow.once('close', () => { clearTimeout(timeout); resolve(); });
+            slow.once('error', error => { clearTimeout(timeout); reject(error); });
+        });
+
+        const healthy = await exchange('GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n');
+        assert.match(healthy, /^HTTP\/1\.1 200 OK\r\n[\s\S]*\r\n\r\nok\n$/);
+
+        const disconnected = net.createConnection({host: '127.0.0.1', port: 18080});
+        await new Promise((resolve, reject) => {
+            disconnected.once('connect', () => { disconnected.destroy(); resolve(); });
+            disconnected.once('error', reject);
+        });
+
+        const oversized = await exchange(`GET /health HTTP/1.1\r\nX-Fill: ${'x'.repeat(5000)}\r\n\r\n`);
+        assert.match(oversized, /^HTTP\/1\.1 413 Content Too Large\r\n/);
+        assert.match(await exchange('GET /value HTTP/1.1\r\nHost: localhost\r\n\r\n'), /\r\n\r\n0\n$/);
+        await slowClosed;
+        assert.match(await exchange('GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n'), /\r\n\r\nok\n$/);
+
+        const result = await exited;
+        assert.equal(result.status, 0, stderr || stdout || `concurrent HTTP service terminated by ${result.signal}`);
+    } finally {
+        slow?.destroy();
+        if (child.exitCode == null && child.signalCode == null) child.kill('SIGKILL');
+    }
+}
+
 test('generation 1 passes the native compiler conformance suite', async t => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-generation1-'));
     const compilerPath = path.join(directory, 'valen');
@@ -268,6 +333,8 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                             });
                             assert.equal(corrupt.status, 78, corrupt.stderr || corrupt.stdout);
                             assert.match(corrupt.stderr, /invalid or unreadable state/);
+                            fs.rmSync(statePath, {force: true});
+                            await runConcurrentHttpService(executable, environment, statePath);
                         }
                     }
                 });

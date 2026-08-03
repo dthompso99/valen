@@ -737,7 +737,9 @@ library Semantics {{
             while arguments.length < method.parameters.length {
                 local defaultValue = node!.parameters[arguments.length].defaultValue
                 if defaultValue == null { return }
-                arguments.append(copy defaultValue!)
+                local copied = copy defaultValue!
+                copied.inferredType = method.parameters[arguments.length].typeName
+                arguments.append(copied)
                 argumentTypes.append(method.parameters[argumentTypes.length].typeName!)
             }
         }
@@ -1702,7 +1704,7 @@ library Semantics {{
         }
 
         consumeArrayElement(expression:Ast.Expression) -> void {
-            if self.isOwningExpression(expression) || expression.kind == "Call" { return }
+            if self.isOwningExpression(expression) || expression.kind == "Call" || expression.kind == "Null" { return }
             if expression.symbol != null {
                 local source = expression.symbol!
                 if source.kind == "Local" || source.kind == "Parameter" {
@@ -1792,6 +1794,10 @@ library Semantics {{
                         return
                     }
                     if !self.isExternalResource(source.typeName!) || parameter.owner == null || !parameter.owner!.isNative { source.ownership = "borrowed" }
+                    expression.ownership = "consume"
+                    return
+                }
+                if source.kind == "Field" && source.ownership == "member-owned" {
                     expression.ownership = "consume"
                     return
                 }

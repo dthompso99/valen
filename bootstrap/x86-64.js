@@ -65,7 +65,7 @@ export class X86_64Backend {
             'valen_System_memoryCompare',
             'valen_System_fileDescriptor', 'valen_System_makeFileNonblocking',
             'valen_Network_listen', 'valen_Network_accept', 'valen_Network_receive',
-            'valen_Network_send', 'valen_Network_closeListener', 'valen_Network_closeConnection',
+            'valen_Network_send', 'valen_Network_sendSome', 'valen_Network_closeListener', 'valen_Network_closeConnection',
             'valen_Network_lastError',
             'valen_Network_listenerDescriptor', 'valen_Network_connectionDescriptor',
             'valen_Network_makeListenerNonblocking', 'valen_Network_makeConnectionNonblocking',
@@ -74,7 +74,7 @@ export class X86_64Backend {
             'valen_Operations_conditionWait', 'valen_Operations_conditionNotifyOne', 'valen_Operations_conditionNotifyAll',
             'valen_Operations_atomicLoad', 'valen_Operations_atomicStore', 'valen_Operations_atomicExchange',
             'valen_Operations_atomicCompareExchange', 'valen_Operations_atomicAdd',
-            'valen_EventLoop_available', 'valen_EventLoop_wait'
+            'valen_EventLoop_available', 'valen_EventLoop_wait', 'valen_EventLoop_monotonicMilliseconds'
         ]);
         for (const external of program.externals) {
             if (!external.foreignLibrary && !supportedRuntimeSymbols.has(external.runtimeSymbol)) {
@@ -194,6 +194,15 @@ export class X86_64Backend {
             '    add r9, rax', '    add rsi, rax', '    sub rdx, rax', '    jmp .Lnetwork_send_next',
             '.Lnetwork_send_done:', '    mov QWORD PTR [rip+valen_network_error], 0', '    mov rax, r9', '    ret',
             '.Lnetwork_send_error:', '    mov r10, rax', '    neg r10', '    mov QWORD PTR [rip+valen_network_error], r10', '    test r9, r9', '    cmovnz rax, r9', '    ret', '',
+            '.globl valen_Network_sendSome', 'valen_Network_sendSome:',
+            '    test rdx, rdx', '    js .Lnetwork_send_some_invalid', '    test rcx, rcx', '    js .Lnetwork_send_some_invalid',
+            '    mov r8, QWORD PTR [rsi+8]', '    cmp rdx, r8', '    ja .Lnetwork_send_some_invalid', '    sub r8, rdx',
+            '    cmp rcx, r8', '    ja .Lnetwork_send_some_invalid', '    mov rdi, QWORD PTR [rdi]', '    add rdx, QWORD PTR [rsi]',
+            '    mov rsi, rdx', '    mov rdx, rcx', '.Lnetwork_send_some_retry:', '    mov eax, 1', '    syscall',
+            '    cmp rax, -4', '    je .Lnetwork_send_some_retry', '    test rax, rax', '    js .Lnetwork_send_some_error',
+            '    mov QWORD PTR [rip+valen_network_error], 0', '    ret',
+            '.Lnetwork_send_some_invalid:', '    mov QWORD PTR [rip+valen_network_error], 22', '    mov rax, -1', '    ret',
+            '.Lnetwork_send_some_error:', '    mov r10, rax', '    neg r10', '    mov QWORD PTR [rip+valen_network_error], r10', '    mov rax, -1', '    ret', '',
             ...close('valen_Network_closeListener'), ...close('valen_Network_closeConnection'),
             ...this.descriptorRuntime('valen_Network_listenerDescriptor'),
             ...this.descriptorRuntime('valen_Network_connectionDescriptor'),
@@ -238,6 +247,13 @@ export class X86_64Backend {
             '    mov rdi, rbx', '    lea rsi, [r12*8]', '    mov eax, 11', '    syscall', '    mov rax, r13',
             '    jmp .Lio_wait_done', '.Lio_wait_early:', '    mov rax, -1', '.Lio_wait_done:',
             '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    pop rbx', '    ret', ''
+        );
+        if (symbols.has('valen_EventLoop_monotonicMilliseconds')) lines.push(
+            '.globl valen_EventLoop_monotonicMilliseconds', 'valen_EventLoop_monotonicMilliseconds:',
+            '    sub rsp, 24', '    mov eax, 228', '    mov edi, 1', '    mov rsi, rsp', '    syscall',
+            '    test rax, rax', '    js .Lmonotonic_error', '    mov r8, QWORD PTR [rsp]', '    imul r8, r8, 1000',
+            '    mov rax, QWORD PTR [rsp+8]', '    cqo', '    mov rcx, 1000000', '    idiv rcx', '    add rax, r8',
+            '    add rsp, 24', '    ret', '.Lmonotonic_error:', '    mov rax, -1', '    add rsp, 24', '    ret', ''
         );
         return lines;
     }

@@ -1,3 +1,5 @@
+import System from 'libSystem.ar'
+
 library Http {{
     Request {{
         member method:string
@@ -46,5 +48,32 @@ library Http {{
         }
         if methodEnd <= 0 || targetEnd <= methodEnd + 1 || bodyStart < 0 { return null }
         return new Request(input.slice(0, methodEnd), input.slice(methodEnd + 1, targetEnd - methodEnd - 1), input.slice(bodyStart, input.length - bodyStart))
+    }
+
+    complete(input:string) -> bool {
+        local bodyStart:i64 = -1
+        local index:i64 = 0
+        while index + 3 < input.length {
+            if input[index] == 13 && input[index + 1] == 10 && input[index + 2] == 13 && input[index + 3] == 10 {
+                bodyStart = index + 4
+                index = input.length
+            }
+            index = index + 1
+        }
+        if bodyStart < 0 { return false }
+        local contentLength:i64 = 0
+        index = 0
+        while index + 16 <= bodyStart {
+            if input.slice(index, 16) == "Content-Length: " {
+                local end = index + 16
+                while end < bodyStart && input[end] != 13 { end = end + 1 }
+                local parsed = System.parseInteger(input.slice(index + 16, end - index - 16))
+                if !parsed.valid || parsed.value < 0 { return true }
+                contentLength = parsed.value
+                index = bodyStart
+            }
+            index = index + 1
+        }
+        return input.length - bodyStart >= contentLength
     }
 }}
