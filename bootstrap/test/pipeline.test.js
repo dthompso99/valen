@@ -475,6 +475,20 @@ test('linear-scan register allocation keeps primitive temporaries across calls a
     assert.ok(frameSize <= 48, `expected an allocated frame no larger than 48 bytes, got ${frameSize}`);
 });
 
+test('instruction selection uses immediate operands and removes redundant moves', () => {
+    const source = `entry {{
+        calculate(value:i64) -> i64 { return ((value + 7) * 3) & 255 }
+        __() -> i64 { return self.calculate(5) }
+    }}`;
+    const semantic = new SemanticAnalyzer().analyze(new Parser().parse(source, 'instruction-selection.ar'));
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
+    assert.match(assembly, /add rax, 7/);
+    assert.match(assembly, /imul rax, 3/);
+    assert.match(assembly, /and rax, 255/);
+    assert.doesNotMatch(assembly, /^    mov (r(?:ax|bx|cx|dx|si|di|bp|sp|8|9|1[0-5])), \1$/m);
+});
+
 test('contract dispatch preserves register and stack arguments', () => {
     const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/abi-contract-arguments.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});

@@ -295,6 +295,7 @@ library X86Object {{
                 local left = operands[0]
                 local count = self.operandCount; if count < 0 { count = operands.length }
                 if count == 1 { self.rex(true, 0, self.rmIndex(left), self.rmBase(left), false); self.byte(247); self.modRm(5, left); return true }
+                if count == 2 && operands[1].kind == "immediate" { self.regRm(105, left, left, left.size); self.little(operands[1].value, 4); return true }
                 if count == 3 { self.regRm(105, left, operands[1], left.size); self.little(operands[2].value, 4); return true }
                 self.regRm2(175, left, operands[1], left.size); return true
             }

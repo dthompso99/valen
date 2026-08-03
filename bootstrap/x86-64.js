@@ -309,6 +309,7 @@ export class X86_64Backend {
     generateFunction(fn) {
         this.fn = fn;
         this.slots = new Map();
+        this.immediates = this.selectImmediateConstants(fn);
         this.registers = this.allocateRegisters(fn);
         const slotTypes = new Map();
         let slotCount = 0;
@@ -319,7 +320,7 @@ export class X86_64Backend {
 
         for (const parameter of fn.parameters) reserve(`name:${parameter.name}`, parameter.type);
         for (const instruction of fn.blocks.flatMap(block => block.instructions)) {
-            if (instruction.result && !this.registers.has(instruction.result)) reserve(`temp:${instruction.result}`, instruction.type);
+            if (instruction.result && !this.registers.has(instruction.result) && !this.immediates.has(instruction.result)) reserve(`temp:${instruction.result}`, instruction.type);
             if (instruction.op === 'declare_local' || instruction.op === 'store_local') {
                 reserve(`name:${instruction.name}`, instruction.type ?? instruction.value?.type);
             }
@@ -369,7 +370,45 @@ export class X86_64Backend {
             `${rootTraceLabel}:`, '    push rbx', '    mov rbx, rdi');
         for (const [key] of roots) lines.push(`    mov rdi, QWORD PTR [rbx-${this.slots.get(key)}]`, '    call valen_gc_mark');
         lines.push('    pop rbx', '    ret', '');
-        return lines;
+        return this.peephole(lines);
+    }
+
+    selectImmediateConstants(fn) {
+        const constants = new Map();
+        const uses = new Map();
+        const supported = new Set(['+', '-', '*', '&', '|', '^', '<<', '>>', '==', '!=', '===', '!==', '<', '<=', '>', '>=']);
+        for (const instruction of fn.blocks.flatMap(block => block.instructions)) {
+            if (instruction.op === 'constant' && instruction.result && !this.isFloat(instruction.type)) {
+                const value = BigInt(instruction.value);
+                if (value >= -2147483648n && value <= 2147483647n) constants.set(instruction.result, instruction.value.toString());
+            }
+            const record = (value, eligible) => {
+                if (value?.kind !== 'temporary') return;
+                const status = uses.get(value.name) ?? {count: 0, eligible: true};
+                status.count++;
+                status.eligible = status.eligible && eligible;
+                uses.set(value.name, status);
+            };
+            record(instruction.right, instruction.op === 'binary' && supported.has(instruction.operator));
+            const visit = value => {
+                if (!value || typeof value !== 'object') return;
+                if (value.kind === 'temporary') { record(value, false); return; }
+                if (Array.isArray(value)) for (const item of value) visit(item);
+                else for (const item of Object.values(value)) visit(item);
+            };
+            for (const [key, value] of Object.entries(instruction)) if (!['result', 'right'].includes(key)) visit(value);
+        }
+        return new Map([...constants].filter(([name]) => uses.get(name)?.eligible));
+    }
+
+    peephole(lines) {
+        return lines.filter(line => {
+            const sameMove = line.match(/^    mov (r(?:ax|bx|cx|dx|si|di|bp|sp|8|9|1[0-5])), \1$/);
+            if (sameMove) return false;
+            if (/^    (?:add|sub|shl|shr|sar) r(?:ax|cx|dx|8|9|1[0-5]), 0$/.test(line)) return false;
+            if (/^    imul r(?:ax|cx|dx|8|9|1[0-5]), 1$/.test(line)) return false;
+            return true;
+        });
     }
 
     allocateRegisters(fn) {
@@ -378,7 +417,7 @@ export class X86_64Backend {
         const lastUses = new Map();
         for (let index = 0; index < instructions.length; index++) {
             const instruction = instructions[index];
-            if (instruction.result && !this.isManagedReferenceType(instruction.type)) {
+            if (instruction.result && !this.immediates.has(instruction.result) && !this.isManagedReferenceType(instruction.type)) {
                 definitions.set(instruction.result, {name: instruction.result, type: instruction.type, start: index, end: index});
             }
             const visit = value => {
@@ -425,6 +464,7 @@ export class X86_64Backend {
         const lines = [];
         switch (instruction.op) {
             case 'constant':
+                if (this.immediates.has(instruction.result)) break;
                 lines.push(`    mov rax, ${instruction.value}`, ...this.normalize('rax', instruction.type));
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
                 break;
@@ -678,10 +718,21 @@ export class X86_64Backend {
 
     binary(instruction) {
         if (this.isFloat(instruction.left.type)) return this.floatBinary(instruction);
-        const lines = [...this.load(instruction.left, 'rax'), ...this.load(instruction.right, 'rcx')];
+        const immediate = instruction.right.kind === 'temporary' ? this.immediates.get(instruction.right.name) : undefined;
+        const operand = immediate === undefined ? 'rcx' : immediate;
+        const lines = [...this.load(instruction.left, 'rax')];
+        if (immediate === undefined) lines.push(...this.load(instruction.right, 'rcx'));
         const simple = {'+': 'add rax, rcx', '-': 'sub rax, rcx', '*': 'imul rax, rcx', '&&': 'and rax, rcx', '||': 'or rax, rcx', '&': 'and rax, rcx', '|': 'or rax, rcx', '^': 'xor rax, rcx', '<<': 'shl rax, cl', '>>': this.isUnsigned(instruction.left.type) ? 'shr rax, cl' : 'sar rax, cl'};
         const condition = {'==': 'sete', '!=': 'setne', '===': 'sete', '!==': 'setne', '<': 'setl', '<=': 'setle', '>': 'setg', '>=': 'setge'};
-        if (simple[instruction.operator]) lines.push(`    ${simple[instruction.operator]}`);
+        if (simple[instruction.operator]) {
+            if (immediate !== undefined) {
+                const mnemonic = simple[instruction.operator].split(' ')[0];
+                const value = instruction.operator === '<<' || instruction.operator === '>>'
+                    ? (BigInt(immediate) & 63n).toString()
+                    : operand;
+                lines.push(`    ${mnemonic} rax, ${value}`);
+            } else lines.push(`    ${simple[instruction.operator]}`);
+        }
         else if (instruction.operator === '/') {
             lines.push('    test rcx, rcx', '    jz .Ldivision_by_zero_error');
             if (this.isUnsigned(instruction.left.type)) lines.push('    xor edx, edx', '    div rcx');
@@ -692,7 +743,7 @@ export class X86_64Backend {
             const opcode = this.isUnsigned(instruction.left.type) && unsignedCondition[instruction.operator]
                 ? unsignedCondition[instruction.operator]
                 : condition[instruction.operator];
-            lines.push('    cmp rax, rcx', `    ${opcode} al`, '    movzx rax, al');
+            lines.push(`    cmp rax, ${operand}`, `    ${opcode} al`, '    movzx rax, al');
         } else throw new Error(`Unsupported binary operator ${instruction.operator}`);
         lines.push(...this.normalize('rax', instruction.type));
         lines.push(`    mov ${this.temp(instruction.result)}, rax`);

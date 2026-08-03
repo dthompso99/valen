@@ -70,7 +70,8 @@ and embedded targets.
 - **WIP:** package metadata, versioning, and compiled libraries
 - Primitive SSA temporaries use conservative linear-scan allocation across `r12`-`r15`, with stack spills and GC-visible managed references.
 - IR canonicalization folds integer/boolean constants, simplifies constant branches, removes unreachable blocks, and eliminates unused pure SSA values without suppressing runtime traps or state changes.
-- **WIP:** optimization levels and peephole optimization
+- Integer instruction selection uses signed 32-bit immediates for arithmetic, bitwise, shift, and comparison operations; generated-function peepholes remove redundant moves and neutral operations.
+- **WIP:** optimization levels with predictable semantics
 - Generation 0 and the self-hosted compiler emit ELF64 relocatable objects without a system assembler.
 - **WIP:** an integrated linker
 - Repeatable compiler and generated-code benchmarks report compile time, memory, executable size, and runtime speed; expanding the workload corpus remains **WIP**.

@@ -1,12 +1,31 @@
 import Ir from 'libIr.ar'
+import System from 'libSystem.ar'
 
 library X86_64 {{
     Writer {{
         member builder:StringBuilder
+        member optimize:bool
 
-        __() -> void { self.builder = new StringBuilder() }
-        line(value:string) -> void { self.builder.append(value); self.builder.appendByte(10) }
+        __() -> void { self.builder = new StringBuilder(); self.optimize = false }
+        line(value:string) -> void {
+            if self.optimize {
+                if value == "    add rax, 0" || value == "    sub rax, 0" || value == "    shl rax, 0" || value == "    shr rax, 0" || value == "    sar rax, 0" || value == "    imul rax, 1" { return }
+                if self.redundantMove(value) { return }
+            }
+            self.builder.append(value); self.builder.appendByte(10)
+        }
         build() -> string { return self.builder.build() }
+
+        redundantMove(value:string) -> bool {
+            if value.length < 14 || value.slice(0, 8) != "    mov " { return false }
+            local comma:i64 = 8
+            while comma < value.length && value[comma] != 44 { comma = comma + 1 }
+            if comma == value.length || comma + 2 >= value.length { return false }
+            local left = value.slice(8, comma - 8)
+            local right = value.slice(comma + 2, value.length - comma - 2)
+            if left != right { return false }
+            return left == "rax" || left == "rbx" || left == "rcx" || left == "rdx" || left == "rsi" || left == "rdi" || left == "rbp" || left == "rsp" || left == "r8" || left == "r9" || left == "r10" || left == "r11" || left == "r12" || left == "r13" || left == "r14" || left == "r15"
+        }
     }}
 
     FunctionSymbol {{
@@ -55,6 +74,12 @@ library X86_64 {{
         __(name:string, start:i64) -> void { self.name = name; self.start = start; self.end = start; self.registerName = "" }
     }}
 
+    Immediate {{
+        member name:string
+        member value:i64
+        __(name:string, value:i64) -> void { self.name = name; self.value = value }
+    }}
+
     Backend {{
         member program:Ir.Program
         member writer:Writer
@@ -65,6 +90,7 @@ library X86_64 {{
         member floatLiterals:Array<Literal>
         member slots:Array<Slot>
         member allocations:Array<Allocation>
+        member immediates:Array<Immediate>
         member currentFunctionSymbol:string
         member nextLabel:i64
         member usesPrint:bool
@@ -81,6 +107,7 @@ library X86_64 {{
             self.floatLiterals = new Array<Literal>(0)
             self.slots = new Array<Slot>(0)
             self.allocations = new Array<Allocation>(0)
+            self.immediates = new Array<Immediate>(0)
             self.currentFunctionSymbol = ""
             self.nextLabel = 0
             self.usesPrint = false
@@ -100,11 +127,13 @@ library X86_64 {{
                 index = index + 1
             }
             if self.hasRuntime("valen_Operations_threadStart") { self.writer.line(".extern pthread_create"); self.writer.line(".extern pthread_join") }
+            self.writer.optimize = true
             index = 0
             while index < self.program.functions.length {
                 self.generateFunction(self.program.functions[index])
                 index = index + 1
             }
+            self.writer.optimize = false
             self.generateMain()
             self.structuralRuntime()
             if self.usesPrint { self.printRuntime() }
@@ -341,6 +370,7 @@ library X86_64 {{
         generateFunction(function:Ir.Function) -> void {
             self.currentFunctionSymbol = self.functionSymbol(function.name)
             self.slots = new Array<Slot>(0)
+            self.selectImmediateConstants(function)
             self.allocateRegisters(function)
             local parameterIndex:i64 = 0
             while parameterIndex < function.parameters.length {
@@ -355,7 +385,9 @@ library X86_64 {{
                     local instruction = instructions[index]
                     if instruction.result != null {
                         local allocation = self.findAllocation(instruction.result!.name)
-                        if allocation == null || allocation!.registerName.length == 0 { self.reserve("temp:" + instruction.result!.name, instruction.result!.typeName) }
+                        if self.findImmediate(instruction.result!.name) == null {
+                            if allocation == null || allocation!.registerName.length == 0 { self.reserve("temp:" + instruction.result!.name, instruction.result!.typeName) }
+                        }
                     }
                     if instruction.op == "declare_local" { self.reserve("name:" + instruction.name!, instruction.typeName!) }
                     if instruction.op == "store_local" { self.reserve("name:" + instruction.name!, instruction.first!.typeName) }
@@ -466,6 +498,7 @@ library X86_64 {{
         generateInstruction(instruction:Ir.Instruction, endLabel:string) -> void {
             local op = instruction.op
             if op == "constant" {
+                if self.findImmediate(instruction.result!.name) != null { return }
                 self.writer.line("    mov rax, " + instruction.text!)
                 self.normalize("rax", instruction.typeName!)
                 self.storeResult(instruction, "rax")
@@ -813,20 +846,24 @@ library X86_64 {{
         generateBinary(instruction:Ir.Instruction) -> void {
             if self.isFloat(instruction.first!.typeName) { self.generateFloatBinary(instruction); return }
             self.load(instruction.first!, "rax")
-            self.load(instruction.second!, "rcx")
+            local immediate = self.findImmediate(instruction.second!.name)
+            local operand = "rcx"
+            if immediate == null { self.load(instruction.second!, "rcx") } else { operand = immediate!.value.toString() }
             local operator = instruction.operator!
-            if operator == "+" { self.writer.line("    add rax, rcx") }
-            if operator == "-" { self.writer.line("    sub rax, rcx") }
-            if operator == "*" { self.writer.line("    imul rax, rcx") }
+            if operator == "+" { self.writer.line("    add rax, " + operand) }
+            if operator == "-" { self.writer.line("    sub rax, " + operand) }
+            if operator == "*" { self.writer.line("    imul rax, " + operand) }
             if operator == "&&" { self.writer.line("    and rax, rcx") }
             if operator == "||" { self.writer.line("    or rax, rcx") }
-            if operator == "&" { self.writer.line("    and rax, rcx") }
-            if operator == "|" { self.writer.line("    or rax, rcx") }
-            if operator == "^" { self.writer.line("    xor rax, rcx") }
-            if operator == "<<" { self.writer.line("    shl rax, cl") }
+            if operator == "&" { self.writer.line("    and rax, " + operand) }
+            if operator == "|" { self.writer.line("    or rax, " + operand) }
+            if operator == "^" { self.writer.line("    xor rax, " + operand) }
+            if operator == "<<" { if immediate == null { self.writer.line("    shl rax, cl") } else { self.writer.line("    shl rax, " + (immediate!.value & 63).toString()) } }
             if operator == ">>" {
-                if self.isUnsigned(instruction.first!.typeName) { self.writer.line("    shr rax, cl") }
-                else { self.writer.line("    sar rax, cl") }
+                local shift = "cl"
+                if immediate != null { shift = (immediate!.value & 63).toString() }
+                if self.isUnsigned(instruction.first!.typeName) { self.writer.line("    shr rax, " + shift) }
+                else { self.writer.line("    sar rax, " + shift) }
             }
             if operator == "/" {
                 self.writer.line("    test rcx, rcx")
@@ -834,7 +871,7 @@ library X86_64 {{
                 if self.isUnsigned(instruction.first!.typeName) { self.writer.line("    xor edx, edx"); self.writer.line("    div rcx") } else { self.writer.line("    cqo"); self.writer.line("    idiv rcx") }
             }
             if operator == "==" || operator == "!=" || operator == "===" || operator == "!==" || operator == "<" || operator == "<=" || operator == ">" || operator == ">=" {
-                self.writer.line("    cmp rax, rcx")
+                self.writer.line("    cmp rax, " + operand)
                 self.writer.line("    " + self.condition(operator, self.isUnsigned(instruction.first!.typeName)) + " al")
                 self.writer.line("    movzx rax, al")
             }
@@ -2851,7 +2888,7 @@ library X86_64 {{
                 while instructionIndex < function.blocks[blockIndex].instructions.length {
                     local instruction = function.blocks[blockIndex].instructions[instructionIndex]
                     if instruction.result != null {
-                        if !self.isManagedReferenceType(instruction.result!.typeName) { self.allocations.append(new Allocation(instruction.result!.name, position)) }
+                        if self.findImmediate(instruction.result!.name) == null && !self.isManagedReferenceType(instruction.result!.typeName) { self.allocations.append(new Allocation(instruction.result!.name, position)) }
                     }
                     self.recordAllocationUse(instruction.first, position)
                     self.recordAllocationUse(instruction.second, position)
@@ -2887,6 +2924,64 @@ library X86_64 {{
                 }
                 allocationIndex = allocationIndex + 1
             }
+        }
+
+        selectImmediateConstants(function:Ir.Function) -> void {
+            self.immediates = new Array<Immediate>(0)
+            local blockIndex:i64 = 0
+            while blockIndex < function.blocks.length {
+                local instructionIndex:i64 = 0
+                while instructionIndex < function.blocks[blockIndex].instructions.length {
+                    local instruction = function.blocks[blockIndex].instructions[instructionIndex]
+                    if instruction.op == "constant" && instruction.result != null && !self.isFloat(instruction.result!.typeName) {
+                        local parsed = System.parseInteger(instruction.text!)
+                        if parsed.valid && parsed.value >= -2147483648 && parsed.value <= 2147483647 {
+                            if self.immediateUsesEligible(function, instruction.result!.name) { self.immediates.append(new Immediate(instruction.result!.name, parsed.value)) }
+                        }
+                    }
+                    instructionIndex = instructionIndex + 1
+                }
+                blockIndex = blockIndex + 1
+            }
+        }
+
+        immediateUsesEligible(function:Ir.Function, name:string) -> bool {
+            local found:bool = false
+            local blockIndex:i64 = 0
+            while blockIndex < function.blocks.length {
+                local instructionIndex:i64 = 0
+                while instructionIndex < function.blocks[blockIndex].instructions.length {
+                    local instruction = function.blocks[blockIndex].instructions[instructionIndex]
+                    local secondUse = instruction.second != null && instruction.second!.kind == "temporary" && instruction.second!.name == name
+                    if secondUse {
+                        found = true
+                        if instruction.op != "binary" || !self.immediateOperator(instruction.operator!) { return false }
+                    }
+                    if instruction.first != null { if instruction.first!.kind == "temporary" && instruction.first!.name == name { return false } }
+                    if instruction.third != null { if instruction.third!.kind == "temporary" && instruction.third!.name == name { return false } }
+                    local argumentIndex:i64 = 0
+                    while argumentIndex < instruction.arguments.length {
+                        if instruction.arguments[argumentIndex].kind == "temporary" && instruction.arguments[argumentIndex].name == name { return false }
+                        argumentIndex = argumentIndex + 1
+                    }
+                    instructionIndex = instructionIndex + 1
+                }
+                blockIndex = blockIndex + 1
+            }
+            return found
+        }
+
+        immediateOperator(operator:string) -> bool {
+            return operator == "+" || operator == "-" || operator == "*" || operator == "&" || operator == "|" || operator == "^" || operator == "<<" || operator == ">>" || operator == "==" || operator == "!=" || operator == "===" || operator == "!==" || operator == "<" || operator == "<=" || operator == ">" || operator == ">="
+        }
+
+        findImmediate(name:string) -> ref Immediate? {
+            local index:i64 = 0
+            while index < self.immediates.length {
+                if self.immediates[index].name == name { return self.immediates[index] }
+                index = index + 1
+            }
+            return null
         }
 
         recordAllocationUse(value:Ir.Value?, position:i64) -> void {

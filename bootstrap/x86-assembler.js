@@ -291,6 +291,7 @@ function encodeInstruction(sink, mnemonic, operands) {
     }
     if (mnemonic === 'imul') {
         if (!right) { const bits = rmRexBits(left); rex(sink, {w: true, ...bits}); sink.emit(0xf7); encodeModRm(sink, 5, left); return; }
+        if (right.kind === 'imm') { encodeRegRm(sink, 0x69, left, left, left.size); sink.emit(little(right.value, 4)); return; }
         if (third) { encodeRegRm(sink, 0x69, left, right, left.size); sink.emit(little(third.value, 4)); return; }
         return encodeRegRm(sink, [0x0f, 0xaf], left, right, left.size);
     }

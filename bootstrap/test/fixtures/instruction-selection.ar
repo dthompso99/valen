@@ -1,0 +1,17 @@
+entry {{
+    calculate(value:i64) -> i64 {
+        local result = value + 7
+        result = result * 3
+        result = result - 2
+        result = result & 255
+        result = result | 256
+        result = result ^ 8
+        result = result << 2
+        result = result >> 1
+        if result < 500 { return 1 }
+        if result >= 700 { return 2 }
+        return 0
+    }
+
+    __() -> i64 { return self.calculate(5) }
+}}
