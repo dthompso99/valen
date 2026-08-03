@@ -940,13 +940,29 @@ export class SemanticAnalyzer {
                 break;
             }
             case 'PropagateExpression': {
-                const optionalType = this.analyzeExpression(expression.expression, scope, object);
-                if (!this.isOptionalType(optionalType)) {
-                    this.report(expression.span, `Cannot propagate non-optional type '${optionalType}'`);
-                } else if (!this.isOptionalType(this.currentMethod?.returnType)) {
-                    this.report(expression.span, "Optional propagation requires the enclosing method to return an optional type");
-                    type = this.optionalBaseType(optionalType);
-                } else type = this.optionalBaseType(optionalType);
+                const propagatedType = this.analyzeExpression(expression.expression, scope, object);
+                if (this.isOptionalType(propagatedType)) {
+                    expression.propagationKind = 'optional';
+                    if (!this.isOptionalType(this.currentMethod?.returnType)) {
+                        this.report(expression.span, "Optional propagation requires the enclosing method to return an optional type");
+                    }
+                    type = this.optionalBaseType(propagatedType);
+                    break;
+                }
+                const result = this.findObjectType(propagatedType);
+                const validField = result && this.lookupField(result, 'valid');
+                const valueField = result && this.lookupField(result, 'value');
+                if (!validField || validField.type !== BOOL || validField.visibility === 'private' || !valueField || valueField.visibility === 'private') {
+                    this.report(expression.span, `Cannot propagate '${propagatedType}'; expected an optional or a result object with public 'valid:bool' and 'value' fields`);
+                } else {
+                    expression.propagationKind = 'result';
+                    expression.validField = validField;
+                    expression.valueField = valueField;
+                    if (this.currentMethod?.returnType !== propagatedType) {
+                        this.report(expression.span, `Result propagation requires the enclosing method to return '${propagatedType}'`);
+                    }
+                    type = valueField.type;
+                }
                 break;
             }
             case 'UnaryExpression': {

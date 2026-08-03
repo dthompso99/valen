@@ -779,10 +779,17 @@ export class IrGenerator {
 
     lowerPropagation(expression) {
         const value = this.lowerExpression(expression.expression);
+        let condition = value;
+        if (expression.propagationKind === 'result') {
+            condition = this.result('load_field', 'bool', {
+                object: value,
+                field: `${expression.validField.owner.type}.${expression.validField.name}`
+            });
+        }
         const nullBlock = this.newBlock('propagate_null');
         const valueBlock = this.newBlock('propagate_value');
         this.emit('branch', {
-            condition: value,
+            condition,
             thenTarget: valueBlock.label,
             elseTarget: nullBlock.label
         });
@@ -790,6 +797,12 @@ export class IrGenerator {
         this.block = nullBlock;
         this.emit('return', {value});
         this.block = valueBlock;
+        if (expression.propagationKind === 'result') {
+            return this.result('load_field', expression.inferredType, {
+                object: value,
+                field: `${expression.valueField.owner.type}.${expression.valueField.name}`
+            });
+        }
         return {...value, type: expression.inferredType};
     }
 

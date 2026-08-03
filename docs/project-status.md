@@ -28,7 +28,7 @@
 - **WIP:** generic constraints and generic methods
 - **WIP:** implicit numeric promotion rules
 - **WIP:** `else if`, expression-valued conditionals, and matching
-- **WIP:** generalized safe `Result` propagation
+- safe `?` propagation for optionals and result objects exposing public `valid:bool` and `value` fields
 
 ## WIP: runtime and concurrency
 

@@ -1270,10 +1270,19 @@ library Ir {{
 
         lowerPropagation(expression:Ast.Expression) -> Value {
             local value = self.lowerExpression(expression.left!)
+            local condition = value
+            if expression.operator != null {
+                if expression.operator! == "result" {
+                    local loadValid = self.temporary("load_field", "bool")
+                    loadValid.first = value
+                    loadValid.name = expression.text
+                    condition = loadValid.result!
+                }
+            }
             local nullBlock = self.newBlock("propagate_null")
             local valueBlock = self.newBlock("propagate_value")
             local branch = new Instruction("branch")
-            branch.first = value
+            branch.first = condition
             branch.target = valueBlock.label
             branch.alternateTarget = nullBlock.label
             self.emit(branch)
@@ -1282,6 +1291,14 @@ library Ir {{
             returnInstruction.first = value
             self.emit(returnInstruction)
             self.currentBlock = valueBlock
+            if expression.operator != null {
+                if expression.operator! == "result" {
+                    local loadValue = self.temporary("load_field", expression.inferredType!)
+                    loadValue.first = value
+                    loadValue.name = expression.name
+                    return new Value(loadValue.result!.kind, loadValue.result!.name, loadValue.result!.typeName)
+                }
+            }
             return new Value(value.kind, value.name, expression.inferredType!)
         }
 

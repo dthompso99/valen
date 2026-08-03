@@ -1307,10 +1307,38 @@ library Semantics {{
                 }
                 return self.typed(expression, target)
             }
-            if expression.kind == "Unwrap" || expression.kind == "Propagate" {
+            if expression.kind == "Unwrap" {
                 local optional = self.analyzeExpression(expression.left!, scope, moduleScope)
                 if !self.isOptional(optional) { self.error(expression.span, "Operator requires an optional value"); return self.typed(expression, "error") }
                 return self.typed(expression, optional.slice(0, optional.length - 1))
+            }
+            if expression.kind == "Propagate" {
+                local propagated = self.analyzeExpression(expression.left!, scope, moduleScope)
+                if self.isOptional(propagated) {
+                    expression.operator = "optional"
+                    if self.currentMethod == null || self.currentMethod!.returnType == null || !self.isOptional(self.currentMethod!.returnType!) {
+                        self.error(expression.span, "Optional propagation requires the enclosing method to return an optional type")
+                    }
+                    return self.typed(expression, propagated.slice(0, propagated.length - 1))
+                }
+                local result = self.findCanonical(propagated)
+                local validField:Symbols.Symbol? = null
+                local valueField:Symbols.Symbol? = null
+                if result != null {
+                    validField = self.lookupMember(result, "valid")
+                    valueField = self.lookupMember(result, "value")
+                }
+                if validField == null || validField!.kind != "Field" || validField!.typeName == null || validField!.typeName! != "bool" || validField!.visibility == "private" || valueField == null || valueField!.kind != "Field" || valueField!.typeName == null || valueField!.visibility == "private" {
+                    self.error(expression.span, "Propagation requires an optional or a result object with public 'valid:bool' and 'value' fields")
+                    return self.typed(expression, "error")
+                }
+                expression.operator = "result"
+                expression.text = validField!.qualifiedName
+                expression.name = valueField!.qualifiedName
+                if self.currentMethod == null || self.currentMethod!.returnType == null || self.currentMethod!.returnType! != propagated {
+                    self.error(expression.span, "Result propagation requires the enclosing method to return the same result type")
+                }
+                return self.typed(expression, valueField!.typeName!)
             }
             return self.typed(expression, "error")
         }

@@ -934,6 +934,29 @@ test('optional propagation is restricted to optional-returning methods', () => {
     assert.match(result.diagnostics[0].message, /enclosing method to return an optional type/);
 });
 
+test('result propagation unwraps valid values and returns invalid results', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/result-propagation.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    const propagation = ir.functions.flatMap(fn => fn.blocks)
+        .find(block => block.label.startsWith('propagate_value'));
+    assert.ok(propagation?.instructions.some(instruction => instruction.op === 'load_field' && instruction.type === 'i64'));
+    assert.doesNotThrow(() => new X86_64Backend().generate(ir));
+});
+
+test('result propagation requires the result protocol and matching return type', () => {
+    const missingProtocol = 'Value {{ member value:i64 }} entry {{ bad(value:Value) -> Value { return value? } __() -> void {} }}';
+    const missing = new SemanticAnalyzer().analyze(new Parser().parse(missingProtocol, 'missing-result.ar'));
+    assert.equal(missing.success, false);
+    assert.match(missing.diagnostics[0].message, /result object with public 'valid:bool' and 'value' fields/);
+
+    const wrongReturn = 'Result {{ member valid:bool; member value:i64 }} entry {{ bad(value:Result) -> i64 { return value? } __() -> void {} }}';
+    const wrong = new SemanticAnalyzer().analyze(new Parser().parse(wrongReturn, 'wrong-result.ar'));
+    assert.equal(wrong.success, false);
+    assert.match(wrong.diagnostics[0].message, /enclosing method to return 'Result'/);
+});
+
 test('test suites lower expectations into a native failure-counting runner', () => {
     const source = `test arithmetic {{
         passing() -> void { expect(2 + 2 == 4) }

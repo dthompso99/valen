@@ -1,0 +1,32 @@
+Outcome {{
+    member valid:bool
+    member value:i64
+
+    __(valid:bool, value:i64) -> void {
+        self.valid = valid
+        self.value = value
+    }
+}}
+
+Worker {{
+    step(valid:bool) -> Outcome {
+        if valid { return new Outcome(true, 41) }
+        return new Outcome(false, 73)
+    }
+
+    calculate(valid:bool) -> Outcome {
+        local value = self.step(valid)?
+        return new Outcome(true, value + 1)
+    }
+}}
+
+entry {{
+    __() -> i32 {
+        local worker = new Worker()
+        local success = worker.calculate(true)
+        if !success.valid || success.value != 42 { return 1 }
+        local failure = worker.calculate(false)
+        if failure.valid || failure.value != 73 { return 2 }
+        return 0
+    }
+}}

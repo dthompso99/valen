@@ -46,7 +46,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 - [ ] Define generic constraints using interfaces or another contract mechanism
 - [ ] Add optional value types for stack primitives
 - [ ] Add flow-sensitive optional narrowing
-- [ ] Generalize safe `Result` propagation
+- [x] Generalize safe `Result` propagation
 - [x] Add floating-point types, literals, conversions, arithmetic, NaN rules, and ABI support
 - [ ] Define numeric promotion and mixed-width arithmetic rules
 
