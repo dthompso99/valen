@@ -113,6 +113,6 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 - [ ] Generations 1 and 2 produce semantically equivalent IR
 - [ ] Invalid programs produce consistent diagnostics across generations
 - [ ] Remove the final JavaScript runtime dependency
-- [ ] Stabilize the x86-64 Linux ABI and runtime
+- [x] Stabilize the x86-64 Linux ABI and runtime
 - [ ] Add ARM64 and additional operating-system targets
 - [ ] Define the freestanding subset required for kernels and embedded systems

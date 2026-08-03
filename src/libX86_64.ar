@@ -666,22 +666,7 @@ library X86_64 {{
         }
 
         generateContractCall(instruction:Ir.Instruction) -> void {
-            local index:i64 = 0
-            while index < instruction.arguments.length {
-                if index >= 6 { break }
-                self.load(instruction.arguments[index], self.argumentRegister(index))
-                index = index + 1
-            }
-            local stackCount = instruction.arguments.length - 6
-            if stackCount < 0 { stackCount = 0 }
-            local padding:i64 = 0
-            if stackCount - (stackCount / 2) * 2 == 1 { padding = 8; self.writer.line("    sub rsp, 8") }
-            index = instruction.arguments.length
-            while index > 6 {
-                index = index - 1
-                self.load(instruction.arguments[index], "rax")
-                self.writer.line("    push rax")
-            }
+            self.load(instruction.arguments[0], "rdi")
             local label = self.nextLabel
             self.nextLabel = self.nextLabel + 1
             local loop = ".Lcontract_call_" + label.toString()
@@ -701,7 +686,24 @@ library X86_64 {{
             self.writer.line("    jmp " + loop)
             self.writer.line(found + ":")
             self.writer.line("    mov rax, QWORD PTR [rdx+8]")
-            self.writer.line("    call QWORD PTR [rax+" + (instruction.slot * 8).toString() + "]")
+            self.writer.line("    mov r11, QWORD PTR [rax+" + (instruction.slot * 8).toString() + "]")
+            local index:i64 = 0
+            while index < instruction.arguments.length {
+                if index >= 6 { break }
+                self.load(instruction.arguments[index], self.argumentRegister(index))
+                index = index + 1
+            }
+            local stackCount = instruction.arguments.length - 6
+            if stackCount < 0 { stackCount = 0 }
+            local padding:i64 = 0
+            if stackCount - (stackCount / 2) * 2 == 1 { padding = 8; self.writer.line("    sub rsp, 8") }
+            index = instruction.arguments.length
+            while index > 6 {
+                index = index - 1
+                self.load(instruction.arguments[index], "rax")
+                self.writer.line("    push rax")
+            }
+            self.writer.line("    call r11")
             local stackBytes = stackCount * 8 + padding
             if stackBytes > 0 { self.writer.line("    add rsp, " + stackBytes.toString()) }
             if instruction.result != null { self.storeResult(instruction, "rax") }

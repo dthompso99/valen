@@ -373,6 +373,14 @@ test('stack arguments, runtime errors, division checks, and symbol mangling are 
     assert.notEqual(backend.mangle('A/B'), backend.mangle('A_2f_B'));
 });
 
+test('contract dispatch preserves register and stack arguments', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/abi-contract-arguments.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
+    assert.match(assembly, /mov r11, QWORD PTR \[rax\+\d+\][\s\S]*call r11/);
+});
+
 test('Argon compiler source foundation and tokenizer load and lower', () => {
     const filePath = path.join(projectRoot, 'src/argon.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});

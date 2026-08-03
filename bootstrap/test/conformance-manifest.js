@@ -4,6 +4,7 @@ export const validPrograms = [
     {name: 'inheritance and contracts', source: 'bootstrap/test/fixtures/inheritance.ar'},
     {name: 'subtypes and checked casts', source: 'bootstrap/test/fixtures/subtypes.ar'},
     {name: 'contract references', source: 'bootstrap/test/fixtures/contract-references.ar'},
+    {name: 'contract ABI arguments', source: 'bootstrap/test/fixtures/abi-contract-arguments.ar'},
     {name: 'default arguments', source: 'bootstrap/test/fixtures/default-arguments.ar'},
     {name: 'collection ownership', source: 'bootstrap/test/fixtures/collection-ownership.ar'},
     {name: 'garbage collection', source: 'bootstrap/test/fixtures/garbage-collection.ar'},

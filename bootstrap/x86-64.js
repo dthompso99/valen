@@ -476,6 +476,14 @@ export class X86_64Backend {
 
     contractCall(instruction) {
         const lines = [];
+        lines.push(...this.load(instruction.arguments[0], 'rdi'));
+        const id = this.runtimeLabel++;
+        const loop = `.Lcontract_call_${id}`;
+        const found = `.Lcontract_found_${id}`;
+        lines.push('    mov rax, QWORD PTR [rdi]', '    mov rdx, QWORD PTR [rax+8]', '    mov rcx, QWORD PTR [rdx]', '    add rdx, 8',
+            `    lea r8, [rip+${this.typeLabel(instruction.contractType)}]`, `${loop}:`, '    test rcx, rcx', `    jz .Lcontract_dispatch_error`,
+            '    cmp QWORD PTR [rdx], r8', `    je ${found}`, '    add rdx, 16', '    dec rcx', `    jmp ${loop}`, `${found}:`,
+            '    mov rax, QWORD PTR [rdx+8]', `    mov r11, QWORD PTR [rax+${instruction.slot * 8}]`);
         instruction.arguments.slice(0, argumentRegisters.length)
             .forEach((argument, index) => lines.push(...this.load(argument, argumentRegisters[index])));
         const stackArguments = instruction.arguments.slice(argumentRegisters.length);
@@ -484,13 +492,7 @@ export class X86_64Backend {
         for (let index = stackArguments.length - 1; index >= 0; index--) {
             lines.push(...this.load(stackArguments[index], 'rax'), '    push rax');
         }
-        const id = this.runtimeLabel++;
-        const loop = `.Lcontract_call_${id}`;
-        const found = `.Lcontract_found_${id}`;
-        lines.push('    mov rax, QWORD PTR [rdi]', '    mov rdx, QWORD PTR [rax+8]', '    mov rcx, QWORD PTR [rdx]', '    add rdx, 8',
-            `    lea r8, [rip+${this.typeLabel(instruction.contractType)}]`, `${loop}:`, '    test rcx, rcx', `    jz .Lcontract_dispatch_error`,
-            '    cmp QWORD PTR [rdx], r8', `    je ${found}`, '    add rdx, 16', '    dec rcx', `    jmp ${loop}`, `${found}:`,
-            '    mov rax, QWORD PTR [rdx+8]', `    call QWORD PTR [rax+${instruction.slot * 8}]`);
+        lines.push('    call r11');
         const stackBytes = stackArguments.length * 8 + padding;
         if (stackBytes) lines.push(`    add rsp, ${stackBytes}`);
         if (instruction.result) lines.push(`    mov ${this.temp(instruction.result)}, rax`);
