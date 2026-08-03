@@ -1,5 +1,6 @@
 import {fileURLToPath} from 'url';
 import {SemanticAnalyzer} from './semantic.js';
+import {formatDiagnostic} from './diagnostics.js';
 
 export class IrGenerator {
     generate(semanticResult) {
@@ -837,8 +838,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     } catch (error) {
         const result = new SemanticAnalyzer().analyzeFile(filePath);
         for (const diagnostic of result.diagnostics) {
-            const {source, line, column} = diagnostic.span;
-            console.error(`${source}:${line}:${column}: ${diagnostic.severity}: ${diagnostic.message}`);
+            console.error(formatDiagnostic(diagnostic));
         }
         if (result.diagnostics.length === 0) console.error(error.message);
         process.exitCode = 1;

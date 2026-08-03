@@ -24,6 +24,7 @@ source -> tokens -> AST -> module graph -> semantic symbols
 ```
 
 - Tokenization records source spans for diagnostics.
+- Structured diagnostics retain a primary span, secondary labeled spans, notes, and replacement hints. Generation 0 and the self-hosted compiler render the same stable text form.
 - Parsing constructs object, member, statement, and expression nodes.
 - Module loading resolves relative imports and `VALEN_LIBRARY_PATH`.
 - Semantic analysis binds names, checks types/contracts, and enforces ownership.

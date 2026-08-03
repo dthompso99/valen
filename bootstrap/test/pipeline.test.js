@@ -10,6 +10,7 @@ import {SemanticAnalyzer} from '../semantic.js';
 import {IrGenerator} from '../ir.js';
 import {IrCanonicalizer, IrValidationError, IrValidator} from '../ir-validation.js';
 import {X86_64Backend} from '../x86-64.js';
+import {formatDiagnostic} from '../diagnostics.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -798,6 +799,11 @@ test('parameters borrow by default while own parameters consume caller ownership
     `, 'parameter-double-consume.ar'));
     assert.equal(invalid.success, false);
     assert.match(invalid.diagnostics[0].message, /Cannot pass borrowed reference 'engine'/);
+    assert.equal(invalid.diagnostics[0].labels.length, 2);
+    assert.match(invalid.diagnostics[0].labels[1].message, /takes ownership/);
+    assert.deepEqual(invalid.diagnostics[0].notes, ['ordinary arguments borrow references unless ownership is transferred explicitly']);
+    assert.equal(invalid.diagnostics[0].fixes[0].replacement, 'copy engine');
+    assert.match(formatDiagnostic(invalid.diagnostics[0]), /--> parameter-double-consume\.ar:3:\d+: parameter 'value' takes ownership[\s\S]*note:[\s\S]*help:[\s\S]*replace with 'copy engine'/);
 
     const lifetime = new SemanticAnalyzer().analyze(new Parser().parse(`
         Engine {{ inspect() -> void {} }}

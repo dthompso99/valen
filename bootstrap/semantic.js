@@ -2,6 +2,7 @@ import fs from 'fs';
 import {fileURLToPath} from 'url';
 import {Parser} from './parser.js';
 import {ModuleLoader} from './module-loader.js';
+import {diagnostic, DiagnosticSeverity, formatDiagnostic} from './diagnostics.js';
 
 const I64 = 'i64';
 const VOID = 'void';
@@ -1446,7 +1447,11 @@ export class SemanticAnalyzer {
         const source = this.ownershipSource(expression);
         if (source?.kind === 'Local' || source?.kind === 'Parameter') {
             if (source.ownership !== 'owned') {
-                this.report(expression.span, `Cannot pass borrowed reference '${source.name}' to owning parameter '${parameter.name}'; use 'copy ${source.name}'`);
+                this.report(expression.span, `Cannot pass borrowed reference '${source.name}' to owning parameter '${parameter.name}'; use 'copy ${source.name}'`, DiagnosticSeverity.error, {
+                    labels: [{span: parameter.declaration.span, message: `parameter '${parameter.name}' takes ownership`}],
+                    notes: ['ordinary arguments borrow references unless ownership is transferred explicitly'],
+                    fixes: [{span: expression.span, message: `create an independent owned value for '${parameter.name}'`, replacement: `copy ${source.name}`}]
+                });
                 return;
             }
             if (!this.isExternalResourceType(source.type) || !parameter.owner?.isNative) source.ownership = 'borrowed';
@@ -1597,8 +1602,8 @@ export class SemanticAnalyzer {
         return type;
     }
 
-    report(span, message, severity = 'error') {
-        this.diagnostics.push({severity, message, span});
+    report(span, message, severity = DiagnosticSeverity.error, details = {}) {
+        this.diagnostics.push(diagnostic(severity, message, span, details));
     }
 }
 
@@ -1612,7 +1617,7 @@ class Scope {
 
     define(name, symbol, span, diagnostics) {
         if (this.symbols.has(name)) {
-            diagnostics.push({severity: 'error', message: `Duplicate declaration '${name}'`, span});
+            diagnostics.push(diagnostic(DiagnosticSeverity.error, `Duplicate declaration '${name}'`, span));
             return false;
         }
         this.symbols.set(name, symbol);
@@ -1655,7 +1660,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     const result = new SemanticAnalyzer().analyzeFile(filePath);
     for (const diagnostic of result.diagnostics) {
         const {source, line, column} = diagnostic.span;
-        console.error(`${source}:${line}:${column}: ${diagnostic.severity}: ${diagnostic.message}`);
+        console.error(formatDiagnostic(diagnostic));
     }
     if (!result.success) process.exitCode = 1;
 }

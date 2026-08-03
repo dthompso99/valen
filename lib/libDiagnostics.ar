@@ -1,4 +1,26 @@
 library Diagnostics {{
+    errorSeverity() -> u8 { return 1 }
+    warningSeverity() -> u8 { return 2 }
+    noteSeverity() -> u8 { return 3 }
+
+    DiagnosticLabel {{
+        member source:string
+        member line:i64
+        member column:i64
+        member message:string
+        member primary:bool
+        __(source:string, line:i64, column:i64, message:string, primary:bool) -> void { self.source = source; self.line = line; self.column = column; self.message = message; self.primary = primary }
+    }}
+
+    FixHint {{
+        member source:string
+        member line:i64
+        member column:i64
+        member message:string
+        member replacement:string
+        __(source:string, line:i64, column:i64, message:string, replacement:string) -> void { self.source = source; self.line = line; self.column = column; self.message = message; self.replacement = replacement }
+    }}
+
     firstMessage(bag:DiagnosticBag) -> string? {
         local diagnostic = bag.first()?
         return diagnostic.message
@@ -13,6 +35,21 @@ library Diagnostics {{
         builder.append(diagnostic.column)
         builder.append(": ")
         builder.append(diagnostic.message)
+        local labelIndex:i64 = 0
+        while labelIndex < diagnostic.labels.length {
+            local label = diagnostic.labels[labelIndex]
+            if !label.primary { builder.append("\n  --> "); builder.append(label.source); builder.append(":"); builder.append(label.line); builder.append(":"); builder.append(label.column); builder.append(": "); builder.append(label.message) }
+            labelIndex = labelIndex + 1
+        }
+        local noteIndex:i64 = 0
+        while noteIndex < diagnostic.notes.length { builder.append("\n  note: "); builder.append(diagnostic.notes[noteIndex]); noteIndex = noteIndex + 1 }
+        local fixIndex:i64 = 0
+        while fixIndex < diagnostic.fixes.length {
+            local fix = diagnostic.fixes[fixIndex]
+            builder.append("\n  help: "); builder.append(fix.message)
+            builder.append("\n  fix: "); builder.append(fix.source); builder.append(":"); builder.append(fix.line); builder.append(":"); builder.append(fix.column); builder.append(": replace with '"); builder.append(fix.replacement); builder.append("'")
+            fixIndex = fixIndex + 1
+        }
         return builder.build()
     }
 
@@ -22,6 +59,9 @@ library Diagnostics {{
         member source:string
         member line:i64
         member column:i64
+        member labels:Array<DiagnosticLabel>
+        member notes:Array<string>
+        member fixes:Array<FixHint>
 
         __(severity:u8, message:string, source:string, line:i64, column:i64) -> void {
             self.severity = severity
@@ -29,7 +69,13 @@ library Diagnostics {{
             self.source = source
             self.line = line
             self.column = column
+            self.labels = new Array<DiagnosticLabel>(0); self.notes = new Array<string>(0); self.fixes = new Array<FixHint>(0)
+            self.labels.append(new DiagnosticLabel(source, line, column, message, true))
         }
+
+        addLabel(source:string, line:i64, column:i64, message:string) -> void { self.labels.append(new DiagnosticLabel(source, line, column, message, false)) }
+        addNote(message:string) -> void { self.notes.append(message) }
+        addFix(source:string, line:i64, column:i64, message:string, replacement:string) -> void { self.fixes.append(new FixHint(source, line, column, message, replacement)) }
     }}
 
     DiagnosticBag {{

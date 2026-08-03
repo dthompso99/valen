@@ -12,6 +12,9 @@ entry {{
         }
 
         local diagnostic = new Diagnostics.Diagnostic(2, "unexpected token", "sample.ar", 4, 12)
+        diagnostic.addLabel("sample.ar", 2, 5, "construct started here")
+        diagnostic.addNote("a closing delimiter is required")
+        diagnostic.addFix("sample.ar", 4, 12, "insert the missing delimiter", "}")
         bag.add(diagnostic)
         local first = bag.first()
         if first == null {
@@ -24,7 +27,7 @@ entry {{
             return 4
         }
         local rendered = Diagnostics.format(resolved)
-        if bag.length() == 1 && resolved.message == "unexpected token" && resolved.line == 4 && rendered == "sample.ar:4:12: unexpected token" {
+        if bag.length() == 1 && resolved.message == "unexpected token" && resolved.line == 4 && rendered == "sample.ar:4:12: unexpected token\n  --> sample.ar:2:5: construct started here\n  note: a closing delimiter is required\n  help: insert the missing delimiter\n  fix: sample.ar:4:12: replace with '}'" {
             return 0
         } else {
             return 5

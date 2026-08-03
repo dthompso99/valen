@@ -261,4 +261,4 @@ test arithmetic {{
 }}
 ```
 
-A failing expectation produces a nonzero native process status. Richer diagnostic notes, fix hints, and multi-span labels are **WIP**.
+A failing expectation produces a nonzero native process status. Compiler diagnostics distinguish errors, warnings, and notes. A diagnostic may identify related source locations, explain the governing rule, and provide a precise replacement hint. The first line remains `path:line:column: severity: message` for editor and script compatibility.

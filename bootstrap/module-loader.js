@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import {Parser} from './parser.js';
+import {diagnostic, DiagnosticSeverity} from './diagnostics.js';
 
 export class ModuleLoader {
     constructor({sourceRoot, libraryPath = process.env.VALEN_LIBRARY_PATH ?? process.env.ARGON_LIBRARY_PATH} = {}) {
@@ -89,8 +90,8 @@ export class ModuleLoader {
     }
 
     report(span, message) {
-        this.diagnostics.push({severity: 'error', message, span: span ?? {
+        this.diagnostics.push(diagnostic(DiagnosticSeverity.error, message, span ?? {
             source: '<module-loader>', line: 1, column: 1, start: 0, end: 0
-        }});
+        }));
     }
 }

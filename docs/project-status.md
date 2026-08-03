@@ -65,7 +65,7 @@ and embedded targets.
 - Generation 1 and generation 2 report identical diagnostics for the shared invalid-program corpus.
 - JavaScript generation 0 is intentionally retained as the stable path from zero; generated native compilers run without JavaScript.
 - **WIP:** formatter and language server
-- **WIP:** richer diagnostics with notes, fixes, and multiple spans
+- Diagnostics have named error/warning/note severities, primary and secondary source labels, explanatory notes, and precise replacement hints with generation parity.
 - **WIP:** package metadata, versioning, and compiled libraries
 - **WIP:** optimization levels, register allocation, and peephole optimization
 - Generation 0 and the self-hosted compiler emit ELF64 relocatable objects without a system assembler.

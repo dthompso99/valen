@@ -1795,7 +1795,11 @@ library Semantics {{
                 local source = resolvedSource!
                 if source.kind == "Local" || source.kind == "Parameter" {
                     if source.ownership != "owned" {
-                        self.error(expression.span, "Cannot pass borrowed reference '" + source.name + "' to owning parameter '" + parameter.name + "'; use 'copy " + source.name + "'")
+                        local diagnostic = new Diagnostics.Diagnostic(Diagnostics.errorSeverity(), "Cannot pass borrowed reference '" + source.name + "' to owning parameter '" + parameter.name + "'; use 'copy " + source.name + "'", expression.span)
+                        diagnostic.addLabel(parameter.span, "parameter '" + parameter.name + "' takes ownership")
+                        diagnostic.addNote("ordinary arguments borrow references unless ownership is transferred explicitly")
+                        diagnostic.addFix(expression.span, "create an independent owned value for '" + parameter.name + "'", "copy " + source.name)
+                        self.diagnostics.add(diagnostic)
                         return
                     }
                     if !self.isExternalResource(source.typeName!) || parameter.owner == null || !parameter.owner!.isNative { source.ownership = "borrowed" }

@@ -2,16 +2,45 @@ import System from 'libSystem.ar'
 import Compiler from 'libCompiler.ar'
 
 library Diagnostics {{
+    errorSeverity() -> u8 { return 1 }
+    warningSeverity() -> u8 { return 2 }
+    noteSeverity() -> u8 { return 3 }
+
+    DiagnosticLabel {{
+        member span:Compiler.SourceSpan
+        member message:string
+        member primary:bool
+        __(span:Compiler.SourceSpan, message:string, primary:bool) -> void { self.span = span; self.message = message; self.primary = primary }
+    }}
+
+    FixHint {{
+        member span:Compiler.SourceSpan
+        member message:string
+        member replacement:string
+        __(span:Compiler.SourceSpan, message:string, replacement:string) -> void { self.span = span; self.message = message; self.replacement = replacement }
+    }}
+
     Diagnostic {{
         member severity:u8
         member message:string
         member span:Compiler.SourceSpan
+        member labels:Array<DiagnosticLabel>
+        member notes:Array<string>
+        member fixes:Array<FixHint>
 
         __(severity:u8, message:string, span:Compiler.SourceSpan) -> void {
             self.severity = severity
             self.message = message
             self.span = span
+            self.labels = new Array<DiagnosticLabel>(0)
+            self.notes = new Array<string>(0)
+            self.fixes = new Array<FixHint>(0)
+            self.labels.append(new DiagnosticLabel(span, message, true))
         }
+
+        addLabel(span:Compiler.SourceSpan, message:string) -> void { self.labels.append(new DiagnosticLabel(span, message, false)) }
+        addNote(message:string) -> void { self.notes.append(message) }
+        addFix(span:Compiler.SourceSpan, message:string, replacement:string) -> void { self.fixes.append(new FixHint(span, message, replacement)) }
     }}
 
     DiagnosticBag {{
@@ -58,6 +87,23 @@ library Diagnostics {{
         builder.append(severityName(diagnostic.severity))
         builder.append(": ")
         builder.append(diagnostic.message)
+        local labelIndex:i64 = 0
+        while labelIndex < diagnostic.labels.length {
+            local label = diagnostic.labels[labelIndex]
+            if !label.primary {
+                builder.append("\n  --> "); builder.append(label.span.source.path); builder.append(":"); builder.append(label.span.line); builder.append(":"); builder.append(label.span.column); builder.append(": "); builder.append(label.message)
+            }
+            labelIndex = labelIndex + 1
+        }
+        local noteIndex:i64 = 0
+        while noteIndex < diagnostic.notes.length { builder.append("\n  note: "); builder.append(diagnostic.notes[noteIndex]); noteIndex = noteIndex + 1 }
+        local fixIndex:i64 = 0
+        while fixIndex < diagnostic.fixes.length {
+            local fix = diagnostic.fixes[fixIndex]
+            builder.append("\n  help: "); builder.append(fix.message)
+            builder.append("\n  fix: "); builder.append(fix.span.source.path); builder.append(":"); builder.append(fix.span.line); builder.append(":"); builder.append(fix.span.column); builder.append(": replace with '"); builder.append(fix.replacement); builder.append("'")
+            fixIndex = fixIndex + 1
+        }
         return builder.build()
     }
 
