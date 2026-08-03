@@ -32,6 +32,8 @@ WORKDIR /app
 COPY --from=stage2 /app/dist/argon .
 #for now, we'll use stage3 as a testing stage.
 COPY examples/ ./examples/
+COPY bootstrap/test/fixtures/native-tests.ar ./tests/native-tests.ar
+COPY bootstrap/test/fixtures/native-tests-failing.ar ./tests/native-tests-failing.ar
 COPY lib/ ./lib/
 ENV ARGON_LIBRARY_PATH=/app/lib
 RUN mkdir dist
@@ -40,5 +42,9 @@ RUN ["./argon", "examples/simple/simple.ar", "-o", "dist/simple"]
 RUN ["dist/simple"]
 RUN ["./argon", "examples/nested/nested.ar", "-o", "dist/nested"]
 RUN ["dist/nested"]
+RUN ["./argon", "tests/native-tests.ar", "-o", "dist/native-tests"]
+RUN ["dist/native-tests"]
+RUN ["./argon", "tests/native-tests-failing.ar", "-o", "dist/native-tests-failing"]
+RUN /bin/sh -c 'dist/native-tests-failing >/tmp/test.stdout 2>/tmp/test.stderr; status=$?; test "$status" -eq 1; grep -q "test failed" /tmp/test.stderr'
 RUN ls -al dist
-CMD ["/bin/bash"]
+CMD ["/bin/sh"]

@@ -1,34 +1,64 @@
-name: Boostrap Argon
+name: Argon compiler
 
-on: 
+on:
   push:
+    branches:
+      - main
     paths:
       - 'bootstrap/**'
+      - 'src/**'
+      - 'lib/**'
+      - 'examples/**'
+      - 'docker/**'
+      - '.gitea/workflows/bootstrap.yaml'
+  pull_request:
+    paths:
+      - 'bootstrap/**'
+      - 'src/**'
+      - 'lib/**'
+      - 'examples/**'
+      - 'docker/**'
+      - '.gitea/workflows/bootstrap.yaml'
   workflow_dispatch:
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-      - name: Login to Registry
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Run bootstrap compiler tests
+        working-directory: bootstrap
+        run: npm test
+
+      - name: Build and test bootstrap generations
+        run: docker build --pull --target stage3 -t argon:test -f ./docker/Dockerfile.bootstrap .
+
+      - name: Login to registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
           REGISTRY_HOST: gitea.hallrd.click
         run: |
+          set -euo pipefail
           echo "$REGISTRY_PASSWORD" | docker login $REGISTRY_HOST -u "$REGISTRY_USERNAME" --password-stdin
-      - name: Build and push Argon image
+
+      - name: Publish tested Argon image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           REGISTRY_HOST: gitea.hallrd.click
           NAMESPACE: dthompson
           IMAGE_AGENT: argon
         run: |
           set -euo pipefail
-          docker build --no-cache --pull \
-            -t $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:latest \
-            -t $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:${{ github.sha }} \
-            -f ./docker/Dockerfile.bootstrap .
+          docker tag argon:test $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:latest
+          docker tag argon:test $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:${{ github.sha }}
           docker push $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:latest
           docker push $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:${{ github.sha }}
