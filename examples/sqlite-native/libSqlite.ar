@@ -1,0 +1,84 @@
+library SQLite {{
+    unsafe native open() -> Database from "valen_sqlite_adapter" as "valen_sqlite_open"
+    unsafe native initialize(database:Database) -> i32 from "valen_sqlite_adapter" as "valen_sqlite_initialize"
+    unsafe native readValue(database:Database) -> i64 from "valen_sqlite_adapter" as "valen_sqlite_get"
+    unsafe native writeValue(database:Database, value:i64) -> i32 from "valen_sqlite_adapter" as "valen_sqlite_set"
+    unsafe native errorCode(database:Database) -> i32 from "valen_sqlite_adapter" as "valen_sqlite_error_code"
+    unsafe native errorLength(database:Database) -> i64 from "valen_sqlite_adapter" as "valen_sqlite_error_length"
+    unsafe native errorByte(database:Database, index:i64) -> u8 from "valen_sqlite_adapter" as "valen_sqlite_error_byte"
+    unsafe native close(own database:Database) -> i32 from "valen_sqlite_adapter" as "valen_sqlite_close"
+
+    Database {{}}
+
+    Store {{
+        member database:Database?
+        member value:i64
+        member error:i64
+        member message:string
+
+        __() -> void {
+            self.database = null
+            self.value = 0
+            self.error = 0
+            self.message = ""
+        }
+
+        load() -> bool {
+            unsafe { self.database = SQLite.open() }
+            if self.database == null { self.error = -1; self.message = "SQLite adapter allocation failed"; return false }
+            local initialized:i32 = 0
+            unsafe { initialized = SQLite.initialize(self.database!) }
+            if initialized != 0 { self.captureError(); self.close(); return false }
+            unsafe { self.value = SQLite.readValue(self.database!) }
+            local readError:i32 = 0
+            unsafe { readError = SQLite.errorCode(self.database!) }
+            if readError != 0 { self.captureError(); self.close(); return false }
+            return true
+        }
+
+        update(value:i64) -> bool {
+            if self.database == null { self.error = -1; return false }
+            local result:i32 = 0
+            unsafe { result = SQLite.writeValue(self.database!, value) }
+            if result != 0 { self.captureError(); return false }
+            self.value = value
+            self.error = 0
+            self.message = ""
+            return true
+        }
+
+        captureError() -> void {
+            if self.database == null { self.error = -1; self.message = "SQLite database is unavailable"; return }
+            unsafe { self.error = SQLite.errorCode(self.database!) as i64 }
+            self.message = self.readErrorMessage()
+        }
+
+        errorMessage() -> string {
+            return self.message
+        }
+
+        readErrorMessage() -> string {
+            if self.database == null { return "SQLite database is unavailable" }
+            local length:i64 = 0
+            unsafe { length = SQLite.errorLength(self.database!) }
+            local output = new StringBuilder()
+            local index:i64 = 0
+            while index < length {
+                local byte:u8 = 0
+                unsafe { byte = SQLite.errorByte(self.database!, index) }
+                output.appendByte(byte)
+                index = index + 1
+            }
+            return output.build()
+        }
+
+        close() -> void {
+            if self.database != null {
+                local result:i32 = 0
+                unsafe { result = SQLite.close(self.database!) }
+                self.database = null
+                if result != 0 { self.error = result as i64 }
+            }
+        }
+    }}
+}}

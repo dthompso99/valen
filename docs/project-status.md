@@ -50,6 +50,11 @@ cancellation, bounded request/response buffering, and partial nonblocking writes
 threads. It has live generation-1/generation-2 concurrency and restart coverage without external
 libraries. DNS, TLS, concurrent persistence, graceful shutdown, and production HTTP parsing remain **WIP**.
 
+The SQLite service demonstrates opaque foreign resources, transactional prepared statements, native
+error conversion, and explicit dynamic dependency provisioning. SQLite is optional: ordinary Valen
+executables do not acquire a C runtime or SQLite dependency unless they import that foreign boundary.
+Static foreign-library selection and a vendored SQLite deployment remain **WIP**.
+
 The freestanding language/runtime capability profile is defined for future kernels, firmware,
 and embedded targets.
 

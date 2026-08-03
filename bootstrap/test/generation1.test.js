@@ -39,13 +39,13 @@ async function runHttpService(executable, environment, statePath, requests) {
         await new Promise((resolve, reject) => {
             const timeout = setTimeout(() => reject(new Error(`HTTP service did not become ready\n${stderr || stdout}`)), 3000);
             const inspect = () => {
-                if (!stdout.includes('valen-http: ready')) return;
+                if (!stdout.includes('ready on http://')) return;
                 clearTimeout(timeout);
                 resolve();
             };
             child.stdout.on('data', inspect);
             child.once('exit', status => {
-                if (!stdout.includes('valen-http: ready')) {
+                if (!stdout.includes('ready on http://')) {
                     clearTimeout(timeout);
                     reject(new Error(`HTTP service exited before readiness with status ${status}\n${stderr || stdout}`));
                 }
@@ -81,13 +81,13 @@ async function runConcurrentHttpService(executable, environment, statePath) {
         await new Promise((resolve, reject) => {
             const timeout = setTimeout(() => reject(new Error(`concurrent HTTP service did not become ready\n${stderr || stdout}`)), 3000);
             const inspect = () => {
-                if (!stdout.includes('valen-http: ready')) return;
+                if (!stdout.includes('ready on http://')) return;
                 clearTimeout(timeout);
                 resolve();
             };
             child.stdout.on('data', inspect);
             child.once('exit', status => {
-                if (!stdout.includes('valen-http: ready')) {
+                if (!stdout.includes('ready on http://')) {
                     clearTimeout(timeout);
                     reject(new Error(`concurrent HTTP service exited before readiness with status ${status}\n${stderr || stdout}`));
                 }
@@ -148,6 +148,16 @@ test('generation 1 passes the native compiler conformance suite', async t => {
         assert.match(compilerObject.stdout, /Type:\s+REL/);
 
         const environment = {...process.env, VALEN_LIBRARY_PATH: path.join(projectRoot, 'lib')};
+        const nativeLibraryPath = path.join(directory, 'native');
+        const adapter = spawnSync(path.join(projectRoot, 'scripts/build-sqlite-adapter.sh'), [nativeLibraryPath], {
+            encoding: 'utf8', cwd: projectRoot
+        });
+        assert.equal(adapter.status, 0, adapter.stderr || adapter.stdout);
+        const adapterDynamic = spawnSync('readelf', ['-d', path.join(nativeLibraryPath, 'libvalen_sqlite_adapter.so')], {encoding: 'utf8'});
+        assert.equal(adapterDynamic.status, 0, adapterDynamic.stderr);
+        assert.match(adapterDynamic.stdout, /NEEDED.*libsqlite3\.so/);
+        environment.LIBRARY_PATH = nativeLibraryPath;
+        environment.LD_LIBRARY_PATH = nativeLibraryPath;
         const compilerDynamic = spawnSync('readelf', ['-d', compilerPath], {encoding: 'utf8'});
         assert.equal(compilerDynamic.status, 0, compilerDynamic.stderr);
         assert.doesNotMatch(compilerDynamic.stdout, /NEEDED/, 'generation 1 unexpectedly requires a shared library');
@@ -294,8 +304,12 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                         assert.equal(compile.status, 0, compile.stderr || compile.stdout);
                         const dynamic = spawnSync('readelf', ['-d', executable], {encoding: 'utf8'});
                         assert.equal(dynamic.status, 0, dynamic.stderr);
-                        assert.doesNotMatch(dynamic.stdout, /NEEDED/, `${fixture.source} unexpectedly requires a shared library`);
-                        if (fixture.live) {
+                        if (fixture.foreignDependency) {
+                            assert.match(dynamic.stdout, new RegExp(`NEEDED.*${fixture.foreignDependency.replaceAll('.', '\\.')}`));
+                        } else {
+                            assert.doesNotMatch(dynamic.stdout, /NEEDED/, `${fixture.source} unexpectedly requires a shared library`);
+                        }
+                        if (fixture.live === 'file') {
                             const statePath = path.join(directory, `state-${generation}`);
                             const get = target => `GET ${target} HTTP/1.1\r\nHost: localhost\r\n\r\n`;
                             const put = value => `PUT /value HTTP/1.1\r\nHost: localhost\r\nContent-Length: ${value.length}\r\n\r\n${value}`;
@@ -335,6 +349,41 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                             assert.match(corrupt.stderr, /invalid or unreadable state/);
                             fs.rmSync(statePath, {force: true});
                             await runConcurrentHttpService(executable, environment, statePath);
+                        }
+                        if (fixture.live === 'sqlite') {
+                            const databasePath = path.join(directory, `database-${generation}.sqlite`);
+                            const sqliteEnvironment = {...environment, VALEN_DATABASE_PATH: databasePath};
+                            const get = target => `GET ${target} HTTP/1.1\r\nHost: localhost\r\n\r\n`;
+                            const put = value => `PUT /value HTTP/1.1\r\nHost: localhost\r\nContent-Length: ${value.length}\r\n\r\n${value}`;
+
+                            const initial = await runHttpService(executable, sqliteEnvironment, databasePath, [
+                                get('/health'), get('/config'), get('/value'), put('99')
+                            ]);
+                            assert.match(initial[0], /\r\n\r\nok\n$/);
+                            assert.match(initial[1], /\r\n\r\nservice=conformance\n$/);
+                            assert.match(initial[2], /\r\n\r\n0\n$/);
+                            assert.match(initial[3], /\r\n\r\n99\n$/);
+                            assert.equal(fs.existsSync(databasePath), true);
+
+                            const restarted = await runHttpService(executable, sqliteEnvironment, databasePath, [
+                                get('/value'), put('-11'), get('/missing'), get('/health')
+                            ]);
+                            assert.match(restarted[0], /\r\n\r\n99\n$/);
+                            assert.match(restarted[1], /\r\n\r\n-11\n$/);
+                            assert.match(restarted[2], /^HTTP\/1\.1 404 Not Found\r\n/);
+                            assert.match(restarted[3], /\r\n\r\nok\n$/);
+
+                            fs.writeFileSync(databasePath, 'not a sqlite database');
+                            const corrupt = spawnSync(executable, [], {
+                                encoding: 'utf8', cwd: projectRoot,
+                                env: {...sqliteEnvironment, VALEN_REQUEST_LIMIT: '1'}
+                            });
+                            assert.equal(corrupt.status, 78, corrupt.stderr || corrupt.stdout);
+                            assert.match(corrupt.stderr, /database initialization failed; SQLite error/);
+                            assert.match(corrupt.stderr, /not a database/i);
+
+                            fs.rmSync(databasePath, {force: true});
+                            await runConcurrentHttpService(executable, sqliteEnvironment, databasePath);
                         }
                     }
                 });

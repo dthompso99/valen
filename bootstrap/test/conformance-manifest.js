@@ -36,7 +36,8 @@ export const targetFailures = [
 ];
 
 export const compileOnlyPrograms = [
-    {name: 'native HTTP service', source: 'examples/http-native/server.ar', live: true}
+    {name: 'native HTTP service', source: 'examples/http-native/server.ar', live: 'file'},
+    {name: 'SQLite-backed native HTTP service', source: 'examples/sqlite-native/server.ar', live: 'sqlite', foreignDependency: 'libvalen_sqlite_adapter.so'}
 ];
 
 export const invalidPrograms = [

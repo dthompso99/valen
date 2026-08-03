@@ -37,6 +37,9 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install native service dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
       - name: Run bootstrap compiler tests
         working-directory: bootstrap
         run: npm test

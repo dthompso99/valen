@@ -1,0 +1,100 @@
+import Network from 'libNetwork.ar'
+import EventLoop from 'libEventLoop.ar'
+import System from 'libSystem.ar'
+import Http from '../http-native/libHttp.ar'
+import Service from '../http-native/libService.ar'
+import SQLite from 'libSqlite.ar'
+
+entry {{
+    member serviceName:string
+    member store:SQLite.Store
+
+    __() -> i32 {
+        System.enableProcessArena()
+        local configuredName = System.environmentVariable("VALEN_SERVICE_NAME")
+        if configuredName == null { self.serviceName = "Valen SQLite" } else { self.serviceName = configuredName! }
+        self.store = new SQLite.Store()
+        if !self.store.load() {
+            System.writeError("valen-sqlite: database initialization failed; SQLite error ")
+            System.writeError(self.store.error.toString())
+            System.writeError(": ")
+            System.writeError(self.store.errorMessage())
+            System.writeError("\n")
+            return 78
+        }
+        local requestLimit:i64 = 4
+        local configuredLimit = System.environmentVariable("VALEN_REQUEST_LIMIT")
+        if configuredLimit != null {
+            local parsedLimit = System.parseInteger(configuredLimit!)
+            if !parsedLimit.valid || parsedLimit.value < 1 { self.store.close(); return 64 }
+            requestLimit = parsedLimit.value
+        }
+        local listener = Network.listen(18080, 16)
+        if listener == null { self.store.close(); return 1 }
+        if !Network.makeListenerNonblocking(listener!) {
+            Network.closeListener(listener!)
+            self.store.close()
+            return 2
+        }
+        System.write("valen-sqlite: ready on http://127.0.0.1:18080\n")
+        local loop = new Service.Loop()
+        local completed:i64 = 0
+        while completed < requestLimit {
+            local descriptors = loop.descriptors(listener!)
+            local interests = loop.interests()
+            local ready = EventLoop.wait(descriptors, interests, 50)
+            completed = completed + loop.expire(EventLoop.monotonicMilliseconds())
+            if ready == 0 {
+                if !loop.accept(listener!) { Network.closeListener(listener!); self.store.close(); return 3 }
+            } else {
+                if ready > 0 {
+                    local index = loop.clientAt(ready - 1)
+                    if index >= 0 {
+                        local client = loop.clients[index]!
+                        local terminal:bool = false
+                        if client.output.length == 0 {
+                            local received = client.receive(loop.maximumRequest)
+                            if received < 0 { terminal = true }
+                            if received == 2 { client.respond(new Http.Response("413 Content Too Large", "request too large\n"), loop.maximumResponse) }
+                            if received == 3 { client.respond(new Http.Response("400 Bad Request", "bad request\n"), loop.maximumResponse) }
+                            if received == 1 {
+                                local request = Http.parse(client.input)
+                                if request == null { client.respond(new Http.Response("400 Bad Request", "bad request\n"), loop.maximumResponse) }
+                                else { client.respond(self.route(request!), loop.maximumResponse) }
+                            }
+                        } else {
+                            local flushed = client.flush()
+                            if flushed != 0 { terminal = true }
+                        }
+                        if terminal { loop.close(index); completed = completed + 1 }
+                    }
+                }
+            }
+        }
+        local index:i64 = 0
+        while index < loop.clients.length { loop.close(index); index = index + 1 }
+        Network.closeListener(listener!)
+        self.store.close()
+        return 0
+    }
+
+    route(request:Http.Request) -> Http.Response {
+        if request.method == "GET" && request.target == "/health" { return new Http.Response("200 OK", "ok\n") }
+        if request.method == "GET" && request.target == "/config" { return new Http.Response("200 OK", "service=" + self.serviceName + "\n") }
+        if request.method == "GET" && request.target == "/value" { return new Http.Response("200 OK", self.store.value.toString() + "\n") }
+        if request.method == "PUT" && request.target == "/value" {
+            local parsed = System.parseInteger(request.body)
+            if !parsed.valid { return new Http.Response("400 Bad Request", "invalid value\n") }
+            if !self.store.update(parsed.value) {
+                System.writeError("valen-sqlite: update failed; SQLite error ")
+                System.writeError(self.store.error.toString())
+                System.writeError(": ")
+                System.writeError(self.store.errorMessage())
+                System.writeError("\n")
+                return new Http.Response("500 Internal Server Error", "database update failed\n")
+            }
+            return new Http.Response("200 OK", self.store.value.toString() + "\n")
+        }
+        return new Http.Response("404 Not Found", "not found\n")
+    }
+}}
