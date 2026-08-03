@@ -11,7 +11,10 @@ library System {{
     native openWrite(path:string) -> File?
     native read(file:File, count:i64) -> string?
     native writeFile(file:File, input:string) -> i64
+    native sync(file:File) -> i64
     native close(own file:File) -> i64
+    native replaceFile(source:string, destination:string) -> i64
+    native removeFile(path:string) -> i64
     native lastError() -> i64
     native currentDirectory() -> string?
     native environmentVariable(name:string) -> string?
@@ -22,6 +25,39 @@ library System {{
     native memoryCompare(left:Array<u8>, leftOffset:i64, right:Array<u8>, rightOffset:i64, count:i64) -> i64
     native fileDescriptor(file:File) -> i64
     native makeFileNonblocking(file:File) -> bool
+
+    parseInteger(input:string) -> IntegerParseResult {
+        if input.length == 0 { return new IntegerParseResult(false, 0) }
+        local negative:bool = false
+        local index:i64 = 0
+        if input[0] == 45 { negative = true; index = 1 }
+        if index == input.length { return new IntegerParseResult(false, 0) }
+        local value:i64 = 0
+        local digits:i64 = 0
+        while index < input.length {
+            local byte = input[index]
+            if byte < 48 || byte > 57 {
+                while index < input.length {
+                    local trailing = input[index]
+                    if trailing != 9 && trailing != 10 && trailing != 13 && trailing != 32 { return new IntegerParseResult(false, 0) }
+                    index = index + 1
+                }
+                if digits == 0 { return new IntegerParseResult(false, 0) }
+                return new IntegerParseResult(true, value)
+            }
+            local digit = (byte - 48) as i64
+            if negative {
+                if value < (-9223372036854775808 + digit) / 10 { return new IntegerParseResult(false, 0) }
+                value = value * 10 - digit
+            } else {
+                if value > (9223372036854775807 - digit) / 10 { return new IntegerParseResult(false, 0) }
+                value = value * 10 + digit
+            }
+            digits = digits + 1
+            index = index + 1
+        }
+        return new IntegerParseResult(digits > 0, value)
+    }
 
     resolvePath(sourceRoot:string, importer:string, specifier:string) -> string {
         if specifier.length > 0 {
@@ -45,5 +81,15 @@ library System {{
 
     File {{
         member descriptor:i64
+    }}
+
+    IntegerParseResult {{
+        member valid:bool
+        member value:i64
+
+        __(valid:bool, value:i64) -> void {
+            self.valid = valid
+            self.value = value
+        }
     }}
 }}

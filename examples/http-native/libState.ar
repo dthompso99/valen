@@ -1,0 +1,73 @@
+import System from 'libSystem.ar'
+
+library State {{
+    Store {{
+        member path:string
+        member value:i64
+        member errorCode:i64
+
+        __(path:string) -> void {
+            self.path = path
+            self.value = 0
+            self.errorCode = 0
+        }
+
+        load() -> bool {
+            local input = System.openRead(self.path)
+            if input == null {
+                self.errorCode = System.lastError()
+                if self.errorCode == 2 { self.errorCode = 0; self.value = 0; return true }
+                return false
+            }
+            local content = System.read(input!, 4096)
+            if content == null {
+                self.errorCode = System.lastError()
+                System.close(input!)
+                return false
+            }
+            if System.close(input!) != 0 { self.errorCode = System.lastError(); return false }
+            local parsed = System.parseInteger(content!)
+            if !parsed.valid { self.errorCode = 22; return false }
+            self.value = parsed.value
+            self.errorCode = 0
+            return true
+        }
+
+        update(value:i64) -> bool {
+            if !self.persist(value) { return false }
+            self.value = value
+            return true
+        }
+
+        persist(value:i64) -> bool {
+            local temporary = self.path + ".tmp"
+            local content = value.toString() + "\n"
+            local output = System.openWrite(temporary)
+            if output == null { self.errorCode = System.lastError(); return false }
+            if System.writeFile(output!, content) != content.length {
+                self.errorCode = System.lastError()
+                System.close(output!)
+                System.removeFile(temporary)
+                return false
+            }
+            if System.sync(output!) != 0 {
+                self.errorCode = System.lastError()
+                System.close(output!)
+                System.removeFile(temporary)
+                return false
+            }
+            if System.close(output!) != 0 {
+                self.errorCode = System.lastError()
+                System.removeFile(temporary)
+                return false
+            }
+            if System.replaceFile(temporary, self.path) != 0 {
+                self.errorCode = System.lastError()
+                System.removeFile(temporary)
+                return false
+            }
+            self.errorCode = 0
+            return true
+        }
+    }}
+}}

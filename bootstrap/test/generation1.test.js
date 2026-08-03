@@ -22,10 +22,11 @@ const exchange = request => new Promise((resolve, reject) => {
     socket.once('error', reject);
 });
 
-async function runHttpService(executable, environment) {
+async function runHttpService(executable, environment, statePath, requests) {
+    assert.equal(requests.length, 4, 'the deterministic service test requires exactly four requests');
     const child = spawn(executable, [], {
         cwd: projectRoot,
-        env: {...environment, VALEN_SERVICE_NAME: 'conformance'}
+        env: {...environment, VALEN_SERVICE_NAME: 'conformance', VALEN_STATE_PATH: statePath}
     });
     let stdout = '';
     let stderr = '';
@@ -52,25 +53,12 @@ async function runHttpService(executable, environment) {
             inspect();
         });
 
-        const health = await exchange('GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n');
-        assert.match(health, /^HTTP\/1\.1 200 OK\r\n/);
-        assert.match(health, /\r\nContent-Length: 3\r\n/);
-        assert.match(health, /\r\n\r\nok\n$/);
-
-        const config = await exchange('GET /config HTTP/1.1\r\nHost: localhost\r\n\r\n');
-        assert.match(config, /^HTTP\/1\.1 200 OK\r\n/);
-        assert.match(config, /\r\n\r\nservice=conformance\n$/);
-
-        const missing = await exchange('GET /missing HTTP/1.1\r\nHost: localhost\r\n\r\n');
-        assert.match(missing, /^HTTP\/1\.1 404 Not Found\r\n/);
-        assert.match(missing, /\r\n\r\nnot found\n$/);
-
-        const malformed = await exchange('POST /health HTTP/1.1\r\nHost: localhost\r\n\r\n');
-        assert.match(malformed, /^HTTP\/1\.1 400 Bad Request\r\n/);
-        assert.match(malformed, /\r\n\r\nbad request\n$/);
+        const responses = [];
+        for (const request of requests) responses.push(await exchange(request));
 
         const result = await exited;
         assert.equal(result.status, 0, stderr || stdout || `HTTP service terminated by ${result.signal}`);
+        return responses;
     } finally {
         if (child.exitCode == null && child.signalCode == null) child.kill('SIGKILL');
     }
@@ -242,7 +230,45 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                         const dynamic = spawnSync('readelf', ['-d', executable], {encoding: 'utf8'});
                         assert.equal(dynamic.status, 0, dynamic.stderr);
                         assert.doesNotMatch(dynamic.stdout, /NEEDED/, `${fixture.source} unexpectedly requires a shared library`);
-                        if (fixture.live) await runHttpService(executable, environment);
+                        if (fixture.live) {
+                            const statePath = path.join(directory, `state-${generation}`);
+                            const get = target => `GET ${target} HTTP/1.1\r\nHost: localhost\r\n\r\n`;
+                            const put = value => `PUT /value HTTP/1.1\r\nHost: localhost\r\nContent-Length: ${value.length}\r\n\r\n${value}`;
+
+                            const initial = await runHttpService(executable, environment, statePath, [
+                                get('/health'), get('/config'), get('/value'), put('42')
+                            ]);
+                            assert.match(initial[0], /^HTTP\/1\.1 200 OK\r\n[\s\S]*\r\n\r\nok\n$/);
+                            assert.match(initial[1], /\r\n\r\nservice=conformance\n$/);
+                            assert.match(initial[2], /\r\n\r\n0\n$/);
+                            assert.match(initial[3], /^HTTP\/1\.1 200 OK\r\n[\s\S]*\r\n\r\n42\n$/);
+                            assert.equal(fs.readFileSync(statePath, 'utf8'), '42\n');
+
+                            const restarted = await runHttpService(executable, environment, statePath, [
+                                get('/value'), put('invalid'), get('/missing'), put('-7')
+                            ]);
+                            assert.match(restarted[0], /\r\n\r\n42\n$/);
+                            assert.match(restarted[1], /^HTTP\/1\.1 400 Bad Request\r\n[\s\S]*\r\n\r\ninvalid value\n$/);
+                            assert.match(restarted[2], /^HTTP\/1\.1 404 Not Found\r\n[\s\S]*\r\n\r\nnot found\n$/);
+                            assert.match(restarted[3], /\r\n\r\n-7\n$/);
+                            assert.equal(fs.readFileSync(statePath, 'utf8'), '-7\n');
+
+                            const verified = await runHttpService(executable, environment, statePath, [
+                                get('/value'), 'not http', get('/missing'), get('/health')
+                            ]);
+                            assert.match(verified[0], /\r\n\r\n-7\n$/);
+                            assert.match(verified[1], /^HTTP\/1\.1 400 Bad Request\r\n[\s\S]*\r\n\r\nbad request\n$/);
+                            assert.match(verified[2], /^HTTP\/1\.1 404 Not Found\r\n/);
+                            assert.match(verified[3], /\r\n\r\nok\n$/);
+
+                            fs.writeFileSync(statePath, 'not an integer\n');
+                            const corrupt = spawnSync(executable, [], {
+                                encoding: 'utf8', cwd: projectRoot,
+                                env: {...environment, VALEN_SERVICE_NAME: 'conformance', VALEN_STATE_PATH: statePath}
+                            });
+                            assert.equal(corrupt.status, 78, corrupt.stderr || corrupt.stdout);
+                            assert.match(corrupt.stderr, /invalid or unreadable state/);
+                        }
                     }
                 });
             }

@@ -1,0 +1,16 @@
+import System from "libSystem.ar"
+
+entry {{
+    __() -> i64 {
+        local positive = System.parseInteger("9223372036854775807")
+        if !positive.valid || positive.value != 9223372036854775807 { return 1 }
+
+        local negative = System.parseInteger("-9223372036854775808\n")
+        if !negative.valid || negative.value != -9223372036854775808 { return 2 }
+
+        if System.parseInteger("9223372036854775808").valid { return 3 }
+        if System.parseInteger("-9223372036854775809").valid { return 4 }
+        if System.parseInteger("12x").valid { return 5 }
+        return 0
+    }
+}}

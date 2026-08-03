@@ -51,7 +51,10 @@ export class X86_64Backend {
             'valen_System_read',
             'valen_System_writeFile',
             'valen_System_writeBytes',
+            'valen_System_sync',
             'valen_System_close',
+            'valen_System_replaceFile',
+            'valen_System_removeFile',
             'valen_System_lastError',
             'valen_System_currentDirectory',
             'valen_System_environmentVariable',
@@ -84,7 +87,8 @@ export class X86_64Backend {
         this.needsProcessArguments = runtimeSymbols.has('valen_System_arguments') || runtimeSymbols.has('valen_System_link') || runtimeSymbols.has('valen_System_environmentVariable');
         this.needsFilesystemState = [
             'valen_System_openRead', 'valen_System_openWrite', 'valen_System_read',
-            'valen_System_writeFile', 'valen_System_writeBytes', 'valen_System_close', 'valen_System_lastError',
+            'valen_System_writeFile', 'valen_System_writeBytes', 'valen_System_sync', 'valen_System_close',
+            'valen_System_replaceFile', 'valen_System_removeFile', 'valen_System_lastError',
             'valen_System_currentDirectory'
         ].some(symbol => runtimeSymbols.has(symbol));
 
@@ -109,7 +113,11 @@ export class X86_64Backend {
         if (runtimeSymbols.has('valen_System_read')) lines.push(...this.fileReadRuntime());
         if (runtimeSymbols.has('valen_System_writeFile')) lines.push(...this.fileWriteRuntime());
         if (runtimeSymbols.has('valen_System_writeBytes')) lines.push(...this.fileWriteBytesRuntime());
+        if (runtimeSymbols.has('valen_System_sync')) lines.push(...this.fileSyncRuntime());
         if (runtimeSymbols.has('valen_System_close')) lines.push(...this.fileCloseRuntime());
+        if (runtimeSymbols.has('valen_System_replaceFile') || runtimeSymbols.has('valen_System_removeFile')) {
+            lines.push(...this.pathMutationRuntime(runtimeSymbols));
+        }
         if (runtimeSymbols.has('valen_System_lastError')) lines.push(...this.lastErrorRuntime());
         if (runtimeSymbols.has('valen_System_currentDirectory')) lines.push(...this.currentDirectoryRuntime());
         if (runtimeSymbols.has('valen_System_environmentVariable')) lines.push(...this.environmentVariableRuntime());
@@ -1436,6 +1444,59 @@ export class X86_64Backend {
             '    ret',
             ''
         ];
+    }
+
+    fileSyncRuntime() {
+        return [
+            '.globl valen_System_sync',
+            'valen_System_sync:',
+            '    mov rdi, QWORD PTR [rdi]',
+            '    mov eax, 74',
+            '    syscall',
+            '    test rax, rax',
+            '    js .Lfile_sync_error',
+            '    mov QWORD PTR [rip+valen_filesystem_error], 0',
+            '    ret',
+            '.Lfile_sync_error:',
+            '    mov r10, rax',
+            '    neg r10',
+            '    mov QWORD PTR [rip+valen_filesystem_error], r10',
+            '    ret',
+            ''
+        ];
+    }
+
+    pathMutationRuntime(runtimeSymbols) {
+        const lines = [
+            '.Lvalen_path_cstring:',
+            '    push rbx', '    push r12', '    push r13',
+            '    mov r12, QWORD PTR [rdi]', '    mov r13, QWORD PTR [rdi+8]',
+            '    lea rdi, [r13+1]', '    call valen_alloc', '    mov rbx, rax',
+            '    mov rdi, rax', '    mov rsi, r12', '    mov rcx, r13', '    rep movsb',
+            '    mov BYTE PTR [rbx+r13], 0', '    mov rax, rbx',
+            '    pop r13', '    pop r12', '    pop rbx', '    ret', ''
+        ];
+        if (runtimeSymbols.has('valen_System_replaceFile')) lines.push(
+            '.globl valen_System_replaceFile', 'valen_System_replaceFile:',
+            '    push rbp', '    mov rbp, rsp', '    push r12', '    push r13',
+            '    mov r13, rsi', '    call .Lvalen_path_cstring', '    mov r12, rax',
+            '    mov rdi, r13', '    call .Lvalen_path_cstring', '    mov rsi, rax', '    mov rdi, r12',
+            '    mov eax, 82', '    syscall', '    test rax, rax', '    js .Lreplace_file_error',
+            '    mov QWORD PTR [rip+valen_filesystem_error], 0', '    jmp .Lreplace_file_done',
+            '.Lreplace_file_error:', '    mov r10, rax', '    neg r10',
+            '    mov QWORD PTR [rip+valen_filesystem_error], r10',
+            '.Lreplace_file_done:', '    pop r13', '    pop r12', '    leave', '    ret', ''
+        );
+        if (runtimeSymbols.has('valen_System_removeFile')) lines.push(
+            '.globl valen_System_removeFile', 'valen_System_removeFile:',
+            '    sub rsp, 8', '    call .Lvalen_path_cstring', '    add rsp, 8',
+            '    mov rdi, rax', '    mov eax, 87', '    syscall',
+            '    test rax, rax', '    js .Lremove_file_error',
+            '    mov QWORD PTR [rip+valen_filesystem_error], 0', '    ret',
+            '.Lremove_file_error:', '    mov r10, rax', '    neg r10',
+            '    mov QWORD PTR [rip+valen_filesystem_error], r10', '    ret', ''
+        );
+        return lines;
     }
 
     lastErrorRuntime() {

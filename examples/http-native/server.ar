@@ -2,14 +2,24 @@ import Network from 'libNetwork.ar'
 import EventLoop from 'libEventLoop.ar'
 import System from 'libSystem.ar'
 import Http from 'libHttp.ar'
+import State from 'libState.ar'
 
 entry {{
     member serviceName:string
+    member store:State.Store
 
     __() -> i32 {
         System.enableProcessArena()
         local configuredName = System.environmentVariable("VALEN_SERVICE_NAME")
         if configuredName == null { self.serviceName = "Valen" } else { self.serviceName = configuredName! }
+        local configuredPath = System.environmentVariable("VALEN_STATE_PATH")
+        if configuredPath == null { self.store = new State.Store("/tmp/valen-value.state") } else { self.store = new State.Store(configuredPath!) }
+        if !self.store.load() {
+            System.writeError("valen-http: invalid or unreadable state; OS error ")
+            System.writeError(self.store.errorCode.toString())
+            System.writeError("\n")
+            return 78
+        }
         local listener = Network.listen(18080, 16)
         if listener == null {
             System.writeError("valen-http: listen failed\n")
@@ -69,11 +79,25 @@ entry {{
     }
 
     route(request:Http.Request) -> Http.Response {
-        if request.target == "/health" {
+        if request.method == "GET" && request.target == "/health" {
             return new Http.Response("200 OK", "ok\n")
         }
-        if request.target == "/config" {
+        if request.method == "GET" && request.target == "/config" {
             return new Http.Response("200 OK", "service=" + self.serviceName + "\n")
+        }
+        if request.method == "GET" && request.target == "/value" {
+            return new Http.Response("200 OK", self.store.value.toString() + "\n")
+        }
+        if request.method == "PUT" && request.target == "/value" {
+            local parsed = System.parseInteger(request.body)
+            if !parsed.valid { return new Http.Response("400 Bad Request", "invalid value\n") }
+            if !self.store.update(parsed.value) {
+                System.writeError("valen-http: persistence failed; OS error ")
+                System.writeError(self.store.errorCode.toString())
+                System.writeError("\n")
+                return new Http.Response("500 Internal Server Error", "persistence failed\n")
+            }
+            return new Http.Response("200 OK", self.store.value.toString() + "\n")
         }
         return new Http.Response("404 Not Found", "not found\n")
     }

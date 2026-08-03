@@ -1,9 +1,13 @@
 library Http {{
     Request {{
+        member method:string
         member target:string
+        member body:string
 
-        __(target:string) -> void {
+        __(method:string, target:string, body:string) -> void {
+            self.method = method
             self.target = target
+            self.body = body
         }
     }}
 
@@ -22,15 +26,25 @@ library Http {{
     }}
 
     parse(input:string) -> Request? {
-        if input.length < 7 || input.slice(0, 4) != "GET " { return null }
-        local index:i64 = 4
+        local methodEnd:i64 = -1
+        local targetEnd:i64 = -1
+        local bodyStart:i64 = -1
+        local index:i64 = 0
         while index < input.length {
-            if input[index] == 32 {
-                if index == 4 { return null }
-                return new Request(input.slice(4, index - 4))
+            if methodEnd < 0 && input[index] == 32 {
+                methodEnd = index
+            } else {
+                if methodEnd >= 0 && targetEnd < 0 && input[index] == 32 { targetEnd = index }
+            }
+            if index + 3 < input.length {
+                if input[index] == 13 && input[index + 1] == 10 && input[index + 2] == 13 && input[index + 3] == 10 {
+                    bodyStart = index + 4
+                    index = input.length
+                }
             }
             index = index + 1
         }
-        return null
+        if methodEnd <= 0 || targetEnd <= methodEnd + 1 || bodyStart < 0 { return null }
+        return new Request(input.slice(0, methodEnd), input.slice(methodEnd + 1, targetEnd - methodEnd - 1), input.slice(bodyStart, input.length - bodyStart))
     }
 }}
