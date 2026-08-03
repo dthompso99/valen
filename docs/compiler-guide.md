@@ -28,7 +28,9 @@ source -> tokens -> AST -> module graph -> semantic symbols
 - Semantic analysis binds names, checks types/contracts, and enforces ownership.
 - IR lowering produces target-independent blocks and instructions.
 - Validation rejects malformed IR before backend generation.
-- The x86-64 backend emits assembly; the system C toolchain assembles and links it.
+- The x86-64 backend emits a controlled Intel-syntax subset. Generation 0 encodes that subset and
+  writes ELF64 relocatable objects directly; it invokes the system toolchain only for linking.
+  Direct object emission from the self-hosted compiler is **WIP**.
 
 Native executable builds can reuse validated backend artifacts by setting
 `ARGON_CACHE_PATH` to an existing writable directory. Cache keys include every loaded module's

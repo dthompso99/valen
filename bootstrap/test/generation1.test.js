@@ -24,6 +24,10 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             throw error;
         }
 
+        const compilerObject = spawnSync('readelf', ['-h', `${compilerPath}.o`], {encoding: 'utf8'});
+        assert.equal(compilerObject.status, 0, compilerObject.stderr);
+        assert.match(compilerObject.stdout, /Type:\s+REL/);
+
         const environment = {...process.env, ARGON_LIBRARY_PATH: path.join(projectRoot, 'lib')};
         const compilerDynamic = spawnSync('readelf', ['-d', compilerPath], {encoding: 'utf8'});
         assert.equal(compilerDynamic.status, 0, compilerDynamic.stderr);
