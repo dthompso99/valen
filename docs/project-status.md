@@ -44,7 +44,8 @@ Platforms without native threads are intended to use `InlineExecutor`; only x86-
 
 - Generation 1 builds a working generation-2 compiler within the supported 3 GiB peak-RSS budget.
 - Generation 1 and generation 2 produce equivalent normalized IR across the shared conformance corpus.
-- **WIP:** removing the final JavaScript bootstrap dependency
+- Generation 1 and generation 2 report identical diagnostics for the shared invalid-program corpus.
+- JavaScript generation 0 is intentionally retained as the stable path from zero; generated native compilers run without JavaScript.
 - **WIP:** formatter and language server
 - **WIP:** richer diagnostics with notes, fixes, and multiple spans
 - **WIP:** package metadata, versioning, and compiled libraries

@@ -111,8 +111,8 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 - [x] Generation 1 passes the compiler test suite
 - [x] Generation 1 builds generation 2 within the supported 3 GiB peak-RSS budget
 - [x] Generations 1 and 2 produce semantically equivalent normalized IR
-- [ ] Invalid programs produce consistent diagnostics across generations
-- [ ] Remove the final JavaScript runtime dependency
+- [x] Invalid programs produce consistent diagnostics across generations
+- [x] Retain JavaScript generation 0 as the stable path from zero; native generations have no JavaScript runtime dependency
 - [x] Stabilize the x86-64 Linux ABI and runtime
 - [ ] Add ARM64 and additional operating-system targets
 - [ ] Define the freestanding subset required for kernels and embedded systems

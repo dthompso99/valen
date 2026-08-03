@@ -22,3 +22,11 @@ export const expectedFailures = [
     {name: 'native test failure status', source: 'bootstrap/test/fixtures/native-tests-failing.ar', status: 1, stderr: /test failed/},
     {name: 'invalid float conversion status', source: 'bootstrap/test/fixtures/float-conversion-failing.ar', status: 76, stderr: /^$/}
 ];
+
+export const invalidPrograms = [
+    {name: 'invalid token', source: 'bootstrap/test/fixtures/invalid-token.ar', status: 65, stderr: /invalid-token\.ar:2:5: error: Unexpected byte 64/},
+    {name: 'missing contract implementation', source: 'bootstrap/test/fixtures/missing-implementation.ar', status: 65, stderr: /missing-implementation\.ar:5:1: error: Object 'Broken' is missing method 'required'/},
+    {name: 'invalid ownership transfer', source: 'bootstrap/test/fixtures/invalid-ownership.ar', status: 65, stderr: /invalid-ownership\.ar:12:21: error: Cannot pass borrowed reference 'engine'/},
+    {name: 'multiple semantic errors', source: 'bootstrap/test/fixtures/native-semantic-errors.ar', status: 65, stderr: /Cannot use value of type 'i64'[\s\S]*Unknown name 'missing'/},
+    {name: 'module import cycle', source: 'bootstrap/test/fixtures/module-cycle-a.ar', status: 65, stderr: /module-cycle-b\.ar:1:1: error: Circular import involving/}
+];

@@ -9,6 +9,6 @@ status and diagnostic output.
 
 Add a fixture to the manifest when it becomes a stable end-to-end language regression.
 Keep bootstrap-only structural assertions in `pipeline.test.js`. Generation 1 and generation
-2 emit deterministic, length-delimited IR snapshots for every valid manifest entry. Invalid-
-diagnostic comparisons should extend the same manifest rather than create independent fixture
-lists.
+2 emit deterministic, length-delimited IR snapshots for every valid manifest entry. Invalid
+manifest entries cover tokenization, module loading, semantic analysis, ownership, and multiple
+diagnostics; both generations must return the declared status and identical diagnostic text.

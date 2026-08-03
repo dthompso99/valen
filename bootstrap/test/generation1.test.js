@@ -6,7 +6,7 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {Compiler} from '../compiler.js';
-import {expectedFailures, validPrograms} from './conformance-manifest.js';
+import {expectedFailures, invalidPrograms, validPrograms} from './conformance-manifest.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -46,13 +46,13 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             });
         }
 
-        await t.test('generation 1 and 2 produce equivalent normalized IR', async t => {
-            const generation2Path = path.join(directory, 'argon-generation2');
-            const build = spawnSync(compilerPath, [path.join(projectRoot, 'src/argon.ar'), '-o', generation2Path], {
-                encoding: 'utf8', env: environment, cwd: projectRoot, maxBuffer: 64 * 1024 * 1024
-            });
-            assert.equal(build.status, 0, build.stderr || build.stdout);
+        const generation2Path = path.join(directory, 'argon-generation2');
+        const build = spawnSync(compilerPath, [path.join(projectRoot, 'src/argon.ar'), '-o', generation2Path], {
+            encoding: 'utf8', env: environment, cwd: projectRoot, maxBuffer: 64 * 1024 * 1024
+        });
+        assert.equal(build.status, 0, build.stderr || build.stdout);
 
+        await t.test('generation 1 and 2 produce equivalent normalized IR', async t => {
             for (const fixture of validPrograms) {
                 await t.test(fixture.name, () => {
                     const sourcePath = path.join(projectRoot, fixture.source);
@@ -67,6 +67,24 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                     assert.match(generation1.stdout, /^program\|/);
                     assert.match(generation1.stdout, /^instruction\|/m);
                     assert.equal(generation2.stdout, generation1.stdout, `normalized IR differs for ${fixture.source}`);
+                });
+            }
+        });
+
+        await t.test('generation 1 and 2 produce equivalent invalid-program diagnostics', async t => {
+            for (const fixture of invalidPrograms) {
+                await t.test(fixture.name, () => {
+                    const sourcePath = path.join(projectRoot, fixture.source);
+                    const generation1 = spawnSync(compilerPath, ['--check', sourcePath], {
+                        encoding: 'utf8', env: environment, cwd: projectRoot, maxBuffer: 64 * 1024 * 1024
+                    });
+                    const generation2 = spawnSync(generation2Path, ['--check', sourcePath], {
+                        encoding: 'utf8', env: environment, cwd: projectRoot, maxBuffer: 64 * 1024 * 1024
+                    });
+                    assert.equal(generation1.status, fixture.status, generation1.stderr || generation1.stdout);
+                    assert.equal(generation2.status, fixture.status, generation2.stderr || generation2.stdout);
+                    assert.match(generation1.stderr, fixture.stderr);
+                    assert.equal(generation2.stderr, generation1.stderr, `diagnostics differ for ${fixture.source}`);
                 });
             }
         });

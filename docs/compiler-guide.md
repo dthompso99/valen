@@ -9,7 +9,7 @@ Argon is developed through two compiler implementations:
 3. Generation 0 compiles `src/argon.ar` into a native generation-1 compiler.
 4. Generation 1 compiles and executes the conformance programs.
 
-The bootstrap compiler does not need every language feature. It needs the subset required to compile the current native compiler source. If `src/` begins using a new feature, generation 0 must understand that feature before the bootstrap remains valid.
+The JavaScript bootstrap is intentionally retained as Argon's stable path from zero. It does not need every language feature: it needs the subset required to compile the current native compiler source. If `src/` begins using a new feature, generation 0 must understand that feature before the bootstrap remains valid.
 
 Generation 1 builds a working generation-2 compiler within a 3 GiB peak-RSS budget. The shared conformance corpus also verifies that generations 1 and 2 emit identical normalized target-independent IR.
 
@@ -74,7 +74,8 @@ Inspect the deterministic target-independent IR emitted by a native compiler:
 
 This length-delimited form includes types, fields, dispatch tables, functions, blocks,
 instructions, operands, externals, and foreign libraries. The conformance suite compares it
-across generations 1 and 2.
+across generations 1 and 2. The same suite runs its invalid-program corpus through both
+generations and requires identical exit statuses and diagnostics.
 
 Run compiler and generated-code benchmarks:
 
