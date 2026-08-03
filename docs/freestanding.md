@@ -38,6 +38,7 @@ requires a capability that the selected target does not provide.
 | `threads` | Thread executors, mutexes, and conditions | Thread creation/joining and synchronization; requires `atomics` |
 | `io` | Target-defined byte input/output and diagnostic sinks | Platform library or application hooks; it does not imply files or standard streams |
 | `filesystem` | File handles, paths, reads, writes, and filesystem errors | Platform-specific filesystem implementation; requires `io` |
+| `network` | Network listeners, connections, reads, and writes | Target socket implementation or application-provided transport hooks; requires `io` |
 | `process` | Arguments, environment, process exit, and current directory | Hosted process implementation |
 | `foreign-abi` | `native ... from` declarations and automatic foreign-library link inputs | A named ABI and linker capable of resolving every requested symbol |
 

@@ -32,6 +32,10 @@ export const targetFailures = [
     }
 ];
 
+export const compileOnlyPrograms = [
+    {name: 'native HTTP service', source: 'examples/http-native/server.ar'}
+];
+
 export const invalidPrograms = [
     {name: 'invalid token', source: 'bootstrap/test/fixtures/invalid-token.ar', status: 65, stderr: /invalid-token\.ar:2:5: error: Unexpected byte 64/},
     {name: 'missing contract implementation', source: 'bootstrap/test/fixtures/missing-implementation.ar', status: 65, stderr: /missing-implementation\.ar:5:1: error: Object 'Broken' is missing method 'required'/},

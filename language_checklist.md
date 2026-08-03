@@ -117,3 +117,4 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 - [ ] Add ARM64 and additional operating-system targets
 - [x] Define the freestanding capability profile required for kernels and embedded systems
 - [x] Remove implicit C-runtime startup dependencies and validate target-provided native facilities
+- [x] Provide a syscall-only native HTTP service example on x86-64 Linux

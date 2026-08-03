@@ -224,6 +224,19 @@ test('file operations lower to native open, read, write, and close facilities', 
     }
 });
 
+test('native networking lowers socket lifecycle operations without foreign libraries', () => {
+    const filePath = path.join(projectRoot, 'examples/http-native/server.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot, libraryPath: path.join(projectRoot, 'lib')});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    assert.deepEqual(ir.foreignLibraries, []);
+    const assembly = new X86_64Backend().generate(ir);
+    for (const symbol of ['listen', 'accept', 'receive', 'send', 'closeListener', 'closeConnection', 'lastError']) {
+        assert.match(assembly, new RegExp(`argon_Network_${symbol}:`));
+    }
+    for (const syscall of [41, 49, 50, 43]) assert.match(assembly, new RegExp(`mov eax, ${syscall}`));
+});
+
 test('native object handles transfer through owning cleanup operations and cannot be copied or deleted', () => {
     const valid = new SemanticAnalyzer().analyze(new Parser().parse(`
         library Native {{

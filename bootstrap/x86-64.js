@@ -59,6 +59,9 @@ export class X86_64Backend {
             'argon_System_link',
             'argon_System_memoryCopy',
             'argon_System_memoryCompare',
+            'argon_Network_listen', 'argon_Network_accept', 'argon_Network_receive',
+            'argon_Network_send', 'argon_Network_closeListener', 'argon_Network_closeConnection',
+            'argon_Network_lastError',
             'argon_Operations_threadAvailable', 'argon_Operations_threadStart', 'argon_Operations_threadJoin',
             'argon_Operations_mutexLock', 'argon_Operations_mutexUnlock',
             'argon_Operations_conditionWait', 'argon_Operations_conditionNotifyOne', 'argon_Operations_conditionNotifyAll',
@@ -109,6 +112,7 @@ export class X86_64Backend {
         if (runtimeSymbols.has('argon_System_link')) lines.push(...this.linkRuntime());
         if (runtimeSymbols.has('argon_System_memoryCopy')) lines.push(...this.memoryCopyRuntime());
         if (runtimeSymbols.has('argon_System_memoryCompare')) lines.push(...this.memoryCompareRuntime());
+        if ([...runtimeSymbols].some(symbol => symbol.startsWith('argon_Network_'))) lines.push(...this.networkRuntime());
         if ([...runtimeSymbols].some(symbol => symbol.startsWith('argon_Operations_'))) lines.push(...this.operationsRuntime(runtimeSymbols));
         lines.push(...this.runtimeErrorRuntime());
         lines.push(...this.allocationRuntime());
@@ -128,8 +132,52 @@ export class X86_64Backend {
         }
         if (this.needsProcessArguments) lines.push(...this.processData());
         if (this.needsFilesystemState) lines.push(...this.filesystemData());
+        if ([...runtimeSymbols].some(symbol => symbol.startsWith('argon_Network_'))) lines.push('.bss', '.align 8', 'argon_network_error:', '    .zero 8', '.text');
         lines.push('.section .note.GNU-stack,"",@progbits');
         return `${lines.join('\n')}\n`;
+    }
+
+    networkRuntime() {
+        const close = name => ['.globl '+name, name+':', '    mov rdi, QWORD PTR [rdi]', '    mov eax, 3', '    syscall', '    ret', ''];
+        return [
+            '.globl argon_Network_listen', 'argon_Network_listen:',
+            '    push rbx', '    push r12', '    push r13', '    mov r12d, edi', '    mov ebx, esi',
+            '    mov eax, 41', '    mov edi, 2', '    mov esi, 1', '    xor edx, edx', '    syscall',
+            '    test rax, rax', '    js .Lnetwork_error_pop2', '    mov r10, rax',
+            '    sub rsp, 16', '    mov WORD PTR [rsp], 2', '    mov eax, r12d', '    rol ax, 8',
+            '    mov WORD PTR [rsp+2], ax', '    mov DWORD PTR [rsp+4], 0', '    mov QWORD PTR [rsp+8], 0',
+            '    mov eax, 49', '    mov rdi, r10', '    mov rsi, rsp', '    mov edx, 16', '    syscall', '    add rsp, 16',
+            '    test rax, rax', '    js .Lnetwork_close_error_pop2',
+            '    mov eax, 50', '    mov rdi, r10', '    mov esi, ebx', '    syscall',
+            '    test rax, rax', '    js .Lnetwork_close_error_pop2', '    mov r12, r10',
+            '    mov edi, 8', '    call argon_alloc', '    mov QWORD PTR [rax], r12',
+            '    mov QWORD PTR [rip+argon_network_error], 0', '    pop r13', '    pop r12', '    pop rbx', '    ret',
+            '.Lnetwork_close_error_pop2:', '    mov r12, rax', '    mov eax, 3', '    mov rdi, r10', '    syscall', '    mov rax, r12',
+            '.Lnetwork_error_pop2:', '    neg rax', '    mov QWORD PTR [rip+argon_network_error], rax', '    xor eax, eax', '    pop r13', '    pop r12', '    pop rbx', '    ret', '',
+            '.globl argon_Network_accept', 'argon_Network_accept:',
+            '    mov rdi, QWORD PTR [rdi]', '    mov eax, 43', '    xor esi, esi', '    xor edx, edx', '    syscall',
+            '    test rax, rax', '    js .Lnetwork_error', '    push rbx', '    mov rbx, rax', '    mov edi, 8', '    call argon_alloc',
+            '    mov QWORD PTR [rax], rbx', '    pop rbx', '    mov QWORD PTR [rip+argon_network_error], 0', '    ret',
+            '.globl argon_Network_receive', 'argon_Network_receive:',
+            '    test rsi, rsi', '    js .Lnetwork_invalid', '    push rbx', '    push r12', '    push r13',
+            '    mov r12, QWORD PTR [rdi]', '    mov r13, rsi', '    mov rdi, r13', '    call argon_alloc', '    mov rbx, rax',
+            '    xor eax, eax', '    mov rdi, r12', '    mov rsi, rbx', '    mov rdx, r13', '    syscall',
+            '    test rax, rax', '    js .Lnetwork_error_pop3', '    mov r12, rax', '    mov edi, 16', '    call argon_alloc',
+            '    mov QWORD PTR [rax], rbx', '    mov QWORD PTR [rax+8], r12', '    mov QWORD PTR [rip+argon_network_error], 0',
+            '    pop r13', '    pop r12', '    pop rbx', '    ret',
+            '.Lnetwork_error_pop3:', '    neg rax', '    mov QWORD PTR [rip+argon_network_error], rax', '    xor eax, eax', '    pop r13', '    pop r12', '    pop rbx', '    ret',
+            '.Lnetwork_invalid:', '    mov QWORD PTR [rip+argon_network_error], 22', '    xor eax, eax', '    ret',
+            '.globl argon_Network_send', 'argon_Network_send:',
+            '    mov r8, QWORD PTR [rdi]', '    mov rdx, QWORD PTR [rsi+8]', '    mov rsi, QWORD PTR [rsi]', '    xor r9d, r9d',
+            '.Lnetwork_send_next:', '    test rdx, rdx', '    je .Lnetwork_send_done', '    mov eax, 1', '    mov rdi, r8', '    syscall',
+            '    cmp rax, -4', '    je .Lnetwork_send_next', '    test rax, rax', '    js .Lnetwork_send_error',
+            '    add r9, rax', '    add rsi, rax', '    sub rdx, rax', '    jmp .Lnetwork_send_next',
+            '.Lnetwork_send_done:', '    mov QWORD PTR [rip+argon_network_error], 0', '    mov rax, r9', '    ret',
+            '.Lnetwork_send_error:', '    mov r10, rax', '    neg r10', '    mov QWORD PTR [rip+argon_network_error], r10', '    test r9, r9', '    cmovnz rax, r9', '    ret', '',
+            ...close('argon_Network_closeListener'), ...close('argon_Network_closeConnection'),
+            '.globl argon_Network_lastError', 'argon_Network_lastError:', '    mov rax, QWORD PTR [rip+argon_network_error]', '    ret', '',
+            '.Lnetwork_error:', '    neg rax', '    mov QWORD PTR [rip+argon_network_error], rax', '    xor eax, eax', '    ret', ''
+        ];
     }
 
     operationsRuntime(symbols) {

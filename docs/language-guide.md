@@ -20,6 +20,24 @@ library Tools {{
 
 Package metadata, library versions, compiled modules, and finalized search-path rules are **WIP**.
 
+## Native networking
+
+`libNetwork.ar` provides blocking TCP sockets through the target runtime. On x86-64 Linux these
+operations use kernel syscalls directly and do not require libc or another shared library:
+
+```argon
+local listener = Network.listen(8080, 16)
+local connection = Network.accept(listener!)
+local request = Network.receive(connection!, 4096)
+Network.send(connection!, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
+Network.closeConnection(connection!)
+Network.closeListener(listener!)
+```
+
+Listeners and connections are owning native resources and must be closed. The current interface
+is blocking, IPv4, and binds all local interfaces. Nonblocking sockets, address selection, DNS,
+TLS, and the event-loop executor are **WIP**.
+
 ## Objects and constructors
 
 Objects use doubled braces:

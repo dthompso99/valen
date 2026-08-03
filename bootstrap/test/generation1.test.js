@@ -6,7 +6,7 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {Compiler} from '../compiler.js';
-import {expectedFailures, invalidPrograms, targetFailures, validPrograms} from './conformance-manifest.js';
+import {compileOnlyPrograms, expectedFailures, invalidPrograms, targetFailures, validPrograms} from './conformance-manifest.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -106,6 +106,24 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                     assert.equal(generation2.status, fixture.status, generation2.stderr || generation2.stdout);
                     assert.match(generation1.stderr, fixture.stderr);
                     assert.equal(generation2.stderr, generation1.stderr, `target diagnostics differ for ${fixture.source}`);
+                });
+            }
+        });
+
+        await t.test('generation 1 and 2 build standalone native services', async t => {
+            for (const fixture of compileOnlyPrograms) {
+                await t.test(fixture.name, () => {
+                    const sourcePath = path.join(projectRoot, fixture.source);
+                    for (const [generation, compiler] of [[1, compilerPath], [2, generation2Path]]) {
+                        const executable = path.join(directory, `service-${generation}-${sequence++}`);
+                        const compile = spawnSync(compiler, [sourcePath, '-o', executable], {
+                            encoding: 'utf8', env: environment, cwd: projectRoot, maxBuffer: 64 * 1024 * 1024
+                        });
+                        assert.equal(compile.status, 0, compile.stderr || compile.stdout);
+                        const dynamic = spawnSync('readelf', ['-d', executable], {encoding: 'utf8'});
+                        assert.equal(dynamic.status, 0, dynamic.stderr);
+                        assert.doesNotMatch(dynamic.stdout, /NEEDED/, `${fixture.source} unexpectedly requires a shared library`);
+                    }
                 });
             }
         });
