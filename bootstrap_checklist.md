@@ -167,7 +167,7 @@ The active post-bootstrap roadmap is maintained in [`language_checklist.md`](lan
 - [ ] JavaScript bootstrap builds compiler generation 0
 - [ ] Generation 0 compiles the example programs
 - [ ] Generation 0 compiles the Argon compiler source
-- [ ] Generation 1 passes the compiler test suite
+- [x] Generation 1 passes the compiler test suite
 - [ ] Generation 1 builds generation 2
 - [ ] Generations 1 and 2 produce semantically equivalent IR
 - [ ] Invalid programs produce consistent diagnostics

@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node test/pipeline.test.js"
+    "test": "node test/pipeline.test.js && node test/generation1.test.js"
   },
   "author": "",
   "license": "ISC",

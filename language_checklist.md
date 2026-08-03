@@ -108,7 +108,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 - [ ] JavaScript bootstrap builds compiler generation 0
 - [ ] Generation 0 compiles the example programs
 - [ ] Generation 0 compiles the Argon compiler source
-- [ ] Generation 1 passes the compiler test suite
+- [x] Generation 1 passes the compiler test suite
 - [ ] Generation 1 builds generation 2 within the supported memory budget
 - [ ] Generations 1 and 2 produce semantically equivalent IR
 - [ ] Invalid programs produce consistent diagnostics across generations
