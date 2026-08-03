@@ -228,6 +228,17 @@ library Parsing {{
                 statement.span = self.span(start.span, self.previous().span)
                 return statement
             }
+            if self.match("FOR") {
+                local start = self.previous()
+                local name = self.consume("IDENTIFIER", "Expected an iteration variable after 'for'")
+                self.consume("IN", "Expected 'in' after iteration variable")
+                local statement = new Ast.Statement("For", start.span)
+                statement.name = name.lexeme
+                statement.expression = self.parseExpression()
+                statement.body = self.parseBlock()
+                statement.span = self.span(start.span, statement.body!.span)
+                return statement
+            }
             if self.match("BREAK") { return new Ast.Statement("Break", self.previous().span) }
             if self.match("CONTINUE") { return new Ast.Statement("Continue", self.previous().span) }
             if self.match("LOCAL") {

@@ -1,0 +1,33 @@
+Counter {{
+    member current:i64
+    member limit:i64
+
+    __(limit:i64) -> void { self.limit = limit }
+    hasNext() -> bool { return self.current < self.limit }
+    next() -> i64 {
+        local value = self.current
+        self.current = self.current + 1
+        return value
+    }
+}}
+
+entry {{
+    __() -> i64 {
+        local values = new Array<i64>(3)
+        values[0] = 10
+        values[1] = 20
+        values[2] = 30
+        local sum:i64 = 0
+        for value in values {
+            if value == 20 { continue }
+            sum = sum + value
+        }
+        for byte in "ab" {
+            sum = sum + (byte as i64)
+        }
+        local counter = new Counter(3)
+        for number in counter { sum = sum + number }
+        if sum == 238 { return 0 }
+        return 1
+    }
+}}

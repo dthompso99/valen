@@ -49,6 +49,8 @@ export const Tokens = [
     {type: 'IF', value: 'if'},
     {type: 'ELSE', value: 'else'},
     {type: 'WHILE', value: 'while'},
+    {type: 'FOR', value: 'for'},
+    {type: 'IN', value: 'in'},
     {type: 'BREAK', value: 'break'},
     {type: 'CONTINUE', value: 'continue'},
     {type: 'TRUE', value: 'true'},

@@ -155,6 +155,8 @@ library Ast {{
         member span:Compiler.SourceSpan
         member symbol:Symbols.Symbol?
         member ownership:string
+        member iteratorHasNext:Symbols.Symbol?
+        member iteratorNext:Symbols.Symbol?
 
         __(kind:string, span:Compiler.SourceSpan) -> void {
             self.kind = kind
@@ -167,6 +169,8 @@ library Ast {{
             self.span = span
             self.symbol = null
             self.ownership = "none"
+            self.iteratorHasNext = null
+            self.iteratorNext = null
         }
     }}
 

@@ -583,6 +583,7 @@ library Ir {{
             }
             if statement.kind == "If" { self.lowerIf(statement); return }
             if statement.kind == "While" { self.lowerWhile(statement); return }
+            if statement.kind == "For" { self.lowerFor(statement); return }
             if statement.kind == "Break" {
                 local instruction = new Instruction("jump")
                 instruction.target = self.breakTarget
@@ -642,6 +643,87 @@ library Ir {{
             self.lowerBlock(statement.body!)
             self.breakTarget = previousBreak
             self.continueTarget = previousContinue
+            self.jumpIfOpen(conditionBlock.label)
+            self.currentBlock = endBlock
+        }
+
+        lowerFor(statement:Ast.Statement) -> void {
+            local iterable = self.lowerExpression(statement.expression!)
+            local iterableName = "$iterable#" + self.nextLocal.toString()
+            self.nextLocal = self.nextLocal + 1
+            local indexName = "$index#" + self.nextLocal.toString()
+            self.nextLocal = self.nextLocal + 1
+            local declaredIterable = new Instruction("declare_local")
+            declaredIterable.name = iterableName; declaredIterable.typeName = iterable.typeName; declaredIterable.first = iterable
+            self.emit(declaredIterable)
+            if statement.iteratorHasNext == null {
+                local zero = self.temporary("constant", "i64")
+                zero.text = "0"
+                local declaredIndex = new Instruction("declare_local")
+                declaredIndex.name = indexName; declaredIndex.typeName = "i64"; declaredIndex.first = zero.result
+                self.emit(declaredIndex)
+            }
+            local conditionBlock = self.newBlock("for_condition")
+            local bodyBlock = self.newBlock("for_body")
+            local incrementBlock = self.newBlock("for_increment")
+            local endBlock = self.newBlock("for_end")
+            self.jumpIfOpen(conditionBlock.label)
+            self.currentBlock = conditionBlock
+            local loadedIterable = self.temporary("load_local", iterable.typeName); loadedIterable.name = iterableName
+            local condition:Instruction? = null
+            if statement.iteratorHasNext != null {
+                condition = self.temporary("call", "bool")
+                condition!.target = statement.iteratorHasNext!.qualifiedName
+                condition!.arguments.append(loadedIterable.result!)
+            } else {
+                local loadedIndex = self.temporary("load_local", "i64"); loadedIndex.name = indexName
+                local lengthOp = "array_length"
+                if iterable.typeName == "string" { lengthOp = "string_length" }
+                local length = self.temporary(lengthOp, "i64"); length.first = loadedIterable.result
+                condition = self.temporary("binary", "bool")
+                condition!.operator = "<"; condition!.first = loadedIndex.result; condition!.second = length.result
+            }
+            local branch = new Instruction("branch")
+            branch.first = condition!.result; branch.target = bodyBlock.label; branch.alternateTarget = endBlock.label
+            self.emit(branch)
+            self.currentBlock = bodyBlock
+            local bodyIterable = self.temporary("load_local", iterable.typeName); bodyIterable.name = iterableName
+            local value:Instruction? = null
+            if statement.iteratorNext != null {
+                value = self.temporary("call", statement.symbol!.typeName!)
+                value!.target = statement.iteratorNext!.qualifiedName
+                value!.arguments.append(bodyIterable.result!)
+            } else {
+                local bodyIndex = self.temporary("load_local", "i64"); bodyIndex.name = indexName
+                local loadOp = "array_load"
+                if iterable.typeName == "string" { loadOp = "string_load" }
+                value = self.temporary(loadOp, statement.symbol!.typeName!)
+                value!.first = bodyIterable.result; value!.second = bodyIndex.result
+                value!.elementType = statement.symbol!.typeName!
+                if iterable.typeName == "string" { value!.elementOwnership = "value" } else { value!.elementOwnership = self.arrayElementOwnership(iterable.typeName) }
+            }
+            local localName = statement.name! + "#" + self.nextLocal.toString()
+            self.nextLocal = self.nextLocal + 1
+            local localValue = new Value("local", localName, statement.symbol!.typeName!)
+            self.bindings.append(new Binding(statement.symbol!, localValue))
+            local declaredValue = new Instruction("declare_local")
+            declaredValue.name = localName; declaredValue.typeName = localValue.typeName; declaredValue.first = value!.result
+            self.emit(declaredValue)
+            local previousBreak = self.breakTarget; local previousContinue = self.continueTarget
+            self.breakTarget = endBlock.label; self.continueTarget = incrementBlock.label
+            self.lowerBlock(statement.body!)
+            self.breakTarget = previousBreak; self.continueTarget = previousContinue
+            self.jumpIfOpen(incrementBlock.label)
+            self.currentBlock = incrementBlock
+            if statement.iteratorHasNext == null {
+                local oldIndex = self.temporary("load_local", "i64"); oldIndex.name = indexName
+                local one = self.temporary("constant", "i64"); one.text = "1"
+                local nextIndex = self.temporary("binary", "i64")
+                nextIndex.operator = "+"; nextIndex.first = oldIndex.result; nextIndex.second = one.result
+                local storedIndex = new Instruction("store_local")
+                storedIndex.name = indexName; storedIndex.typeName = "i64"; storedIndex.first = nextIndex.result
+                self.emit(storedIndex)
+            }
             self.jumpIfOpen(conditionBlock.label)
             self.currentBlock = endBlock
         }

@@ -298,6 +298,8 @@ library Compiler {{
             if value == "if" { return "IF" }
             if value == "else" { return "ELSE" }
             if value == "while" { return "WHILE" }
+            if value == "for" { return "FOR" }
+            if value == "in" { return "IN" }
             if value == "break" { return "BREAK" }
             if value == "continue" { return "CONTINUE" }
             if value == "true" { return "TRUE" }

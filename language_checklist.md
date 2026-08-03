@@ -63,7 +63,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 - [ ] Add a thread-pool executor after single-worker correctness is established
 - [ ] Add event-loop executors for nonblocking file and network I/O
 - [x] Implement short-circuit lowering for `&&` and `||`
-- [ ] Add iterators and `for` loops
+- [x] Add iterators and `for` loops
 - [ ] Add `else if` shorthand
 - [ ] Evaluate expression-valued conditionals and richer control-flow expressions
 - [ ] Define exhaustive matching if a sum type or enum model is introduced

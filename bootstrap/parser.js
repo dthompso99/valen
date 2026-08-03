@@ -17,6 +17,7 @@ import {
     LocalDeclaration,
     IfStatement,
     WhileStatement,
+    ForStatement,
     BreakStatement,
     ContinueStatement,
     IdentifierExpression,
@@ -280,6 +281,7 @@ export class Parser {
         }
         if (this.match('IF')) return this.parseIf(this.previous());
         if (this.match('WHILE')) return this.parseWhile(this.previous());
+        if (this.match('FOR')) return this.parseFor(this.previous());
         if (this.match('BREAK')) return new BreakStatement(this.span(this.previous(), this.previous()));
         if (this.match('CONTINUE')) return new ContinueStatement(this.span(this.previous(), this.previous()));
         if (this.match('LOCAL')) return this.parseLocal(this.previous());
@@ -309,6 +311,14 @@ export class Parser {
         const condition = this.parseExpression();
         const body = this.parseBlock();
         return new WhileStatement(condition, body, this.span(start, body));
+    }
+
+    parseFor(start) {
+        const name = this.consume('IDENTIFIER', "Expected an iteration variable after 'for'");
+        this.consume('IN', `Expected 'in' after iteration variable ${name.value}`);
+        const iterable = this.parseExpression();
+        const body = this.parseBlock();
+        return new ForStatement(name.value, iterable, body, this.span(start, body));
     }
 
     parseLocal(start) {

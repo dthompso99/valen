@@ -279,6 +279,9 @@ export class IrGenerator {
             case 'WhileStatement':
                 this.lowerWhile(statement);
                 break;
+            case 'ForStatement':
+                this.lowerFor(statement);
+                break;
             case 'BreakStatement': {
                 const loop = this.loopStack.at(-1);
                 this.emit('jump', {target: loop.breakTarget});
@@ -346,6 +349,65 @@ export class IrGenerator {
         this.lowerBlock(statement.body);
         this.loopStack.pop();
         if (!this.isTerminated()) this.emit('jump', {target: conditionBlock.label});
+        this.block = endBlock;
+    }
+
+    lowerFor(statement) {
+        const iterable = this.lowerExpression(statement.iterable);
+        const iterableName = `$iterable#${this.nextLocal++}`;
+        const indexName = `$index#${this.nextLocal++}`;
+        this.emit('declare_local', {name: iterableName, type: iterable.type, value: iterable});
+        if (!statement.iteratorHasNext) {
+            const zero = this.result('constant', 'i64', {value: 0});
+            this.emit('declare_local', {name: indexName, type: 'i64', value: zero});
+        }
+        const conditionBlock = this.newBlock('for_condition');
+        const bodyBlock = this.newBlock('for_body');
+        const incrementBlock = this.newBlock('for_increment');
+        const endBlock = this.newBlock('for_end');
+        this.emit('jump', {target: conditionBlock.label});
+
+        this.block = conditionBlock;
+        const collection = this.result('load_local', iterable.type, {name: iterableName});
+        let condition;
+        if (statement.iteratorHasNext) {
+            condition = this.result('call', 'bool', {target: this.functionName(statement.iteratorHasNext), arguments: [collection], slot: -1});
+        } else {
+            const index = this.result('load_local', 'i64', {name: indexName});
+            const length = this.result(iterable.type === 'string' ? 'string_length' : 'array_length', 'i64',
+                iterable.type === 'string' ? {string: collection} : {array: collection});
+            condition = this.result('binary', 'bool', {operator: '<', left: index, right: length});
+        }
+        this.emit('branch', {condition, thenTarget: bodyBlock.label, elseTarget: endBlock.label});
+
+        this.block = bodyBlock;
+        const currentCollection = this.result('load_local', iterable.type, {name: iterableName});
+        let value;
+        if (statement.iteratorNext) {
+            value = this.result('call', statement.inferredType, {target: this.functionName(statement.iteratorNext), arguments: [currentCollection], slot: -1});
+        } else {
+            const currentIndex = this.result('load_local', 'i64', {name: indexName});
+            value = iterable.type === 'string'
+                ? this.result('string_load', 'u8', {array: currentCollection, index: currentIndex})
+                : this.result('array_load', statement.inferredType, {array: currentCollection, index: currentIndex,
+                    elementType: statement.inferredType, elementOwnership: this.arrayElementOwnership(iterable.type)});
+        }
+        const local = {kind: 'local', name: `${statement.name}#${this.nextLocal++}`, type: statement.inferredType};
+        this.locals.set(statement.semanticSymbol, local);
+        this.emit('declare_local', {name: local.name, type: local.type, value});
+        this.loopStack.push({breakTarget: endBlock.label, continueTarget: incrementBlock.label});
+        this.lowerBlock(statement.body);
+        this.loopStack.pop();
+        if (!this.isTerminated()) this.emit('jump', {target: incrementBlock.label});
+
+        this.block = incrementBlock;
+        if (!statement.iteratorHasNext) {
+            const oldIndex = this.result('load_local', 'i64', {name: indexName});
+            const one = this.result('constant', 'i64', {value: 1});
+            const nextIndex = this.result('binary', 'i64', {operator: '+', left: oldIndex, right: one});
+            this.emit('store_local', {name: indexName, type: 'i64', value: nextIndex});
+        }
+        this.emit('jump', {target: conditionBlock.label});
         this.block = endBlock;
     }
 
@@ -687,6 +749,11 @@ export class IrGenerator {
 
     arrayElementTypeName(type) {
         return type?.startsWith('Array<') && type.endsWith('>') ? type.slice(6, -1) : null;
+    }
+
+    arrayElementOwnership(type) {
+        const element = this.arrayElementTypeName(type);
+        return element?.startsWith('ref ') ? 'ref' : element?.startsWith('weak ') ? 'weak' : 'owned';
     }
 
     lowerInitializers(object, instance) {

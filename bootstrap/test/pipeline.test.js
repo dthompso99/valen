@@ -839,6 +839,26 @@ test('logical operators lower their right operands into short-circuit blocks', (
     assert.equal(fn.blocks.flatMap(block => block.instructions).filter(instruction => instruction.op === 'binary' && ['&&', '||'].includes(instruction.operator)).length, 0);
 });
 
+test('for loops iterate arrays and strings with loop-local values', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/for-loops.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath);
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    const instructions = ir.functions.flatMap(fn => fn.blocks).flatMap(block => block.instructions);
+    assert.ok(instructions.some(instruction => instruction.op === 'array_load'));
+    assert.ok(instructions.some(instruction => instruction.op === 'string_load'));
+    assert.ok(instructions.some(instruction => instruction.op === 'call' && instruction.target.endsWith('Counter.hasNext')));
+    assert.ok(instructions.some(instruction => instruction.op === 'call' && instruction.target.endsWith('Counter.next')));
+    assert.ok(ir.functions.flatMap(fn => fn.blocks).some(block => block.label.startsWith('for_increment')));
+});
+
+test('for loops reject non-iterable values', () => {
+    const source = 'entry {{ __() -> void { for value in 42 { } } }}';
+    const result = new SemanticAnalyzer().analyze(new Parser().parse(source, 'invalid-for.ar'));
+    assert.equal(result.success, false);
+    assert.match(result.diagnostics[0].message, /not iterable/);
+});
+
 test('generated primitive executable returns success', t => {
     const semantic = new SemanticAnalyzer().analyze(new Parser().parse(primitiveProgram, 'primitives.ar'));
     const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));

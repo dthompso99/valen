@@ -963,6 +963,35 @@ library Semantics {{
                 if statement.alternate != null { self.analyzeBlock(statement.alternate!, scope, moduleScope, returnType, inLoop) }
                 return
             }
+            if statement.kind == "For" {
+                local iterableType = self.analyzeExpression(statement.expression!, scope, moduleScope)
+                local elementType = "error"
+                if iterableType == "string" { elementType = "u8" } else {
+                    if self.isArray(iterableType) { elementType = self.arrayElementType(iterableType) }
+                    else {
+                        local iterator = self.findCanonical(iterableType)
+                        local hasNext:Symbols.Symbol? = null
+                        local next:Symbols.Symbol? = null
+                        if iterator != null { hasNext = self.lookupMethod(iterator!, "hasNext"); next = self.lookupMethod(iterator!, "next") }
+                        if hasNext == null || next == null || hasNext!.parameters.length != 0 || next!.parameters.length != 0 || hasNext!.returnType! != "bool" || next!.returnType! == "void" {
+                            self.error(statement.expression!.span, "Type '" + iterableType + "' is not iterable; expected hasNext() -> bool and next() -> value")
+                        } else {
+                            statement.iteratorHasNext = hasNext
+                            statement.iteratorNext = next
+                            elementType = next!.returnType!
+                        }
+                    }
+                }
+                local loopScope = new Symbols.Scope("for " + statement.name!, scope)
+                local symbol = new Symbols.Symbol("Local", statement.name!, self.currentMethod!.qualifiedName + "." + statement.name!, statement.span)
+                symbol.typeName = elementType
+                symbol.ownership = "borrowed"
+                symbol.declaredOwnership = "borrowed"
+                statement.symbol = symbol
+                if !loopScope.define(symbol) { self.error(statement.span, "Duplicate iteration variable '" + statement.name! + "'") }
+                self.analyzeBlock(statement.body!, loopScope, moduleScope, returnType, true)
+                return
+            }
             if statement.kind == "Break" || statement.kind == "Continue" {
                 if !inLoop { self.error(statement.span, "'" + statement.kind + "' is only valid inside a loop") }
                 return

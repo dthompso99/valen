@@ -665,6 +665,31 @@ export class SemanticAnalyzer {
                 this.loopDepth--;
                 return false;
             }
+            case 'ForStatement': {
+                const iterableType = this.analyzeExpression(statement.iterable, scope, object);
+                let elementType = iterableType === STRING ? 'u8' : this.arrayElementType(iterableType);
+                if (!elementType) {
+                    const iterator = this.findObjectType(iterableType);
+                    const hasNext = iterator ? this.resolveOverload(iterator, 'hasNext', [], statement.span) : null;
+                    const next = iterator ? this.resolveOverload(iterator, 'next', [], statement.span) : null;
+                    if (!hasNext || !next || hasNext.returnType !== BOOL || next.returnType === VOID) {
+                        this.report(statement.iterable.span, `Type '${iterableType}' is not iterable; expected hasNext() -> bool and next() -> value`);
+                    } else {
+                        statement.iteratorHasNext = hasNext;
+                        statement.iteratorNext = next;
+                        elementType = next.returnType;
+                    }
+                }
+                const loopScope = new Scope(scope, `for ${statement.name}`);
+                const symbol = {kind: 'Local', name: statement.name, type: elementType ?? UNKNOWN,
+                    declaration: statement, ownership: 'borrowed', declaredOwnership: 'borrowed', ownershipVersion: 0};
+                loopScope.define(statement.name, symbol, statement.span, this.diagnostics);
+                this.annotate(statement, symbol.type, symbol);
+                this.loopDepth++;
+                this.analyzeBlock(statement.body, loopScope, object, method);
+                this.loopDepth--;
+                return false;
+            }
             case 'BreakStatement':
             case 'ContinueStatement':
                 if (this.loopDepth === 0) {

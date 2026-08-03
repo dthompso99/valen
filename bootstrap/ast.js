@@ -143,6 +143,15 @@ export class WhileStatement extends AstNode {
     }
 }
 
+export class ForStatement extends AstNode {
+    constructor(name, iterable, body, span) {
+        super('ForStatement', span);
+        this.name = name;
+        this.iterable = iterable;
+        this.body = body;
+    }
+}
+
 export class BreakStatement extends AstNode {
     constructor(span) {
         super('BreakStatement', span);
