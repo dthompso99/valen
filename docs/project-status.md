@@ -21,7 +21,8 @@
 
 ## WIP: language ergonomics
 
-- **WIP:** array literals, insertion/removal, capacity controls, and slices
+- Array literals infer homogeneous owned element types, including numeric promotion and nested arrays.
+- **WIP:** array insertion/removal, capacity controls, and slices
 - **WIP:** Unicode code-point and grapheme-aware strings
 - **WIP:** string interpolation and richer formatting
 - flow-sensitive optional narrowing for stable locals and parameters

@@ -1100,6 +1100,40 @@ library Semantics {{
             if expression.kind == "String" { return self.typed(expression, "string") }
             if expression.kind == "Boolean" { return self.typed(expression, "bool") }
             if expression.kind == "Null" { return self.typed(expression, "null") }
+            if expression.kind == "ArrayLiteral" {
+                if expression.arguments.length == 0 {
+                    self.error(expression.span, "Cannot infer the element type of an empty array literal; use new Array<T>(0)")
+                    expression.text = "error"
+                    return self.typed(expression, "Array<error>")
+                }
+                local elementTypes = new Array<string>(0)
+                local index:i64 = 0
+                while index < expression.arguments.length {
+                    elementTypes.append(self.analyzeExpression(expression.arguments[index], scope, moduleScope))
+                    index = index + 1
+                }
+                local elementType = elementTypes[0]
+                index = 1
+                while index < elementTypes.length {
+                    local candidate = elementTypes[index]
+                    if (self.isInteger(elementType) || self.isFloat(elementType)) && (self.isInteger(candidate) || self.isFloat(candidate)) {
+                        local promoted = self.numericPromotion(elementType, candidate, expression.arguments[index].span)
+                        if promoted != null { elementType = promoted! } else { elementType = "error" }
+                    } else {
+                        if candidate != elementType { self.error(expression.arguments[index].span, "Array literal element has type '" + candidate + "', expected '" + elementType + "'") }
+                    }
+                    index = index + 1
+                }
+                index = 0
+                while index < expression.arguments.length {
+                    local numeric = (self.isInteger(elementType) || self.isFloat(elementType)) && (self.isInteger(elementTypes[index]) || self.isFloat(elementTypes[index]))
+                    if !numeric { self.requireCompatible(elementType, elementTypes[index], expression.arguments[index].span) }
+                    if self.isReference(elementType) { self.consumeArrayElement(expression.arguments[index]) }
+                    index = index + 1
+                }
+                expression.text = elementType
+                return self.typed(expression, "Array<" + elementType + ">")
+            }
             if expression.kind == "Identifier" {
                 local symbol = scope.lookup(expression.name!)
                 if symbol == null { symbol = self.lookupMember(self.currentOwner, expression.name!) }
@@ -1902,6 +1936,8 @@ library Semantics {{
         isOwningExpression(expression:Ast.Expression?) -> bool {
             if expression == null { return false }
             if expression!.kind == "New" { return true }
+            if expression!.kind == "ArrayLiteral" { return true }
+            if expression!.kind == "String" { return true }
             if expression!.kind == "Unary" { return expression!.operator! == "copy" }
             if expression!.kind == "Call" {
                 if expression!.left == null || expression!.left!.symbol == null { return false }

@@ -1,0 +1,17 @@
+entry {{
+    __() -> i64 {
+        local values = [10, 20, 30]
+        if values.length != 3 { return 1 }
+        if values[0] != 10 || values[2] != 30 { return 2 }
+
+        local decimals = [1, 2.5]
+        if decimals[0] != 1.0 || decimals[1] != 2.5 { return 3 }
+
+        local words = ["alpha", "beta"]
+        if words[1] != "beta" { return 4 }
+
+        local rows = [[1, 2], [3, 4]]
+        if rows[1][0] != 3 { return 5 }
+        return 0
+    }
+}}

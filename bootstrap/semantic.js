@@ -808,6 +808,34 @@ export class SemanticAnalyzer {
             case 'StringLiteral':
                 type = STRING;
                 break;
+            case 'ArrayLiteral': {
+                if (expression.elements.length === 0) {
+                    this.report(expression.span, 'Cannot infer the element type of an empty array literal; use new Array<T>(0)');
+                    type = 'Array<error>';
+                    break;
+                }
+                const elementTypes = expression.elements.map(element => this.analyzeExpression(element, scope, object));
+                let elementType = elementTypes[0];
+                for (let index = 1; index < elementTypes.length; index++) {
+                    const candidate = elementTypes[index];
+                    if ((integerTypes.has(elementType) || this.isFloat(elementType)) && (integerTypes.has(candidate) || this.isFloat(candidate))) {
+                        elementType = this.numericPromotion(elementType, candidate, expression.elements[index].span) ?? UNKNOWN;
+                    } else if (candidate !== elementType) {
+                        this.report(expression.elements[index].span, `Array literal element has type '${candidate}', expected '${elementType}'`);
+                    }
+                }
+                for (let index = 0; index < expression.elements.length; index++) {
+                    const numeric = (integerTypes.has(elementTypes[index]) || this.isFloat(elementTypes[index])) &&
+                        (integerTypes.has(elementType) || this.isFloat(elementType));
+                    if (!numeric) this.requireAssignable(elementTypes[index], elementType, expression.elements[index].span, expression.elements[index]);
+                    if (this.isReferenceType(elementType)) this.consumeArrayElement(expression.elements[index]);
+                }
+                expression.elementType = elementType;
+                expression.elementOwnership = 'owned';
+                type = `Array<${elementType}>`;
+                symbol = {kind: 'ArrayType', name: 'Array', type, elementType, elementOwnership: 'owned'};
+                break;
+            }
             case 'NullLiteral':
                 type = NULL;
                 break;
@@ -1472,7 +1500,7 @@ export class SemanticAnalyzer {
     }
 
     isOwningExpression(expression) {
-        return expression?.kind === 'NewExpression' ||
+        return expression?.kind === 'NewExpression' || expression?.kind === 'ArrayLiteral' || expression?.kind === 'StringLiteral' ||
             expression?.kind === 'UnaryExpression' && expression.operator === 'copy' ||
             expression?.kind === 'CallExpression' && expression.callee?.semanticSymbol?.returnOwnership === 'owned';
     }

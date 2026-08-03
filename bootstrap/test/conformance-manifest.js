@@ -15,6 +15,7 @@ export const validPrograms = [
     {name: 'instruction selection', source: 'bootstrap/test/fixtures/instruction-selection.ar'},
     {name: 'default arguments', source: 'bootstrap/test/fixtures/default-arguments.ar'},
     {name: 'collection ownership', source: 'bootstrap/test/fixtures/collection-ownership.ar'},
+    {name: 'array literals', source: 'bootstrap/test/fixtures/array-literals.ar'},
     {name: 'garbage collection', source: 'bootstrap/test/fixtures/garbage-collection.ar'},
     {name: 'repeated garbage collection', source: 'bootstrap/test/fixtures/garbage-collection-repeated.ar'},
     {name: 'optional diagnostics', source: 'bootstrap/test/fixtures/diagnostics.ar'},

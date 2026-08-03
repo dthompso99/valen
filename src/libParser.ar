@@ -413,6 +413,22 @@ library Parsing {{
 
         parsePrimary() -> ref Ast.Expression {
             local token = self.advanceToken()
+            if token.kind == "LEFT_BRACKET" {
+                local literal = new Ast.Expression("ArrayLiteral", token.span)
+                self.skipNewlines()
+                if !self.check("RIGHT_BRACKET") {
+                    local more:bool = true
+                    while more {
+                        self.skipNewlines()
+                        literal.arguments.append(self.parseExpression())
+                        self.skipNewlines()
+                        more = self.match("COMMA")
+                    }
+                }
+                local end = self.consume("RIGHT_BRACKET", "Expected ']' after array literal")
+                literal.span = self.span(token.span, end.span)
+                return literal
+            }
             local kind:string? = null
             if token.kind == "NULL" { kind = "Null" }
             if token.kind == "TRUE" || token.kind == "FALSE" { kind = "Boolean" }

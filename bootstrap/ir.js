@@ -434,6 +434,8 @@ export class IrGenerator {
                 return this.result('constant', expression.inferredType, {value: expression.value ? 1 : 0});
             case 'StringLiteral':
                 return this.result('string_constant', expression.inferredType, {value: expression.value});
+            case 'ArrayLiteral':
+                return this.lowerArrayLiteral(expression);
             case 'NullLiteral':
                 return this.result('constant', expression.inferredType, {value: 0});
             case 'IdentifierExpression':
@@ -734,6 +736,20 @@ export class IrGenerator {
             this.emit('call', {target: this.functionName(constructor), arguments: args});
         }
         return instance;
+    }
+
+    lowerArrayLiteral(expression) {
+        const length = this.result('constant', 'i64', {value: expression.elements.length});
+        const array = this.result('array_new', expression.inferredType, {length, elementType: expression.elementType});
+        for (let index = 0; index < expression.elements.length; index++) {
+            const element = expression.elements[index];
+            let value = this.lowerExpression(element);
+            if (value.type !== expression.elementType) value = this.result('convert', expression.elementType, {value, fromType: value.type});
+            const position = this.result('constant', 'i64', {value: index});
+            this.emit('array_store', {array, index: position, value, elementType: expression.elementType, elementOwnership: 'owned'});
+            if (element.ownership === 'consume') this.consumeLifetime(element);
+        }
+        return array;
     }
 
     consumeLifetime(expression) {

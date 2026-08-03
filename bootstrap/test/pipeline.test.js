@@ -144,6 +144,31 @@ test('dynamic arrays support construction, indexing, assignment, length, and app
     assert.doesNotThrow(() => new X86_64Backend().generate(ir));
 });
 
+test('array literals infer homogeneous element types and lower allocation plus stores', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/array-literals.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    const instructions = ir.functions.flatMap(fn => fn.blocks.flatMap(block => block.instructions));
+    assert.ok(instructions.filter(instruction => instruction.op === 'array_new').length >= 6);
+    assert.ok(instructions.filter(instruction => instruction.op === 'array_store').length >= 11);
+
+    const empty = new SemanticAnalyzer().analyze(new Parser().parse('entry {{ __() -> void { local values = [] } }}', 'empty-array.ar'));
+    assert.equal(empty.success, false);
+    assert.match(empty.diagnostics[0].message, /Cannot infer the element type of an empty array literal/);
+
+    const mixed = new SemanticAnalyzer().analyze(new Parser().parse('entry {{ __() -> void { local values = [1, "two"] } }}', 'mixed-array.ar'));
+    assert.equal(mixed.success, false);
+    assert.match(mixed.diagnostics[0].message, /Array literal element has type 'string'/);
+
+    const consumed = new SemanticAnalyzer().analyze(new Parser().parse(
+        'Item {{}} entry {{ __() -> void { local item = new Item(); local items = [item]; local duplicates = [item] } }}',
+        'owned-array-literal.ar'
+    ));
+    assert.equal(consumed.success, false);
+    assert.ok(consumed.diagnostics.some(diagnostic => /Cannot insert borrowed reference/.test(diagnostic.message)));
+});
+
 test('hashed symbol collections and parent-linked scopes resolve end to end', () => {
     const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/scopes.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot, libraryPath: path.join(projectRoot, 'lib')});

@@ -903,6 +903,7 @@ library Ir {{
                 instruction.text = expression.text
                 return instruction.result!
             }
+            if expression.kind == "ArrayLiteral" { return self.lowerArrayLiteral(expression) }
             if expression.kind == "Identifier" { return self.lowerIdentifier(expression) }
             if expression.kind == "Member" { return self.lowerMember(expression) }
             if expression.kind == "Index" { return self.lowerIndex(expression) }
@@ -1265,6 +1266,34 @@ library Ir {{
                 self.emit(call)
             }
             return instance
+        }
+
+        lowerArrayLiteral(expression:Ast.Expression) -> ref Value {
+            local length = self.constant(expression.arguments.length.toString(), "i64")
+            local created = self.temporary("array_new", expression.inferredType!)
+            created.first = length
+            created.elementType = expression.text
+            local array = created.result!
+            local index:i64 = 0
+            while index < expression.arguments.length {
+                local element = expression.arguments[index]
+                local value = self.lowerExpression(element)
+                if value.typeName != expression.text! {
+                    local converted = self.temporary("convert", expression.text!)
+                    converted.first = value
+                    value = converted.result!
+                }
+                local stored = new Instruction("array_store")
+                stored.first = array
+                stored.second = self.constant(index.toString(), "i64")
+                stored.third = value
+                stored.elementType = expression.text
+                stored.elementOwnership = "owned"
+                self.emit(stored)
+                if element.ownership == "consume" { self.consumeLifetime(element) }
+                index = index + 1
+            }
+            return array
         }
 
         lowerInitializers(owner:Symbols.Symbol, instance:Value) -> void {

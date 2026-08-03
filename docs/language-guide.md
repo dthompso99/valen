@@ -152,18 +152,22 @@ for value in values {
 }
 ```
 
-`else if` shorthand, expression-valued conditionals, array literals, slices, insertion/removal, and exhaustive matching are **WIP**.
+`else if` shorthand, expression-valued conditionals, slices, insertion/removal, and exhaustive matching are **WIP**.
 
 ## Arrays, strings, and generic objects
 
 Arrays are dynamically sized:
 
 ```valen
-local names = new Array<string>(0)
+local names = ["valen", "argon"]
 names.append("valen")
 local first = names[0]
 local count = names.length
 ```
+
+Non-empty literals infer a homogeneous element type. Numeric elements use the ordinary lossless
+promotion rules, nested literals are supported, and reference elements transfer ownership into the
+new array. Empty literals do not guess their element type; use `new Array<T>(0)`.
 
 Generic objects are monomorphized:
 

@@ -224,6 +224,13 @@ export class StringLiteral extends AstNode {
     }
 }
 
+export class ArrayLiteral extends AstNode {
+    constructor(elements, span) {
+        super('ArrayLiteral', span);
+        this.elements = elements;
+    }
+}
+
 export class UnaryExpression extends AstNode {
     constructor(operator, operand, span) {
         super('UnaryExpression', span);

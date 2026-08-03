@@ -28,6 +28,7 @@ import {
     UnwrapExpression,
     PropagateExpression,
     StringLiteral,
+    ArrayLiteral,
     UnaryExpression,
     BinaryExpression,
     AssignmentExpression,
@@ -444,6 +445,20 @@ export class Parser {
     }
 
     parsePrimary() {
+        if (this.match('LEFT_BRACKET')) {
+            const start = this.previous();
+            const elements = [];
+            this.skipNewlines();
+            if (!this.check('RIGHT_BRACKET')) {
+                do {
+                    this.skipNewlines();
+                    elements.push(this.parseExpression());
+                    this.skipNewlines();
+                } while (this.match('COMMA'));
+            }
+            const end = this.consume('RIGHT_BRACKET', "Expected ']' after array literal");
+            return new ArrayLiteral(elements, this.span(start, end));
+        }
         if (this.match('NULL')) {
             const token = this.previous();
             return new NullLiteral(this.span(token, token));
