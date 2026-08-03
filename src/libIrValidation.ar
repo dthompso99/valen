@@ -1,6 +1,14 @@
 import Ir from 'libIr.ar'
+import System from 'libSystem.ar'
 
 library IrValidation {{
+    FoldedConstant {{
+        member name:string
+        member value:i64
+        member typeName:string
+        __(name:string, value:i64, typeName:string) -> void { self.name = name; self.value = value; self.typeName = typeName }
+    }}
+
     Pass {{
         prepare(program:Ir.Program) -> Array<string> {
             self.canonicalize(program)
@@ -29,9 +37,172 @@ library IrValidation {{
                     block.instructions = instructions
                     blockIndex = blockIndex + 1
                 }
+                self.foldConstants(functionNode)
                 self.removeUnreachable(functionNode)
+                self.removeDeadValues(functionNode)
                 functionIndex = functionIndex + 1
             }
+        }
+
+        foldConstants(functionNode:Ir.Function) -> void {
+            local constants = new Array<FoldedConstant>(0)
+            local blockIndex:i64 = 0
+            while blockIndex < functionNode.blocks.length {
+                local block = functionNode.blocks[blockIndex]
+                local instructionIndex:i64 = 0
+                while instructionIndex < block.instructions.length {
+                    local instruction = block.instructions[instructionIndex]
+                    local folded = self.foldInstruction(instruction, constants)
+                    if folded != null {
+                        instruction.op = "constant"
+                        instruction.text = folded!.value.toString()
+                        instruction.first = null
+                        instruction.second = null
+                        instruction.third = null
+                        instruction.arguments = new Array<ref Ir.Value>(0)
+                        instruction.operator = null
+                    }
+                    if instruction.op == "constant" && instruction.result != null && self.foldableInteger(instruction.result!.typeName) {
+                        local parsed = System.parseInteger(instruction.text!)
+                        if parsed.valid { constants.append(new FoldedConstant(instruction.result!.name, parsed.value, instruction.result!.typeName)) }
+                    }
+                    if instruction.op == "branch" && instruction.first != null {
+                        local condition = self.findConstant(constants, instruction.first!.name)
+                        if condition != null {
+                            instruction.op = "jump"
+                            if condition!.value == 0 { instruction.target = instruction.alternateTarget }
+                            instruction.first = null
+                            instruction.alternateTarget = null
+                        }
+                    }
+                    instructionIndex = instructionIndex + 1
+                }
+                blockIndex = blockIndex + 1
+            }
+        }
+
+        foldInstruction(instruction:Ir.Instruction, constants:Array<FoldedConstant>) -> ref FoldedConstant? {
+            if instruction.result == null || !self.foldableInteger(instruction.result!.typeName) { return null }
+            if instruction.op == "unary" && instruction.first != null {
+                local operand = self.findConstant(constants, instruction.first!.name)
+                if operand == null { return null }
+                if instruction.operator! == "-" { return new FoldedConstant(instruction.result!.name, self.normalizeInteger(-operand!.value, instruction.result!.typeName), instruction.result!.typeName) }
+                if instruction.operator! == "!" {
+                    if operand!.value == 0 { return new FoldedConstant(instruction.result!.name, 1, instruction.result!.typeName) }
+                    return new FoldedConstant(instruction.result!.name, 0, instruction.result!.typeName)
+                }
+                return null
+            }
+            if instruction.op == "convert" && instruction.first != null {
+                local converted = self.findConstant(constants, instruction.first!.name)
+                if converted != null && self.foldableInteger(converted!.typeName) {
+                    return new FoldedConstant(instruction.result!.name, self.normalizeInteger(converted!.value, instruction.result!.typeName), instruction.result!.typeName)
+                }
+                return null
+            }
+            if instruction.op != "binary" || instruction.first == null || instruction.second == null { return null }
+            local left = self.findConstant(constants, instruction.first!.name)
+            local right = self.findConstant(constants, instruction.second!.name)
+            if left == null || right == null { return null }
+            local operator = instruction.operator!
+            if operator == "+" { return self.foldedResult(instruction, left!.value + right!.value) }
+            if operator == "-" { return self.foldedResult(instruction, left!.value - right!.value) }
+            if operator == "*" { return self.foldedResult(instruction, left!.value * right!.value) }
+            if operator == "/" {
+                if right!.value == 0 || (instruction.result!.typeName == "i64" && left!.value == -9223372036854775808 && right!.value == -1) { return null }
+                return self.foldedResult(instruction, left!.value / right!.value)
+            }
+            if operator == "&" { return self.foldedResult(instruction, left!.value & right!.value) }
+            if operator == "|" { return self.foldedResult(instruction, left!.value | right!.value) }
+            if operator == "^" { return self.foldedResult(instruction, left!.value ^ right!.value) }
+            if operator == "<<" { return self.foldedResult(instruction, left!.value << (right!.value & 63)) }
+            if operator == ">>" { return self.foldedResult(instruction, left!.value >> (right!.value & 63)) }
+            if operator == "==" || operator == "===" { if left!.value == right!.value { return self.foldedResult(instruction, 1) }; return self.foldedResult(instruction, 0) }
+            if operator == "!=" || operator == "!==" { if left!.value != right!.value { return self.foldedResult(instruction, 1) }; return self.foldedResult(instruction, 0) }
+            if operator == "<" { if left!.value < right!.value { return self.foldedResult(instruction, 1) }; return self.foldedResult(instruction, 0) }
+            if operator == "<=" { if left!.value <= right!.value { return self.foldedResult(instruction, 1) }; return self.foldedResult(instruction, 0) }
+            if operator == ">" { if left!.value > right!.value { return self.foldedResult(instruction, 1) }; return self.foldedResult(instruction, 0) }
+            if operator == ">=" { if left!.value >= right!.value { return self.foldedResult(instruction, 1) }; return self.foldedResult(instruction, 0) }
+            return null
+        }
+
+        foldedResult(instruction:Ir.Instruction, value:i64) -> ref FoldedConstant {
+            return new FoldedConstant(instruction.result!.name, self.normalizeInteger(value, instruction.result!.typeName), instruction.result!.typeName)
+        }
+
+        normalizeInteger(value:i64, typeName:string) -> i64 {
+            if typeName == "bool" { if value == 0 { return 0 }; return 1 }
+            if typeName == "u8" { return value & 255 }
+            if typeName == "i8" { local result = value & 255; if result >= 128 { result = result - 256 }; return result }
+            if typeName == "u16" { return value & 65535 }
+            if typeName == "i16" { local result = value & 65535; if result >= 32768 { result = result - 65536 }; return result }
+            if typeName == "u32" { return value & 4294967295 }
+            if typeName == "i32" { local result = value & 4294967295; if result >= 2147483648 { result = result - 4294967296 }; return result }
+            return value
+        }
+
+        findConstant(constants:Array<FoldedConstant>, name:string) -> ref FoldedConstant? {
+            local index = constants.length
+            while index > 0 { index = index - 1; if constants[index].name == name { return constants[index] } }
+            return null
+        }
+
+        foldableInteger(typeName:string) -> bool {
+            return typeName == "bool" || typeName == "u8" || typeName == "i8" || typeName == "u16" || typeName == "i16" || typeName == "u32" || typeName == "i32" || typeName == "i64"
+        }
+
+        removeDeadValues(functionNode:Ir.Function) -> void {
+            local changed:bool = true
+            while changed {
+                changed = false
+                local blockIndex:i64 = 0
+                while blockIndex < functionNode.blocks.length {
+                    local retained = new Array<ref Ir.Instruction>(0)
+                    local instructionIndex:i64 = 0
+                    while instructionIndex < functionNode.blocks[blockIndex].instructions.length {
+                        local instruction = functionNode.blocks[blockIndex].instructions[instructionIndex]
+                        local dead:bool = false
+                        if instruction.result != null && self.pureInstruction(instruction) {
+                            dead = self.temporaryUseCount(functionNode, instruction.result!.name) == 0
+                        }
+                        if dead { changed = true } else { retained.append(instruction) }
+                        instructionIndex = instructionIndex + 1
+                    }
+                    functionNode.blocks[blockIndex].instructions = retained
+                    blockIndex = blockIndex + 1
+                }
+            }
+        }
+
+        pureInstruction(instruction:Ir.Instruction) -> bool {
+            if instruction.op == "constant" || instruction.op == "float_constant" || instruction.op == "string_constant" || instruction.op == "load_local" || instruction.op == "unary" { return true }
+            if instruction.op == "binary" { return instruction.operator! != "/" }
+            if instruction.op == "convert" && instruction.first != null && instruction.result != null {
+                return self.foldableInteger(instruction.first!.typeName) && self.foldableInteger(instruction.result!.typeName)
+            }
+            return false
+        }
+
+        temporaryUseCount(functionNode:Ir.Function, name:string) -> i64 {
+            local count:i64 = 0
+            local blockIndex:i64 = 0
+            while blockIndex < functionNode.blocks.length {
+                local instructionIndex:i64 = 0
+                while instructionIndex < functionNode.blocks[blockIndex].instructions.length {
+                    local instruction = functionNode.blocks[blockIndex].instructions[instructionIndex]
+                    count = count + self.valueUse(instruction.first, name) + self.valueUse(instruction.second, name) + self.valueUse(instruction.third, name)
+                    local argumentIndex:i64 = 0
+                    while argumentIndex < instruction.arguments.length { count = count + self.valueUse(instruction.arguments[argumentIndex], name); argumentIndex = argumentIndex + 1 }
+                    instructionIndex = instructionIndex + 1
+                }
+                blockIndex = blockIndex + 1
+            }
+            return count
+        }
+
+        valueUse(value:Ir.Value?, name:string) -> i64 {
+            if value != null { if value!.kind == "temporary" && value!.name == name { return 1 } }
+            return 0
         }
 
         removeUnreachable(functionNode:Ir.Function) -> void {

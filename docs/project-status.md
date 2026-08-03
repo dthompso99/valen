@@ -69,6 +69,7 @@ and embedded targets.
 - Diagnostics have named error/warning/note severities, primary and secondary source labels, explanatory notes, and precise replacement hints with generation parity.
 - **WIP:** package metadata, versioning, and compiled libraries
 - Primitive SSA temporaries use conservative linear-scan allocation across `r12`-`r15`, with stack spills and GC-visible managed references.
+- IR canonicalization folds integer/boolean constants, simplifies constant branches, removes unreachable blocks, and eliminates unused pure SSA values without suppressing runtime traps or state changes.
 - **WIP:** optimization levels and peephole optimization
 - Generation 0 and the self-hosted compiler emit ELF64 relocatable objects without a system assembler.
 - **WIP:** an integrated linker

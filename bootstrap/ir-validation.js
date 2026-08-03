@@ -1,4 +1,5 @@
 const terminators = new Set(['return', 'jump', 'branch']);
+const integerTypes = new Set(['bool', 'u8', 'i8', 'u16', 'i16', 'u32', 'i32', 'i64']);
 const supportedOperations = new Set([
     'allocate', 'array_append', 'array_length', 'array_load', 'array_new', 'array_store', 'binary', 'branch',
     'builder_append_byte', 'builder_append_string', 'builder_build', 'builder_length', 'builder_new', 'call',
@@ -28,6 +29,109 @@ export class IrCanonicalizer {
             if (terminal >= 0) block.instructions.length = terminal + 1;
             if (terminal < 0 && fn.returnType === 'void') block.instructions.push({op: 'return'});
         }
+        this.foldConstants(fn);
+        this.removeUnreachable(fn);
+        this.removeDeadValues(fn);
+    }
+
+    foldConstants(fn) {
+        const constants = new Map();
+        for (const block of fn.blocks) {
+            for (let index = 0; index < block.instructions.length; index++) {
+                let instruction = block.instructions[index];
+                const folded = this.foldInstruction(instruction, constants);
+                if (folded !== null) {
+                    instruction = {op: 'constant', result: instruction.result, type: instruction.type, value: folded.toString()};
+                    block.instructions[index] = instruction;
+                }
+                if (instruction.op === 'constant' && instruction.result && integerTypes.has(instruction.type)) {
+                    constants.set(instruction.result, {value: BigInt(instruction.value), type: instruction.type});
+                }
+                if (instruction.op === 'branch') {
+                    const condition = instruction.condition?.kind === 'temporary' ? constants.get(instruction.condition.name) : null;
+                    if (condition) block.instructions[index] = {op: 'jump', target: condition.value !== 0n ? instruction.thenTarget : instruction.elseTarget};
+                }
+            }
+        }
+    }
+
+    foldInstruction(instruction, constants) {
+        if (!instruction.result || !integerTypes.has(instruction.type)) return null;
+        const constant = value => value?.kind === 'temporary' ? constants.get(value.name) : null;
+        if (instruction.op === 'unary') {
+            const operand = constant(instruction.operand);
+            if (!operand) return null;
+            if (instruction.operator === '-') return this.normalizeInteger(-operand.value, instruction.type);
+            if (instruction.operator === '!') return operand.value === 0n ? 1n : 0n;
+            return null;
+        }
+        if (instruction.op === 'convert') {
+            const value = constant(instruction.value);
+            return value && integerTypes.has(value.type) ? this.normalizeInteger(value.value, instruction.type) : null;
+        }
+        if (instruction.op !== 'binary') return null;
+        const left = constant(instruction.left);
+        const right = constant(instruction.right);
+        if (!left || !right) return null;
+        const a = left.value;
+        const b = right.value;
+        let value;
+        switch (instruction.operator) {
+            case '+': value = a + b; break;
+            case '-': value = a - b; break;
+            case '*': value = a * b; break;
+            case '/':
+                if (b === 0n || instruction.type === 'i64' && a === -(1n << 63n) && b === -1n) return null;
+                value = a / b;
+                break;
+            case '&': value = a & b; break;
+            case '|': value = a | b; break;
+            case '^': value = a ^ b; break;
+            case '<<': value = a << (b & 63n); break;
+            case '>>': value = instruction.left.type?.startsWith('u')
+                ? this.normalizeInteger(a, instruction.left.type) >> (b & 63n)
+                : a >> (b & 63n); break;
+            case '==': case '===': return a === b ? 1n : 0n;
+            case '!=': case '!==': return a !== b ? 1n : 0n;
+            case '<': return a < b ? 1n : 0n;
+            case '<=': return a <= b ? 1n : 0n;
+            case '>': return a > b ? 1n : 0n;
+            case '>=': return a >= b ? 1n : 0n;
+            default: return null;
+        }
+        return this.normalizeInteger(value, instruction.type);
+    }
+
+    normalizeInteger(value, type) {
+        if (type === 'bool') return value === 0n ? 0n : 1n;
+        if (type === 'i64') return BigInt.asIntN(64, value);
+        const bits = Number(type.slice(1));
+        return type.startsWith('u') ? BigInt.asUintN(bits, value) : BigInt.asIntN(bits, value);
+    }
+
+    removeDeadValues(fn) {
+        const pure = instruction => ['constant', 'float_constant', 'string_constant', 'load_local', 'unary'].includes(instruction.op) ||
+            instruction.op === 'binary' && instruction.operator !== '/' ||
+            instruction.op === 'convert' && integerTypes.has(instruction.type) && integerTypes.has(instruction.value?.type);
+        let changed = true;
+        while (changed) {
+            changed = false;
+            const uses = new Map();
+            for (const block of fn.blocks) for (const instruction of block.instructions) {
+                for (const value of new IrValidator().values(instruction)) if (value.kind === 'temporary') uses.set(value.name, (uses.get(value.name) ?? 0) + 1);
+            }
+            for (const block of fn.blocks) {
+                const retained = block.instructions.filter(instruction => {
+                    const dead = instruction.result && !uses.has(instruction.result) && pure(instruction);
+                    if (dead) changed = true;
+                    return !dead;
+                });
+                block.instructions = retained;
+            }
+        }
+    }
+
+    removeUnreachable(fn) {
         if (!fn.blocks.length) return;
         const byLabel = new Map(fn.blocks.map(block => [block.label, block]));
         const reachable = new Set();
@@ -137,9 +241,16 @@ export class IrValidator {
 
     values(instruction) {
         const values = [];
-        const add = value => { if (value && typeof value === 'object' && value.kind) values.push(value); };
-        for (const key of ['value', 'left', 'right', 'operand', 'object', 'array', 'index', 'length', 'string', 'builder', 'condition']) add(instruction[key]);
-        for (const value of instruction.arguments ?? []) add(value);
+        const add = value => {
+            if (!value || typeof value !== 'object') return;
+            if (value.kind) {
+                values.push(value);
+                return;
+            }
+            if (Array.isArray(value)) for (const item of value) add(item);
+            else for (const [key, item] of Object.entries(value)) if (key !== 'result') add(item);
+        };
+        for (const [key, value] of Object.entries(instruction)) if (key !== 'result') add(value);
         return values;
     }
 }

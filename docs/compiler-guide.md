@@ -29,6 +29,7 @@ source -> tokens -> AST -> module graph -> semantic symbols
 - Module loading resolves relative imports and `VALEN_LIBRARY_PATH`.
 - Semantic analysis binds names, checks types/contracts, and enforces ownership.
 - IR lowering produces target-independent blocks and instructions.
+- Canonicalization folds integer and boolean constants, simplifies constant branches, removes unreachable blocks, and eliminates unused side-effect-free SSA values. Potentially trapping and stateful operations are retained.
 - Validation rejects malformed IR before backend generation.
 - The x86-64 backend emits a controlled Intel-syntax subset. Both generation 0 and the self-hosted
   compiler encode that subset and write ELF64 relocatable objects directly; the system toolchain is
@@ -51,7 +52,7 @@ provider, not the removal of hosted linking. Generation 0 can stop after object 
 The self-hosted compiler can stop at the same boundary with
 `valen --emit-object <source> -o <output.o>`.
 
-An integrated linker, register allocation, and optimization levels are **WIP**.
+An integrated linker and optimization levels are **WIP**. Primitive SSA temporaries currently use conservative linear-scan register allocation with stack spills.
 
 ## Repository map
 

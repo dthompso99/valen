@@ -1076,6 +1076,37 @@ test('IR canonicalization removes unreachable blocks and instructions after term
     assert.doesNotThrow(() => new IrValidator().validate(program));
 });
 
+test('IR optimization folds constants, simplifies branches, and removes dead pure values', () => {
+    const temporary = (name, type = 'i64') => ({kind: 'temporary', name, type});
+    const fn = {name: 'entry.__', owner: 'entry', parameters: [{name: 'self', type: 'entry'}], returnType: 'i64', blocks: [
+        {label: 'entry', instructions: [
+            {op: 'constant', result: '%0', type: 'i64', value: 2},
+            {op: 'constant', result: '%1', type: 'i64', value: 3},
+            {op: 'binary', result: '%2', type: 'i64', operator: '+', left: temporary('%0'), right: temporary('%1')},
+            {op: 'constant', result: '%3', type: 'i64', value: 5},
+            {op: 'binary', result: '%4', type: 'bool', operator: '==', left: temporary('%2'), right: temporary('%3')},
+            {op: 'branch', condition: temporary('%4', 'bool'), thenTarget: 'live', elseTarget: 'dead'}
+        ]},
+        {label: 'live', instructions: [
+            {op: 'constant', result: '%5', type: 'i64', value: 99},
+            {op: 'constant', result: '%6', type: 'i64', value: 1},
+            {op: 'constant', result: '%7', type: 'i64', value: 0},
+            {op: 'binary', result: '%8', type: 'i64', operator: '/', left: temporary('%6'), right: temporary('%7')},
+            {op: 'return', value: temporary('%2')}
+        ]},
+        {label: 'dead', instructions: [{op: 'return', value: temporary('%3')}]}
+    ]};
+    const program = {types: [{name: 'entry', fields: [], virtualMethods: [], contracts: []}], functions: [fn], externals: [], entry: fn.name};
+    new IrCanonicalizer().run(program);
+    assert.deepEqual(fn.blocks.map(block => block.label), ['entry', 'live']);
+    assert.deepEqual(fn.blocks[0].instructions.map(instruction => instruction.op), ['constant', 'jump']);
+    assert.equal(fn.blocks[0].instructions[0].value, '5');
+    assert.equal(fn.blocks[0].instructions[1].target, 'live');
+    assert.ok(!fn.blocks.flatMap(block => block.instructions).some(instruction => instruction.result === '%5'));
+    assert.ok(fn.blocks.flatMap(block => block.instructions).some(instruction => instruction.result === '%8' && instruction.op === 'binary'));
+    assert.doesNotThrow(() => new IrValidator().validate(program));
+});
+
 test('IR validation rejects malformed control flow and calls before assembly', () => {
     const fn = {name: 'entry.__', owner: 'entry', parameters: [{name: 'self', type: 'entry'}], returnType: 'void', blocks: [
         {label: 'entry', instructions: [
