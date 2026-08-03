@@ -60,6 +60,11 @@ jobs:
       - name: Build and test bootstrap generations
         run: docker build --pull --target stage3 -t argon:test -f ./docker/Dockerfile.bootstrap .
 
+      - name: Build and run scratch deployment proof
+        run: |
+          docker build --target scratch-runtime -t argon:scratch -f ./docker/Dockerfile.bootstrap .
+          docker run --rm argon:scratch
+
       - name: Login to registry
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:

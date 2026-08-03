@@ -94,3 +94,12 @@ docker build -f docker/Dockerfile.bootstrap -t argon:test .
 ```
 
 It builds the native compiler in successive stages and runs representative programs. Packaging a general-purpose compiler image is **WIP**.
+
+The self-contained native output can also run in an otherwise empty container:
+
+```sh
+docker build --target scratch-runtime -f docker/Dockerfile.bootstrap -t argon:scratch .
+docker run --rm argon:scratch
+```
+
+That final image is built `FROM scratch` and contains only the compiled smoke-test executable. It proves the self-contained ELF path does not require a shell, libc, a dynamic loader, or runtime files. A future libc-linked output mode can remain a separate compiler option.

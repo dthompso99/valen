@@ -48,3 +48,7 @@ RUN ["./argon", "tests/native-tests-failing.ar", "-o", "dist/native-tests-failin
 RUN /bin/sh -c 'dist/native-tests-failing >/tmp/test.stdout 2>/tmp/test.stderr; status=$?; test "$status" -eq 1; grep -q "test failed" /tmp/test.stderr'
 RUN ls -al dist
 CMD ["/bin/sh"]
+
+FROM scratch AS scratch-runtime
+COPY --from=stage3 /app/dist/simple /argon-smoke
+ENTRYPOINT ["/argon-smoke"]
