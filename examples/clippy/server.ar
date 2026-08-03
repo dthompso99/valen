@@ -64,8 +64,9 @@ entry {{
         if configuredPort != null { local parsed = System.parseInteger(configuredPort!); if !parsed.valid || parsed.value < 1 || parsed.value > 65535 { return 64 }; port = parsed.value }
         local listener = Network.listen(port as u16, 64)
         if listener == null || !Network.makeListenerNonblocking(listener!) { return 1 }
+        if !System.enableShutdownSignals() { Network.closeListener(listener!); return 1 }
         System.write("clippy: ready on port " + port.toString() + "\n")
-        while true {
+        while !System.shutdownRequested() {
             local descriptors = new Array<i64>(0); local interests = new Array<i64>(0)
             descriptors.append(Network.listenerDescriptor(listener!)); interests.append(1)
             local index:i64 = 0
@@ -74,6 +75,10 @@ entry {{
             if ready == 0 { if !self.accept(listener!) { return 2 } }
             else { if ready > 0 { local clientIndex = self.clientAt(ready - 1); if clientIndex >= 0 { self.service(clientIndex) } } }
         }
+        local closing:i64 = 0
+        while closing < self.clients.length { if self.clients[closing] != null { self.retire(closing) }; closing = closing + 1 }
+        Network.closeListener(listener!)
+        System.write("clippy: stopped\n")
         return 0
     }
 

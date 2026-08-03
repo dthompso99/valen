@@ -84,6 +84,8 @@ test('Valen Clippy upgrades, broadcasts, fragments, and rejects malformed client
     assert.equal(build.status, 0, build.stderr || build.stdout);
     const port = await availablePort();
     const server = spawn(executable, [], {env: {...process.env, PORT: `${port}`, VALEN_MAX_MESSAGE_BYTES: '1024'}, stdio: ['ignore', 'pipe', 'pipe']});
+    let serverOutput = '';
+    server.stdout.on('data', data => { serverOutput += data.toString(); });
     t.after(() => { if (server.exitCode == null) server.kill('SIGKILL'); fs.rmSync(directory, {recursive: true, force: true}); });
     await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('Clippy did not become ready')), 3000);
@@ -107,4 +109,11 @@ test('Valen Clippy upgrades, broadcasts, fragments, and rejects malformed client
     malformed.send('unmasked', {masked: false});
     assert.equal((await malformed.next()).opcode, 8);
     first.socket.destroy(); second.socket.destroy(); malformed.socket.destroy();
+    const stopped = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Clippy did not stop after SIGTERM')), 3000);
+        server.once('exit', (status, signal) => { clearTimeout(timeout); resolve({status, signal}); });
+    });
+    server.kill('SIGTERM');
+    assert.deepEqual(await stopped, {status: 0, signal: null});
+    assert.match(serverOutput, /clippy: stopped/);
 });

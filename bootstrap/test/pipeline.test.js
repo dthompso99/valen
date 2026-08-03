@@ -880,6 +880,14 @@ test('managed allocation triggers adaptive collection and native handles use GC 
     assert.match(assembly, /valen_gc_native_handle_finalize:[\s\S]*mov QWORD PTR \[r10\+16\], -1/);
 });
 
+test('shutdown signals lower to async-safe flags checked by application safe points', () => {
+    const semantic = new SemanticAnalyzer().analyzeFile(path.join(projectRoot, 'examples/clippy/server.ar'), {sourceRoot: projectRoot, libraryPath: path.join(projectRoot, 'lib')});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
+    assert.match(assembly, /valen_System_enableShutdownSignals:[\s\S]*mov edi, 2[\s\S]*mov edi, 15[\s\S]*valen_System_shutdownRequested:/);
+    assert.match(assembly, /\.Lshutdown_signal_handler:[\s\S]*mov QWORD PTR \[rip\+valen_shutdown_requested\], 1/);
+});
+
 test('UTF-8 strings support length, byte indexing, equality, concatenation, and slicing', () => {
     const semantic = new SemanticAnalyzer().analyze(new Parser().parse(stringProgram, 'strings.ar'));
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));

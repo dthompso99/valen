@@ -9,6 +9,7 @@ If you are new to the project, read these in order:
 5. [File-backed service friction report](service-friction/file-backed-value.md) — see what atomic persistence added.
 6. [Concurrent service friction report](service-friction/concurrent-http.md) — see how readiness, cancellation, and backpressure behaved.
 7. [SQLite FFI friction report](service-friction/sqlite-ffi.md) — see how an explicit native dependency behaved.
+8. [Clippy service friction report](service-friction/clippy.md) — see what the first long-running scratch deployment exposed.
 
 For compiler contributors:
 

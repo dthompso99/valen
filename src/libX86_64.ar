@@ -155,7 +155,8 @@ library X86_64 {{
             if name == "valen_System_openRead" || name == "valen_System_openWrite" || name == "valen_System_read" || name == "valen_System_writeFile" || name == "valen_System_writeBytes" || name == "valen_System_sync" { return true }
             if name == "valen_System_close" || name == "valen_System_replaceFile" || name == "valen_System_removeFile" { return true }
             if name == "valen_System_lastError" || name == "valen_System_currentDirectory" || name == "valen_System_environmentVariable" || name == "valen_System_collectGarbage" { return true }
-            if name == "valen_System_enableProcessArena" || name == "valen_System_link" || name == "valen_System_memoryCopy" || name == "valen_System_memoryCompare" { return true }
+            if name == "valen_System_enableProcessArena" || name == "valen_System_enableShutdownSignals" || name == "valen_System_shutdownRequested" { return true }
+            if name == "valen_System_link" || name == "valen_System_memoryCopy" || name == "valen_System_memoryCompare" { return true }
             if name == "valen_System_fileDescriptor" || name == "valen_System_makeFileNonblocking" { return true }
             if name == "valen_Operations_threadAvailable" || name == "valen_Operations_threadStart" || name == "valen_Operations_threadJoin" { return true }
             if name == "valen_Operations_mutexLock" || name == "valen_Operations_mutexUnlock" || name == "valen_Operations_conditionWait" { return true }
@@ -1069,6 +1070,15 @@ library X86_64 {{
             self.writer.line("    mov DWORD PTR [rip+valen_arena_enabled], 1")
             self.writer.line("    ret")
             self.writer.line("")
+            self.writer.line(".globl valen_System_enableShutdownSignals"); self.writer.line("valen_System_enableShutdownSignals:")
+            self.writer.line("    sub rsp, 32"); self.writer.line("    lea rax, [rip+.Lshutdown_signal_handler]"); self.writer.line("    mov QWORD PTR [rsp], rax")
+            self.writer.line("    mov QWORD PTR [rsp+8], 67108864"); self.writer.line("    lea rax, [rip+.Lshutdown_signal_return]"); self.writer.line("    mov QWORD PTR [rsp+16], rax"); self.writer.line("    mov QWORD PTR [rsp+24], 0")
+            self.writer.line("    mov eax, 13"); self.writer.line("    mov edi, 2"); self.writer.line("    mov rsi, rsp"); self.writer.line("    xor edx, edx"); self.writer.line("    mov r10d, 8"); self.writer.line("    syscall"); self.writer.line("    test rax, rax"); self.writer.line("    js .Lshutdown_signal_failed")
+            self.writer.line("    mov eax, 13"); self.writer.line("    mov edi, 15"); self.writer.line("    mov rsi, rsp"); self.writer.line("    xor edx, edx"); self.writer.line("    mov r10d, 8"); self.writer.line("    syscall"); self.writer.line("    test rax, rax"); self.writer.line("    js .Lshutdown_signal_failed")
+            self.writer.line("    add rsp, 32"); self.writer.line("    mov eax, 1"); self.writer.line("    ret"); self.writer.line(".Lshutdown_signal_failed:"); self.writer.line("    add rsp, 32"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
+            self.writer.line(".globl valen_System_shutdownRequested"); self.writer.line("valen_System_shutdownRequested:"); self.writer.line("    mov rax, QWORD PTR [rip+valen_shutdown_requested]"); self.writer.line("    ret")
+            self.writer.line(".Lshutdown_signal_handler:"); self.writer.line("    mov QWORD PTR [rip+valen_shutdown_requested], 1"); self.writer.line("    ret")
+            self.writer.line(".Lshutdown_signal_return:"); self.writer.line("    mov eax, 15"); self.writer.line("    syscall"); self.writer.line("")
             self.writer.line(".globl valen_alloc")
             self.writer.line("valen_alloc:")
             self.writer.line("    test rdi, rdi")
@@ -2431,6 +2441,8 @@ library X86_64 {{
             self.writer.line("    .zero 4")
             self.writer.line("valen_arena_enabled:")
             self.writer.line("    .zero 4")
+            self.writer.line("valen_shutdown_requested:")
+            self.writer.line("    .zero 8")
             self.writer.line(".section .data")
             self.writer.line(".align 8")
             self.writer.line("valen_gc_threshold:")

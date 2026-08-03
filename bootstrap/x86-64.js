@@ -60,6 +60,8 @@ export class X86_64Backend {
             'valen_System_environmentVariable',
             'valen_System_collectGarbage',
             'valen_System_enableProcessArena',
+            'valen_System_enableShutdownSignals',
+            'valen_System_shutdownRequested',
             'valen_System_link',
             'valen_System_memoryCopy',
             'valen_System_memoryCompare',
@@ -123,6 +125,7 @@ export class X86_64Backend {
         if (runtimeSymbols.has('valen_System_environmentVariable')) lines.push(...this.environmentVariableRuntime());
         if (runtimeSymbols.has('valen_System_collectGarbage')) lines.push('.globl valen_System_collectGarbage', 'valen_System_collectGarbage:', '    jmp valen_gc_collect', '');
         if (runtimeSymbols.has('valen_System_enableProcessArena')) lines.push('.globl valen_System_enableProcessArena', 'valen_System_enableProcessArena:', '    mov DWORD PTR [rip+valen_arena_enabled], 1', '    ret', '');
+        if (runtimeSymbols.has('valen_System_enableShutdownSignals') || runtimeSymbols.has('valen_System_shutdownRequested')) lines.push(...this.shutdownSignalRuntime());
         if (runtimeSymbols.has('valen_System_link')) lines.push(...this.linkRuntime());
         if (runtimeSymbols.has('valen_System_memoryCopy')) lines.push(...this.memoryCopyRuntime());
         if (runtimeSymbols.has('valen_System_memoryCompare')) lines.push(...this.memoryCompareRuntime());
@@ -149,6 +152,7 @@ export class X86_64Backend {
         }
         if (this.needsProcessArguments) lines.push(...this.processData());
         if (this.needsFilesystemState) lines.push(...this.filesystemData());
+        if (runtimeSymbols.has('valen_System_enableShutdownSignals') || runtimeSymbols.has('valen_System_shutdownRequested')) lines.push('.bss', '.align 8', 'valen_shutdown_requested:', '    .zero 8', '.text');
         if ([...runtimeSymbols].some(symbol => symbol.startsWith('valen_Network_'))) lines.push('.bss', '.align 8', 'valen_network_error:', '    .zero 8', '.text');
         lines.push('.section .note.GNU-stack,"",@progbits');
         return `${lines.join('\n')}\n`;
@@ -1261,6 +1265,21 @@ export class X86_64Backend {
             '    syscall',
             '    ud2',
             ''
+        ];
+    }
+
+    shutdownSignalRuntime() {
+        return [
+            '.globl valen_System_enableShutdownSignals', 'valen_System_enableShutdownSignals:',
+            '    sub rsp, 32', '    lea rax, [rip+.Lshutdown_signal_handler]', '    mov QWORD PTR [rsp], rax',
+            '    mov QWORD PTR [rsp+8], 67108864', '    lea rax, [rip+.Lshutdown_signal_return]', '    mov QWORD PTR [rsp+16], rax', '    mov QWORD PTR [rsp+24], 0',
+            '    mov eax, 13', '    mov edi, 2', '    mov rsi, rsp', '    xor edx, edx', '    mov r10d, 8', '    syscall', '    test rax, rax', '    js .Lshutdown_signal_failed',
+            '    mov eax, 13', '    mov edi, 15', '    mov rsi, rsp', '    xor edx, edx', '    mov r10d, 8', '    syscall', '    test rax, rax', '    js .Lshutdown_signal_failed',
+            '    add rsp, 32', '    mov eax, 1', '    ret',
+            '.Lshutdown_signal_failed:', '    add rsp, 32', '    xor eax, eax', '    ret',
+            '.globl valen_System_shutdownRequested', 'valen_System_shutdownRequested:', '    mov rax, QWORD PTR [rip+valen_shutdown_requested]', '    ret',
+            '.Lshutdown_signal_handler:', '    mov QWORD PTR [rip+valen_shutdown_requested], 1', '    ret',
+            '.Lshutdown_signal_return:', '    mov eax, 15', '    syscall', ''
         ];
     }
 
