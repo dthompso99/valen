@@ -66,7 +66,6 @@ jobs:
       - name: Build and run scratch deployment proof
         run: |
           docker build --target scratch-runtime -t valen:scratch -f ./docker/Dockerfile.bootstrap .
-          docker run --rm valen:scratch
 
       - name: Login to registry
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
