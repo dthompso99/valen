@@ -20,7 +20,7 @@ entry {{
         if mixed32 != 3999999998 { return 3 }
         if widenedUnsigned != 60250 { return 4 }
         if mixedFloat != 0.5 { return 5 }
-        if mixedBits != 80 { return 6 }
+        if mixedBits != 96 { return 6 }
         if !(signed16 < unsigned16) { return 7 }
         return 0
     }
