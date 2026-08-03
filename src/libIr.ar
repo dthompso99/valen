@@ -842,6 +842,33 @@ library Ir {{
                 tested.ownerType = expression.text
                 return tested.result!
             }
+            if expression.operator! == "&&" || expression.operator! == "||" {
+                local name = "$short#" + self.nextLocal.toString()
+                self.nextLocal = self.nextLocal + 1
+                local declared = new Instruction("declare_local")
+                declared.name = name
+                declared.typeName = "bool"
+                declared.first = left
+                self.emit(declared)
+                local rightBlock = self.newBlock("short_right")
+                local endBlock = self.newBlock("short_end")
+                local branch = new Instruction("branch")
+                branch.first = left
+                if expression.operator! == "&&" { branch.target = rightBlock.label; branch.alternateTarget = endBlock.label }
+                else { branch.target = endBlock.label; branch.alternateTarget = rightBlock.label }
+                self.emit(branch)
+                self.currentBlock = rightBlock
+                local stored = new Instruction("store_local")
+                stored.name = name
+                stored.typeName = "bool"
+                stored.first = self.lowerExpression(expression.right!)
+                self.emit(stored)
+                self.jumpIfOpen(endBlock.label)
+                self.currentBlock = endBlock
+                local loaded = self.temporary("load_local", "bool")
+                loaded.name = name
+                return loaded.result!
+            }
             local right = self.lowerExpression(expression.right!)
             local op = "binary"
             if left.typeName == "string" {

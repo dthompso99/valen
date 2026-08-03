@@ -389,6 +389,9 @@ export class IrGenerator {
                     const value = this.lowerExpression(expression.left);
                     return this.result('type_test', 'bool', {value, targetType: expression.runtimeType});
                 }
+                if (expression.operator === '&&' || expression.operator === '||') {
+                    return this.lowerShortCircuit(expression);
+                }
                 const left = this.lowerExpression(expression.left);
                 const right = this.lowerExpression(expression.right);
                 if (left.type === 'string' && expression.operator !== '===' && expression.operator !== '!==') {
@@ -431,6 +434,25 @@ export class IrGenerator {
             default:
                 throw new Error(`Cannot lower expression ${expression.kind}`);
         }
+    }
+
+    lowerShortCircuit(expression) {
+        const left = this.lowerExpression(expression.left);
+        const name = `$short#${this.nextLocal++}`;
+        this.emit('declare_local', {name, type: 'bool', value: left});
+        const rightBlock = this.newBlock('short_right');
+        const endBlock = this.newBlock('short_end');
+        this.emit('branch', {
+            condition: left,
+            thenTarget: expression.operator === '&&' ? rightBlock.label : endBlock.label,
+            elseTarget: expression.operator === '&&' ? endBlock.label : rightBlock.label
+        });
+        this.block = rightBlock;
+        const right = this.lowerExpression(expression.right);
+        this.emit('store_local', {name, type: 'bool', value: right});
+        if (!this.isTerminated()) this.emit('jump', {target: endBlock.label});
+        this.block = endBlock;
+        return this.result('load_local', 'bool', {name});
     }
 
     optionalBaseTypeName(type) {

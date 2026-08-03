@@ -62,7 +62,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 - [ ] Add native mutex, condition, and atomic synchronization objects
 - [ ] Add a thread-pool executor after single-worker correctness is established
 - [ ] Add event-loop executors for nonblocking file and network I/O
-- [ ] Implement short-circuit lowering for `&&` and `||`
+- [x] Implement short-circuit lowering for `&&` and `||`
 - [ ] Add iterators and `for` loops
 - [ ] Add `else if` shorthand
 - [ ] Evaluate expression-valued conditionals and richer control-flow expressions

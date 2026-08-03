@@ -828,6 +828,17 @@ test('expect is rejected outside test suites', () => {
     assert.match(result.diagnostics[0].message, /only available inside a test suite/);
 });
 
+test('logical operators lower their right operands into short-circuit blocks', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/short-circuit.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath);
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    const fn = ir.functions.find(candidate => candidate.name === ir.entry);
+    assert.equal(fn.blocks.filter(block => block.label.startsWith('short_right')).length, 2);
+    assert.equal(fn.blocks.filter(block => block.label.startsWith('short_end')).length, 2);
+    assert.equal(fn.blocks.flatMap(block => block.instructions).filter(instruction => instruction.op === 'binary' && ['&&', '||'].includes(instruction.operator)).length, 0);
+});
+
 test('generated primitive executable returns success', t => {
     const semantic = new SemanticAnalyzer().analyze(new Parser().parse(primitiveProgram, 'primitives.ar'));
     const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));

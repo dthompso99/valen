@@ -1,0 +1,7 @@
+entry {{
+    __() -> i64 {
+        if false && (1 / 0 == 0) { return 1 }
+        if true || (1 / 0 == 0) { return 0 }
+        return 2
+    }
+}}
