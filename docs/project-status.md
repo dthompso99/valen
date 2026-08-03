@@ -64,7 +64,7 @@ and embedded targets.
 - Generation 1 and generation 2 produce equivalent normalized IR across the shared conformance corpus.
 - Generation 1 and generation 2 report identical diagnostics for the shared invalid-program corpus.
 - JavaScript generation 0 is intentionally retained as the stable path from zero; generated native compilers run without JavaScript.
-- **WIP:** formatter and language server
+- The editor-neutral language server provides live diagnostics, quick fixes, hover, go-to-definition, and document symbols; editor packaging and the formatter remain **WIP**.
 - Diagnostics have named error/warning/note severities, primary and secondary source labels, explanatory notes, and precise replacement hints with generation parity.
 - **WIP:** package metadata, versioning, and compiled libraries
 - **WIP:** optimization levels, register allocation, and peephole optimization

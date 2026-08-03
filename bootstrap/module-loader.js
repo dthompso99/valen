@@ -4,12 +4,13 @@ import {Parser} from './parser.js';
 import {diagnostic, DiagnosticSeverity} from './diagnostics.js';
 
 export class ModuleLoader {
-    constructor({sourceRoot, libraryPath = process.env.VALEN_LIBRARY_PATH ?? process.env.ARGON_LIBRARY_PATH} = {}) {
+    constructor({sourceRoot, libraryPath = process.env.VALEN_LIBRARY_PATH ?? process.env.ARGON_LIBRARY_PATH, documents = new Map()} = {}) {
         this.sourceRoot = sourceRoot ? path.resolve(sourceRoot) : null;
         this.libraryPaths = (libraryPath ?? '').split(path.delimiter).filter(Boolean).map(entry => path.resolve(entry));
         this.modules = new Map();
         this.loading = [];
         this.diagnostics = [];
+        this.documents = documents;
     }
 
     load(entryPath) {
@@ -31,7 +32,7 @@ export class ModuleLoader {
 
         let source;
         try {
-            source = fs.readFileSync(canonicalPath, 'utf8');
+            source = this.documents.get(canonicalPath) ?? fs.readFileSync(canonicalPath, 'utf8');
         } catch (error) {
             this.report(importDeclaration?.span, `Cannot load '${canonicalPath}': ${error.message}`);
             return null;
@@ -67,16 +68,17 @@ export class ModuleLoader {
         } else {
             localPath = path.resolve(path.dirname(importerPath), specifier);
         }
-        if (fs.existsSync(localPath) || specifier.startsWith('/')) return localPath;
+        if (this.documents.has(path.resolve(localPath)) || fs.existsSync(localPath) || specifier.startsWith('/')) return localPath;
         for (const libraryPath of this.libraryPaths) {
             const candidate = path.resolve(libraryPath, specifier);
-            if (fs.existsSync(candidate)) return candidate;
+            if (this.documents.has(path.resolve(candidate)) || fs.existsSync(candidate)) return candidate;
         }
         return localPath;
     }
 
     canonicalize(filePath) {
         const resolved = path.resolve(filePath);
+        if (this.documents.has(resolved)) return resolved;
         try {
             return fs.realpathSync(resolved);
         } catch {
