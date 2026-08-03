@@ -246,8 +246,15 @@ library Semantics {{
             self.defineBuiltin("void")
             self.defineBuiltin("bool")
             self.defineBuiltin("u8")
+            self.defineBuiltin("i8")
+            self.defineBuiltin("u16")
+            self.defineBuiltin("i16")
+            self.defineBuiltin("u32")
             self.defineBuiltin("i32")
+            self.defineBuiltin("u64")
             self.defineBuiltin("i64")
+            self.defineBuiltin("f32")
+            self.defineBuiltin("f64")
             self.defineBuiltin("string")
             self.defineBuiltin("Array")
             self.defineBuiltin("StringBuilder")
@@ -918,7 +925,7 @@ library Semantics {{
 
         isForeignAbiType(typeName:string, allowVoid:bool) -> bool {
             if allowVoid && typeName == "void" { return true }
-            if self.isInteger(typeName) || typeName == "bool" { return true }
+            if self.isInteger(typeName) || self.isFloat(typeName) || typeName == "bool" { return true }
             return self.isExternalResource(typeName)
         }
 
@@ -1042,6 +1049,7 @@ library Semantics {{
 
         analyzeExpression(expression:Ast.Expression, scope:Symbols.Scope, moduleScope:Symbols.Scope) -> string {
             if expression.kind == "Integer" { return self.typed(expression, "i64") }
+            if expression.kind == "Float" { return self.typed(expression, "f64") }
             if expression.kind == "String" { return self.typed(expression, "string") }
             if expression.kind == "Boolean" { return self.typed(expression, "bool") }
             if expression.kind == "Null" { return self.typed(expression, "null") }
@@ -1268,7 +1276,7 @@ library Semantics {{
                     return self.typed(expression, "void")
                 }
                 if expression.operator! == "!" { self.requireCompatible("bool", operand, expression.span); return self.typed(expression, "bool") }
-                if !self.isInteger(operand) { self.error(expression.span, "Unary '-' requires an integer") }
+                if !self.isInteger(operand) && !self.isFloat(operand) { self.error(expression.span, "Unary '-' requires a numeric value") }
                 return self.typed(expression, operand)
             }
             if expression.kind == "Binary" { return self.analyzeBinary(expression, scope, moduleScope) }
@@ -1293,7 +1301,7 @@ library Semantics {{
                         }
                     }
                 } else {
-                    if !self.isInteger(source) || !self.isInteger(target) { self.error(expression.span, "Integer conversion requires integer types") }
+                    if (!self.isInteger(source) && !self.isFloat(source)) || (!self.isInteger(target) && !self.isFloat(target)) { self.error(expression.span, "Numeric conversion requires numeric types") }
                 }
                 return self.typed(expression, target)
             }
@@ -1390,7 +1398,8 @@ library Semantics {{
             if operator == "+" {
                 if left == "string" && right == "string" { return self.typed(expression, "string") }
             }
-            if !self.isInteger(left) || !self.isInteger(right) { self.error(expression.span, "Operator '" + operator + "' requires compatible operands"); return self.typed(expression, "error") }
+            if (!self.isInteger(left) && !self.isFloat(left)) || (!self.isInteger(right) && !self.isFloat(right)) { self.error(expression.span, "Operator '" + operator + "' requires compatible numeric operands"); return self.typed(expression, "error") }
+            self.requireCompatible(left, right, expression.right!.span)
             return self.typed(expression, left)
         }
 
@@ -1804,6 +1813,7 @@ library Semantics {{
             return symbol!.externalResource
         }
         isInteger(name:string) -> bool { return name == "u8" || name == "i8" || name == "u16" || name == "i16" || name == "u32" || name == "i32" || name == "u64" || name == "i64" }
+        isFloat(name:string) -> bool { return name == "f32" || name == "f64" }
 
         scopeFor(module:ModuleLoading.Module) -> ref Symbols.Scope {
             local index:i64 = 0

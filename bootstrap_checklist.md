@@ -131,7 +131,7 @@ These features are not required to self-host, but should be reconsidered for the
 
 The active post-bootstrap roadmap is maintained in [`language_checklist.md`](language_checklist.md). In particular, the `inherits` and `implements` language constructs are explicit first-phase work there.
 
-- [ ] Floating-point types, literals, conversions, arithmetic, NaN rules, and ABI support
+- [x] Floating-point types, literals, conversions, arithmetic, NaN rules, and ABI support
 - [ ] Array literals
 - [ ] Array removal, insertion, explicit capacity reservation, and shrinking
 - [ ] Array slices/views and multidimensional conveniences

@@ -1,0 +1,44 @@
+library Math {{
+    unsafe native absolute(value:f64) -> f64 from "m" as "fabs"
+    unsafe native absolute32(value:f32) -> f32 from "m" as "fabsf"
+}}
+
+Calculator {{
+    member scale:f32 = 1.5 as f32
+
+    combine(a:f64, b:i64, c:f64, d:i64, e:f64, f:f64, g:f64, h:f64, i:f64, j:f64, k:f64) -> f64 {
+        return a + (b as f64) + c + (d as f64) + e + f + g + h + i + j + k
+    }
+}}
+
+entry {{
+    __() -> i32 {
+        local calculator = new Calculator()
+        if calculator.scale != (1.5 as f32) { return 1 }
+
+        local total = calculator.combine(1.0, 2, 3.0, 4, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0)
+        if total != 66.0 { return 2 }
+        if -total != -66.0 { return 3 }
+        if (7.75 as i64) != 7 { return 4 }
+        if ((9 as f64) / 2.0) != 4.5 { return 5 }
+
+        local values = new Array<f64>(2)
+        values[0] = 1.25
+        values[1] = 2.75
+        if values[0] + values[1] != 4.0 { return 6 }
+
+        local nan = 0.0 / 0.0
+        if nan == nan { return 7 }
+        if !(nan != nan) { return 8 }
+        if nan < 1.0 || nan <= 1.0 || nan > 1.0 || nan >= 1.0 { return 9 }
+
+        local absolute:f64 = 0.0
+        unsafe { absolute = Math.absolute(-12.5) }
+        if absolute != 12.5 { return 10 }
+        local absolute32:f32 = 0.0 as f32
+        unsafe { absolute32 = Math.absolute32(-3.25 as f32) }
+        if absolute32 != (3.25 as f32) { return 11 }
+        if 1.25e1 != 12.5 { return 12 }
+        return 0
+    }
+}}

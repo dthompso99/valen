@@ -8,6 +8,8 @@ const VOID = 'void';
 const BOOL = 'bool';
 const STRING = 'string';
 const STRING_BUILDER = 'StringBuilder';
+const F32 = 'f32';
+const F64 = 'f64';
 const UNKNOWN = '<unknown>';
 const NULL = '<null>';
 const integerTypes = new Set(['u8', 'i8', 'u16', 'i16', 'u32', 'i32', 'u64', 'i64']);
@@ -57,7 +59,7 @@ export class SemanticAnalyzer {
         this.globals = new Scope(null, 'builtins');
         this.objectSymbols = new Map();
         this.contractTypes = new Set();
-        for (const name of [...integerTypes, VOID, BOOL, STRING, STRING_BUILDER]) {
+        for (const name of [...integerTypes, F32, F64, VOID, BOOL, STRING, STRING_BUILDER]) {
             this.globals.define(name, {kind: 'BuiltinType', name, type: name}, null, this.diagnostics);
         }
     }
@@ -626,7 +628,7 @@ export class SemanticAnalyzer {
 
     isForeignAbiType(type, allowVoid) {
         if (allowVoid && type === VOID) return true;
-        if (integerTypes.has(type) || type === BOOL) return true;
+        if (integerTypes.has(type) || this.isFloat(type) || type === BOOL) return true;
         const base = this.isOptionalType(type) ? this.optionalBaseType(type) : type;
         return this.findObjectType(base)?.externalResource === true;
     }
@@ -760,6 +762,10 @@ export class SemanticAnalyzer {
         switch (expression.kind) {
             case 'IntegerLiteral':
                 type = I64;
+                break;
+            case 'FloatLiteral':
+                type = F64;
+                if (!Number.isFinite(expression.value)) this.report(expression.span, `Floating literal '${expression.lexeme}' is not finite`);
                 break;
             case 'BooleanLiteral':
                 type = BOOL;
@@ -918,8 +924,9 @@ export class SemanticAnalyzer {
                     else if (this.isOptionalType(targetType) && this.conformsTo(targetObject.type, sourceObject.type)) expression.conversionKind = 'checked_reference';
                     else this.report(expression.span, `Downcast from '${sourceType}' to '${targetBase}' must produce an optional value`);
                     type = targetType;
-                } else if (!integerTypes.has(sourceType) || !integerTypes.has(targetType)) {
-                    this.report(expression.span, `Cannot convert '${sourceType}' to '${targetType}'; integer conversion requires integer types`);
+                } else if ((!integerTypes.has(sourceType) && !this.isFloat(sourceType)) ||
+                           (!integerTypes.has(targetType) && !this.isFloat(targetType))) {
+                    this.report(expression.span, `Cannot convert '${sourceType}' to '${targetType}'; numeric conversion requires numeric types`);
                     type = UNKNOWN;
                 } else type = targetType;
                 break;
@@ -967,8 +974,8 @@ export class SemanticAnalyzer {
                 } else if (expression.operator === '!') {
                     this.requireAssignable(operand, BOOL, expression.operand.span, expression.operand);
                     type = BOOL;
-                } else if (!integerTypes.has(operand)) {
-                    this.report(expression.operand.span, `Unary '-' requires an integer, got '${operand}'`);
+                } else if (!integerTypes.has(operand) && !this.isFloat(operand)) {
+                    this.report(expression.operand.span, `Unary '-' requires a numeric value, got '${operand}'`);
                 } else if (operand.startsWith('u')) {
                     this.report(expression.span, `Unary '-' cannot be applied to unsigned type '${operand}'`);
                     type = operand;
@@ -1020,8 +1027,8 @@ export class SemanticAnalyzer {
                     const compatible = left === right || this.conformsTo(left, right) || this.conformsTo(right, left);
                     if (!compatible) this.report(expression.span, `Structural equality requires compatible references, got '${left}' and '${right}'`);
                     type = BOOL;
-                } else if (!integerTypes.has(left) || !integerTypes.has(right)) {
-                    this.report(expression.span, `Operator '${expression.operator}' requires integer operands`);
+                } else if ((!integerTypes.has(left) && !this.isFloat(left)) || (!integerTypes.has(right) && !this.isFloat(right))) {
+                    this.report(expression.span, `Operator '${expression.operator}' requires numeric operands`);
                 } else {
                     if (this.isIntegerLiteral(expression.left) && !this.isIntegerLiteral(expression.right)) {
                         this.requireAssignable(left, right, expression.left.span, expression.left);
@@ -1513,6 +1520,12 @@ export class SemanticAnalyzer {
               expression.operand.kind === 'IntegerLiteral'
                 ? expression.operand
                 : null;
+        if (expression?.kind === 'FloatLiteral' && this.isFloat(expected)) {
+            if (expected === F32 && !Number.isFinite(Math.fround(expression.value))) {
+                this.report(span, `Floating literal '${expression.lexeme}' is outside the range of 'f32'`);
+            } else expression.inferredType = expected;
+            return;
+        }
         if (integerLiteral && integerTypes.has(expected)) {
             const sign = expression.kind === 'UnaryExpression' ? -1n : 1n;
             const value = sign * BigInt(integerLiteral.lexeme);
@@ -1556,6 +1569,10 @@ export class SemanticAnalyzer {
             expression.operator === '-' &&
             expression.operand.kind === 'IntegerLiteral'
         );
+    }
+
+    isFloat(type) {
+        return type === F32 || type === F64;
     }
 
     annotate(node, type, symbol) {

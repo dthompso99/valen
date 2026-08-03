@@ -47,7 +47,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 - [ ] Add optional value types for stack primitives
 - [ ] Add flow-sensitive optional narrowing
 - [ ] Generalize safe `Result` propagation
-- [ ] Add floating-point types, literals, conversions, arithmetic, NaN rules, and ABI support
+- [x] Add floating-point types, literals, conversions, arithmetic, NaN rules, and ABI support
 - [ ] Define numeric promotion and mixed-width arithmetic rules
 
 ## 4. Control flow and iteration

@@ -181,6 +181,14 @@ export class IntegerLiteral extends AstNode {
     }
 }
 
+export class FloatLiteral extends AstNode {
+    constructor(value, lexeme, span) {
+        super('FloatLiteral', span);
+        this.value = value;
+        this.lexeme = lexeme;
+    }
+}
+
 export class BooleanLiteral extends AstNode {
     constructor(value, span) {
         super('BooleanLiteral', span);

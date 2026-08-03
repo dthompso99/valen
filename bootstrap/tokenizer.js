@@ -90,7 +90,21 @@ export class Tokenizer {
             if (/\d/.test(character)) {
                 advance();
                 while (offset < this.source.length && /\d/.test(this.source[offset])) advance();
-                add('INTEGER_LITERAL', this.source.slice(start, offset), start, tokenLine, tokenColumn);
+                let kind = 'INTEGER_LITERAL';
+                if (this.source[offset] === '.' && /\d/.test(this.source[offset + 1] ?? '')) {
+                    kind = 'FLOAT_LITERAL';
+                    advance();
+                    while (offset < this.source.length && /\d/.test(this.source[offset])) advance();
+                }
+                if ((this.source[offset] === 'e' || this.source[offset] === 'E') &&
+                    (/\d/.test(this.source[offset + 1] ?? '') ||
+                     ((this.source[offset + 1] === '+' || this.source[offset + 1] === '-') && /\d/.test(this.source[offset + 2] ?? '')))) {
+                    kind = 'FLOAT_LITERAL';
+                    advance();
+                    if (this.source[offset] === '+' || this.source[offset] === '-') advance();
+                    while (offset < this.source.length && /\d/.test(this.source[offset])) advance();
+                }
+                add(kind, this.source.slice(start, offset), start, tokenLine, tokenColumn);
                 continue;
             }
 

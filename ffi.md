@@ -18,13 +18,13 @@ their first-use order.
 
 Foreign declarations are always `unsafe`, and calls therefore require an
 `unsafe` block. This makes the source location that trusts foreign code explicit.
-The supported ABI consists of `bool`, fixed-width integers, `void` returns, and
+The supported ABI consists of `bool`, fixed-width integers, `f32`, `f64`, `void` returns, and
 opaque native-resource object references. Optional native-resource returns map a
 null pointer to `null`. Native resources follow Argon's existing transfer rules:
 borrowed parameters do not transfer ownership, `own` parameters do, and cleanup
 must be supplied by another native operation.
 
 Strings, arrays, builders, ordinary managed objects, callbacks, variadic
-functions, aggregates passed by value, and floating-point values are rejected at
+functions and aggregates passed by value are rejected at
 the boundary. A wrapper library must translate those representations until a
 dedicated ABI rule is specified for them.

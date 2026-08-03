@@ -421,6 +421,8 @@ export class IrGenerator {
         switch (expression.kind) {
             case 'IntegerLiteral':
                 return this.result('constant', expression.inferredType, {value: expression.lexeme});
+            case 'FloatLiteral':
+                return this.result('float_constant', expression.inferredType, {value: expression.lexeme});
             case 'BooleanLiteral':
                 return this.result('constant', expression.inferredType, {value: expression.value ? 1 : 0});
             case 'StringLiteral':

@@ -417,6 +417,7 @@ library Parsing {{
             if token.kind == "NULL" { kind = "Null" }
             if token.kind == "TRUE" || token.kind == "FALSE" { kind = "Boolean" }
             if token.kind == "INTEGER_LITERAL" { kind = "Integer" }
+            if token.kind == "FLOAT_LITERAL" { kind = "Float" }
             if token.kind == "STRING_LITERAL" { kind = "String" }
             if token.kind == "IDENTIFIER" { kind = "Identifier" }
             if token.kind == "LEFT_PAREN" {

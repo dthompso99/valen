@@ -6,6 +6,7 @@ export const validPrograms = [
     {name: 'contract references', source: 'bootstrap/test/fixtures/contract-references.ar'},
     {name: 'contract ABI arguments', source: 'bootstrap/test/fixtures/abi-contract-arguments.ar'},
     {name: 'foreign libc call', source: 'bootstrap/test/fixtures/foreign-libc.ar'},
+    {name: 'floating point', source: 'bootstrap/test/fixtures/floating-point.ar'},
     {name: 'default arguments', source: 'bootstrap/test/fixtures/default-arguments.ar'},
     {name: 'collection ownership', source: 'bootstrap/test/fixtures/collection-ownership.ar'},
     {name: 'garbage collection', source: 'bootstrap/test/fixtures/garbage-collection.ar'},
@@ -17,5 +18,6 @@ export const validPrograms = [
 ];
 
 export const expectedFailures = [
-    {name: 'native test failure status', source: 'bootstrap/test/fixtures/native-tests-failing.ar', status: 1, stderr: /test failed/}
+    {name: 'native test failure status', source: 'bootstrap/test/fixtures/native-tests-failing.ar', status: 1, stderr: /test failed/},
+    {name: 'invalid float conversion status', source: 'bootstrap/test/fixtures/float-conversion-failing.ar', status: 76, stderr: /^$/}
 ];

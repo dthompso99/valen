@@ -10,6 +10,7 @@ export class X86_64Backend {
         this.fieldOffsets = new Map();
         this.typeSizes = new Map();
         this.stringLiterals = new Map();
+        this.floatLiterals = new Map();
         this.runtimeLabel = 0;
 
         for (const type of program.types) {
@@ -36,6 +37,7 @@ export class X86_64Backend {
         for (const fn of program.functions) {
             for (const instruction of fn.blocks.flatMap(block => block.instructions)) {
                 if (instruction.op === 'string_constant') this.internString(instruction.value);
+                if (instruction.op === 'float_constant') this.internFloat(instruction.value, instruction.type);
             }
         }
         const supportedRuntimeSymbols = new Set([
@@ -107,6 +109,8 @@ export class X86_64Backend {
         lines.push(...this.stringRuntime());
         lines.push(...this.builderRuntime());
         lines.push(...this.stringData());
+        lines.push(...this.floatData());
+        lines.push(...this.floatConversionData());
         lines.push(...this.typeData());
         lines.push(...this.gcData());
         if (program.functions.some(fn => fn.name === '$argon.test.run')) {
@@ -159,16 +163,12 @@ export class X86_64Backend {
             `    mov QWORD PTR [rbp-${rootRecordOffset - 16}], rbp`);
         lines.push(`    lea rax, [rbp-${rootRecordOffset}]`, '    mov QWORD PTR [rip+argon_gc_roots], rax');
 
-        fn.parameters.forEach((parameter, index) => {
-            if (index < argumentRegisters.length) {
-                lines.push(`    mov ${this.slot(`name:${parameter.name}`)}, ${argumentRegisters[index]}`);
-            } else {
-                lines.push(
-                    `    mov rax, QWORD PTR [rbp+${16 + (index - argumentRegisters.length) * 8}]`,
-                    `    mov ${this.slot(`name:${parameter.name}`)}, rax`
-                );
-            }
-        });
+        for (const location of this.argumentLocations(fn.parameters)) {
+            const slot = this.slot(`name:${location.value.name}`);
+            if (location.kind === 'gp') lines.push(`    mov ${slot}, ${location.register}`);
+            else if (location.kind === 'xmm') lines.push(location.value.type === 'f32' ? `    movd eax, ${location.register}` : `    movq rax, ${location.register}`, `    mov ${slot}, rax`);
+            else lines.push(`    mov rax, QWORD PTR [rbp+${16 + location.stackIndex * 8}]`, `    mov ${slot}, rax`);
+        }
 
         for (const block of fn.blocks) {
             if (block.label !== 'entry') lines.push(`${this.blockLabel(block.label)}:`);
@@ -197,6 +197,13 @@ export class X86_64Backend {
                 lines.push(`    mov rax, ${instruction.value}`, ...this.normalize('rax', instruction.type));
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
                 break;
+            case 'float_constant': {
+                const literal = this.internFloat(instruction.value, instruction.type);
+                if (instruction.type === 'f32') lines.push(`    movss xmm0, DWORD PTR [rip+${literal.label}]`, '    movd eax, xmm0');
+                else lines.push(`    movsd xmm0, QWORD PTR [rip+${literal.label}]`, '    movq rax, xmm0');
+                lines.push(`    mov ${this.temp(instruction.result)}, rax`);
+                break;
+            }
             case 'string_constant':
                 lines.push(`    lea rax, [rip+${this.stringLiterals.get(instruction.value).descriptor}]`);
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
@@ -236,7 +243,10 @@ export class X86_64Backend {
             }
             case 'unary':
                 lines.push(...this.load(instruction.operand, 'rax'));
-                if (instruction.operator === '-') lines.push('    neg rax');
+                if (instruction.operator === '-' && this.isFloat(instruction.type)) {
+                    lines.push(`    ${instruction.type === 'f32' ? 'xor eax, 0x80000000' : 'mov rcx, 0x8000000000000000'}`);
+                    if (instruction.type === 'f64') lines.push('    xor rax, rcx');
+                } else if (instruction.operator === '-') lines.push('    neg rax');
                 else if (instruction.operator === '!') lines.push('    test rax, rax', '    sete al', '    movzx rax, al');
                 else throw new Error(`Unsupported unary operator ${instruction.operator}`);
                 lines.push(...this.normalize('rax', instruction.type));
@@ -402,7 +412,7 @@ export class X86_64Backend {
             }
             case 'convert':
                 lines.push(...this.load(instruction.value, 'rax'));
-                lines.push(...this.normalize('rax', instruction.type));
+                lines.push(...this.convertNumber(instruction.value.type, instruction.type));
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
                 break;
             case 'unwrap':
@@ -422,7 +432,10 @@ export class X86_64Backend {
                 );
                 break;
             case 'return':
-                if (instruction.value) lines.push(...this.load(instruction.value, 'rax'));
+                if (instruction.value) {
+                    lines.push(...this.load(instruction.value, 'rax'));
+                    if (this.isFloat(instruction.value.type)) lines.push(instruction.value.type === 'f32' ? '    movd xmm0, eax' : '    movq xmm0, rax');
+                }
                 else lines.push('    xor eax, eax');
                 lines.push(`    jmp ${endLabel}`);
                 break;
@@ -433,6 +446,7 @@ export class X86_64Backend {
     }
 
     binary(instruction) {
+        if (this.isFloat(instruction.left.type)) return this.floatBinary(instruction);
         const lines = [...this.load(instruction.left, 'rax'), ...this.load(instruction.right, 'rcx')];
         const simple = {'+': 'add rax, rcx', '-': 'sub rax, rcx', '*': 'imul rax, rcx', '&&': 'and rax, rcx', '||': 'or rax, rcx'};
         const condition = {'==': 'sete', '!=': 'setne', '===': 'sete', '!==': 'setne', '<': 'setl', '<=': 'setle', '>': 'setg', '>=': 'setge'};
@@ -454,11 +468,71 @@ export class X86_64Backend {
         return lines;
     }
 
+    floatBinary(instruction) {
+        const type = instruction.left.type;
+        const suffix = type === 'f32' ? 'ss' : 'sd';
+        const lines = [...this.load(instruction.left, 'rax'), ...this.load(instruction.right, 'rcx'),
+            type === 'f32' ? '    movd xmm0, eax' : '    movq xmm0, rax',
+            type === 'f32' ? '    movd xmm1, ecx' : '    movq xmm1, rcx'];
+        const arithmetic = {'+': `add${suffix}`, '-': `sub${suffix}`, '*': `mul${suffix}`, '/': `div${suffix}`};
+        if (arithmetic[instruction.operator]) {
+            lines.push(`    ${arithmetic[instruction.operator]} xmm0, xmm1`, type === 'f32' ? '    movd eax, xmm0' : '    movq rax, xmm0');
+        } else {
+            lines.push(`    ucomi${suffix} xmm0, xmm1`);
+            const ordered = {'==': 'sete', '<': 'setb', '<=': 'setbe'};
+            const direct = {'>': 'seta', '>=': 'setae'};
+            if (instruction.operator === '!=') lines.push('    setne al', '    setp dl', '    or al, dl');
+            else if (ordered[instruction.operator]) lines.push(`    ${ordered[instruction.operator]} al`, '    setnp dl', '    and al, dl');
+            else if (direct[instruction.operator]) lines.push(`    ${direct[instruction.operator]} al`);
+            else throw new Error(`Unsupported floating operator ${instruction.operator}`);
+            lines.push('    movzx rax, al');
+        }
+        lines.push(`    mov ${this.temp(instruction.result)}, rax`);
+        return lines;
+    }
+
+    convertNumber(from, to) {
+        if (from === to) return this.normalize('rax', to);
+        if (this.isFloat(from) && this.isFloat(to)) {
+            return from === 'f32'
+                ? ['    movd xmm0, eax', '    cvtss2sd xmm0, xmm0', '    movq rax, xmm0']
+                : ['    movq xmm0, rax', '    cvtsd2ss xmm0, xmm0', '    movd eax, xmm0'];
+        }
+        if (!this.isFloat(from) && this.isFloat(to)) {
+            const suffix = to === 'f32' ? 'ss' : 'sd';
+            if (from === 'u64') {
+                const id = this.runtimeLabel++;
+                return ['    test rax, rax', `    jns .Luint_float_${id}`, '    mov rcx, rax', '    and eax, 1', '    shr rcx, 1', '    or rcx, rax',
+                    `    cvtsi2${suffix} xmm0, rcx`, `    add${suffix} xmm0, xmm0`, `    jmp .Luint_float_done_${id}`,
+                    `.Luint_float_${id}:`, `    cvtsi2${suffix} xmm0, rax`, `.Luint_float_done_${id}:`, to === 'f32' ? '    movd eax, xmm0' : '    movq rax, xmm0'];
+            }
+            return [`    cvtsi2${suffix} xmm0, rax`, to === 'f32' ? '    movd eax, xmm0' : '    movq rax, xmm0'];
+        }
+        if (this.isFloat(from)) {
+            const lines = [from === 'f32' ? '    movd xmm0, eax' : '    movq xmm0, rax'];
+            if (from === 'f32') lines.push('    cvtss2sd xmm0, xmm0');
+            lines.push('    ucomisd xmm0, xmm0', '    jp .Lfloat_conversion_error');
+            const bits = Number(to.slice(1));
+            if (to.startsWith('u')) {
+                lines.push('    ucomisd xmm0, QWORD PTR [rip+.Lfloat_zero]', '    jb .Lfloat_conversion_error',
+                    `    ucomisd xmm0, QWORD PTR [rip+.Lfloat_u${bits}_limit]`, '    jae .Lfloat_conversion_error');
+                if (to === 'u64') lines.push('    ucomisd xmm0, QWORD PTR [rip+.Lfloat_i64_limit]', '    jb 1f',
+                    '    subsd xmm0, QWORD PTR [rip+.Lfloat_i64_limit]', '    cvttsd2si rax, xmm0', '    mov rcx, 0x8000000000000000', '    add rax, rcx', '    jmp 2f',
+                    '1:', '    cvttsd2si rax, xmm0', '2:');
+                else lines.push('    cvttsd2si rax, xmm0', ...this.normalize('rax', to));
+            } else lines.push(`    ucomisd xmm0, QWORD PTR [rip+.Lfloat_i${bits}_minimum]`, '    jb .Lfloat_conversion_error',
+                `    ucomisd xmm0, QWORD PTR [rip+.Lfloat_i${bits}_limit]`, '    jae .Lfloat_conversion_error',
+                '    cvttsd2si rax, xmm0', ...this.normalize('rax', to));
+            return lines;
+        }
+        return this.normalize('rax', to);
+    }
+
     call(instruction, dynamic = false) {
         const lines = [];
-        instruction.arguments.slice(0, argumentRegisters.length)
-            .forEach((argument, index) => lines.push(...this.load(argument, argumentRegisters[index])));
-        const stackArguments = instruction.arguments.slice(argumentRegisters.length);
+        const locations = this.argumentLocations(instruction.arguments);
+        for (const location of locations.filter(item => item.kind !== 'stack')) lines.push(...this.loadArgument(location.value, location));
+        const stackArguments = locations.filter(item => item.kind === 'stack').map(item => item.value);
         const padding = stackArguments.length % 2 === 1 ? 8 : 0;
         if (padding) lines.push('    sub rsp, 8');
         for (let index = stackArguments.length - 1; index >= 0; index--) {
@@ -473,7 +547,10 @@ export class X86_64Backend {
         }
         const stackBytes = stackArguments.length * 8 + padding;
         if (stackBytes) lines.push(`    add rsp, ${stackBytes}`);
-        if (instruction.result) lines.push(...this.normalize('rax', instruction.type), `    mov ${this.temp(instruction.result)}, rax`);
+        if (instruction.result) {
+            if (this.isFloat(instruction.type)) lines.push(instruction.type === 'f32' ? '    movd eax, xmm0' : '    movq rax, xmm0');
+            lines.push(...this.normalize('rax', instruction.type), `    mov ${this.temp(instruction.result)}, rax`);
+        }
         return lines;
     }
 
@@ -487,9 +564,9 @@ export class X86_64Backend {
             `    lea r8, [rip+${this.typeLabel(instruction.contractType)}]`, `${loop}:`, '    test rcx, rcx', `    jz .Lcontract_dispatch_error`,
             '    cmp QWORD PTR [rdx], r8', `    je ${found}`, '    add rdx, 16', '    dec rcx', `    jmp ${loop}`, `${found}:`,
             '    mov rax, QWORD PTR [rdx+8]', `    mov r11, QWORD PTR [rax+${instruction.slot * 8}]`);
-        instruction.arguments.slice(0, argumentRegisters.length)
-            .forEach((argument, index) => lines.push(...this.load(argument, argumentRegisters[index])));
-        const stackArguments = instruction.arguments.slice(argumentRegisters.length);
+        const locations = this.argumentLocations(instruction.arguments);
+        for (const location of locations.filter(item => item.kind !== 'stack')) lines.push(...this.loadArgument(location.value, location));
+        const stackArguments = locations.filter(item => item.kind === 'stack').map(item => item.value);
         const padding = stackArguments.length % 2 === 1 ? 8 : 0;
         if (padding) lines.push('    sub rsp, 8');
         for (let index = stackArguments.length - 1; index >= 0; index--) {
@@ -498,8 +575,27 @@ export class X86_64Backend {
         lines.push('    call r11');
         const stackBytes = stackArguments.length * 8 + padding;
         if (stackBytes) lines.push(`    add rsp, ${stackBytes}`);
-        if (instruction.result) lines.push(...this.normalize('rax', instruction.type), `    mov ${this.temp(instruction.result)}, rax`);
+        if (instruction.result) {
+            if (this.isFloat(instruction.type)) lines.push(instruction.type === 'f32' ? '    movd eax, xmm0' : '    movq rax, xmm0');
+            lines.push(...this.normalize('rax', instruction.type), `    mov ${this.temp(instruction.result)}, rax`);
+        }
         return lines;
+    }
+
+    argumentLocations(values) {
+        let gp = 0;
+        let xmm = 0;
+        let stack = 0;
+        return values.map(value => {
+            if (this.isFloat(value.type) && xmm < 8) return {kind: 'xmm', register: `xmm${xmm++}`, value};
+            if (!this.isFloat(value.type) && gp < argumentRegisters.length) return {kind: 'gp', register: argumentRegisters[gp++], value};
+            return {kind: 'stack', stackIndex: stack++, value};
+        });
+    }
+
+    loadArgument(value, location) {
+        if (location.kind === 'gp') return this.load(value, location.register);
+        return [...this.load(value, 'rax'), value.type === 'f32' ? `    movd ${location.register}, eax` : `    movq ${location.register}, rax`];
     }
 
     generateMain() {
@@ -1406,6 +1502,9 @@ export class X86_64Backend {
             '.Lcontract_dispatch_error:',
             '    mov edi, 75',
             '    jmp .Lruntime_error',
+            '.Lfloat_conversion_error:',
+            '    mov edi, 76',
+            '    jmp .Lruntime_error',
             '.Lruntime_error:',
             '    mov eax, 60',
             '    syscall',
@@ -1887,6 +1986,33 @@ export class X86_64Backend {
         return literal;
     }
 
+    internFloat(value, type) {
+        const key = `${type}:${value}`;
+        if (this.floatLiterals.has(key)) return this.floatLiterals.get(key);
+        const literal = {label: `.Largon_float_${this.floatLiterals.size}`, value, type};
+        this.floatLiterals.set(key, literal);
+        return literal;
+    }
+
+    floatData() {
+        if (this.floatLiterals.size === 0) return [];
+        const lines = ['.section .rodata'];
+        for (const literal of this.floatLiterals.values()) {
+            lines.push(literal.type === 'f32' ? '.align 4' : '.align 8', `${literal.label}:`, `    ${literal.type === 'f32' ? '.float' : '.double'} ${literal.value}`);
+        }
+        return [...lines, '.text'];
+    }
+
+    floatConversionData() {
+        return ['.section .rodata', '.align 8', '.Lfloat_zero:', '    .double 0.0',
+            '.Lfloat_u8_limit:', '    .double 256.0', '.Lfloat_u16_limit:', '    .double 65536.0',
+            '.Lfloat_u32_limit:', '    .double 4294967296.0', '.Lfloat_u64_limit:', '    .double 18446744073709551616.0',
+            '.Lfloat_i8_minimum:', '    .double -128.0', '.Lfloat_i8_limit:', '    .double 128.0',
+            '.Lfloat_i16_minimum:', '    .double -32768.0', '.Lfloat_i16_limit:', '    .double 32768.0',
+            '.Lfloat_i32_minimum:', '    .double -2147483648.0', '.Lfloat_i32_limit:', '    .double 2147483648.0',
+            '.Lfloat_i64_minimum:', '    .double -9223372036854775808.0', '.Lfloat_i64_limit:', '    .double 9223372036854775808.0', '.text'];
+    }
+
     stringData() {
         if (this.stringLiterals.size === 0) return [];
         const lines = ['.section .data.rel.ro', '.align 8'];
@@ -1927,6 +2053,7 @@ export class X86_64Backend {
         if (type === 'u8' || type === 'i8' || type === 'bool') return 1;
         if (type === 'u16' || type === 'i16') return 2;
         if (type === 'u32' || type === 'i32') return 4;
+        if (type === 'f32') return 4;
         return 8;
     }
 
@@ -1936,6 +2063,10 @@ export class X86_64Backend {
 
     isUnsigned(type) {
         return type?.startsWith('u') || type === 'bool';
+    }
+
+    isFloat(type) {
+        return type === 'f32' || type === 'f64';
     }
 
     normalize(register, type) {
@@ -1950,7 +2081,7 @@ export class X86_64Backend {
     }
 
     memorySize(type) {
-        return {u8: 'BYTE', i8: 'BYTE', bool: 'BYTE', u16: 'WORD', i16: 'WORD', u32: 'DWORD', i32: 'DWORD'}[type] ?? 'QWORD';
+        return {u8: 'BYTE', i8: 'BYTE', bool: 'BYTE', u16: 'WORD', i16: 'WORD', u32: 'DWORD', i32: 'DWORD', f32: 'DWORD'}[type] ?? 'QWORD';
     }
 
     registerForSize(register, type) {
@@ -1968,6 +2099,7 @@ export class X86_64Backend {
         if (type === 'i8') return [`    movsx rax, BYTE PTR ${address}`];
         if (type === 'u16') return [`    movzx eax, WORD PTR ${address}`];
         if (type === 'i16') return [`    movsx rax, WORD PTR ${address}`];
+        if (type === 'f32') return [`    mov eax, DWORD PTR ${address}`];
         if (type === 'u32') return [`    mov eax, DWORD PTR ${address}`];
         if (type === 'i32') return [`    movsxd rax, DWORD PTR ${address}`];
         return [`    mov rax, QWORD PTR ${address}`];

@@ -781,6 +781,12 @@ library Ir {{
 
         lowerExpression(expression:Ast.Expression) -> ref Value {
             if expression.kind == "Integer" { return self.constant(expression.text!, expression.inferredType!) }
+            if expression.kind == "Float" {
+                local instruction = self.temporary("float_constant", expression.inferredType!)
+                instruction.text = expression.text
+                self.emit(instruction)
+                return instruction.result!
+            }
             if expression.kind == "Boolean" {
                 if expression.text! == "true" { return self.constant("1", "bool") }
                 return self.constant("0", "bool")

@@ -1,0 +1,7 @@
+entry {{
+    __() -> i32 {
+        local nan = 0.0 / 0.0
+        local impossible = nan as i32
+        return impossible
+    }
+}}

@@ -22,6 +22,7 @@ import {
     ContinueStatement,
     IdentifierExpression,
     IntegerLiteral,
+    FloatLiteral,
     BooleanLiteral,
     NullLiteral,
     UnwrapExpression,
@@ -454,6 +455,10 @@ export class Parser {
         if (this.match('INTEGER_LITERAL')) {
             const token = this.previous();
             return new IntegerLiteral(Number(token.value), token.value, this.span(token, token));
+        }
+        if (this.match('FLOAT_LITERAL')) {
+            const token = this.previous();
+            return new FloatLiteral(Number(token.value), token.value, this.span(token, token));
         }
         if (this.match('STRING_LITERAL')) {
             const token = this.previous();

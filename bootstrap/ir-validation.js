@@ -2,7 +2,7 @@ const terminators = new Set(['return', 'jump', 'branch']);
 const supportedOperations = new Set([
     'allocate', 'array_append', 'array_length', 'array_load', 'array_new', 'array_store', 'binary', 'branch',
     'builder_append_byte', 'builder_append_string', 'builder_build', 'builder_length', 'builder_new', 'call',
-    'checked_cast', 'constant', 'contract_call', 'convert', 'declare_local', 'destroy_array', 'destroy_object',
+    'checked_cast', 'constant', 'float_constant', 'contract_call', 'convert', 'declare_local', 'destroy_array', 'destroy_object',
     'integer_to_string', 'jump', 'load_field', 'load_local', 'return', 'store_field', 'store_local', 'string_concat',
     'string_constant', 'string_equal', 'string_length', 'string_load', 'string_slice', 'structural_copy',
     'structural_equal', 'structural_hash', 'test_expect', 'test_failures', 'type_test', 'unary', 'unwrap', 'virtual_call'

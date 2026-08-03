@@ -128,7 +128,7 @@ test('integer conversions require integer source and target types', () => {
     const source = 'entry {{ __() -> void { local value:i64 = true as i64 } }}';
     const result = new SemanticAnalyzer().analyze(new Parser().parse(source, 'conversion.ar'));
     assert.equal(result.success, false);
-    assert.match(result.diagnostics[0].message, /integer conversion requires integer types/);
+    assert.match(result.diagnostics[0].message, /numeric conversion requires numeric types/);
 });
 
 test('dynamic arrays support construction, indexing, assignment, length, and append', () => {
@@ -291,6 +291,19 @@ test('foreign native declarations lower explicit libraries and C symbols', () =>
         const result = new SemanticAnalyzer().analyze(new Parser().parse(source, 'invalid-ffi.ar'));
         assert.equal(result.success, false);
     }
+});
+
+test('floating types lower literals, SSE arithmetic, conversions, and mixed ABI calls', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/floating-point.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    assert.ok(ir.functions.flatMap(fn => fn.blocks).flatMap(block => block.instructions).some(item => item.op === 'float_constant'));
+    assert.deepEqual(ir.foreignLibraries, ['m']);
+    const assembly = new X86_64Backend().generate(ir);
+    for (const opcode of ['addsd', 'divsd', 'ucomisd', 'cvtsi2sd', 'cvttsd2si']) assert.match(assembly, new RegExp(opcode));
+    assert.match(assembly, /movq xmm7/);
+    assert.match(assembly, /push rax/);
 });
 
 test('generic objects monomorphize concrete invariant specializations', () => {

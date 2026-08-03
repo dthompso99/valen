@@ -197,7 +197,23 @@ library Compiler {{
             while self.isDigit(self.peek(0)) {
                 self.advance()
             }
-            self.addToken("INTEGER_LITERAL", start, tokenLine, tokenColumn)
+            local kind = "INTEGER_LITERAL"
+            if self.peek(0) == 46 && self.isDigit(self.peek(1)) {
+                kind = "FLOAT_LITERAL"
+                self.advance()
+                while self.isDigit(self.peek(0)) { self.advance() }
+            }
+            if self.peek(0) == 101 || self.peek(0) == 69 {
+                local next = self.peek(1)
+                local signedDigit = (next == 43 || next == 45) && self.isDigit(self.peek(2))
+                if self.isDigit(next) || signedDigit {
+                    kind = "FLOAT_LITERAL"
+                    self.advance()
+                    if self.peek(0) == 43 || self.peek(0) == 45 { self.advance() }
+                    while self.isDigit(self.peek(0)) { self.advance() }
+                }
+            }
+            self.addToken(kind, start, tokenLine, tokenColumn)
         }
 
         scanSymbol() -> void {

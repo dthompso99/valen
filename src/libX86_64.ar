@@ -54,6 +54,7 @@ library X86_64 {{
         member fields:Array<FieldLayout>
         member types:Array<TypeLayout>
         member literals:Array<Literal>
+        member floatLiterals:Array<Literal>
         member slots:Array<Slot>
         member currentFunctionSymbol:string
         member nextLabel:i64
@@ -68,6 +69,7 @@ library X86_64 {{
             self.fields = new Array<FieldLayout>(0)
             self.types = new Array<TypeLayout>(0)
             self.literals = new Array<Literal>(0)
+            self.floatLiterals = new Array<Literal>(0)
             self.slots = new Array<Slot>(0)
             self.currentFunctionSymbol = ""
             self.nextLabel = 0
@@ -108,6 +110,8 @@ library X86_64 {{
             self.stringRuntime()
             self.builderRuntime()
             self.stringData()
+            self.floatData()
+            self.floatConversionData()
             self.runtimeData()
             self.typeData()
             self.writer.line(".section .rodata")
@@ -171,6 +175,7 @@ library X86_64 {{
                     while instructionIndex < instructions.length {
                         local instruction = instructions[instructionIndex]
                         if instruction.op == "string_constant" { self.internString(instruction.text!) }
+                        if instruction.op == "float_constant" { self.internFloat(instruction.text!, instruction.typeName!) }
                         if instruction.op == "call" {
                             if instruction.target! == "System.print" { self.usesPrint = true }
                             if instruction.target! == "System.write" { self.usesWrite = true }
@@ -234,13 +239,25 @@ library X86_64 {{
             self.writer.line("    lea rax, [rbp-" + rootRecordOffset.toString() + "]")
             self.writer.line("    mov QWORD PTR [rip+argon_gc_roots], rax")
             parameterIndex = 0
+            local gpIndex:i64 = 0
+            local xmmIndex:i64 = 0
+            local stackIndex:i64 = 0
             while parameterIndex < function.parameters.length {
-                local destination = self.slot("name:" + function.parameters[parameterIndex].name)
-                if parameterIndex < 6 {
-                    self.writer.line("    mov " + destination + ", " + self.argumentRegister(parameterIndex))
-                } else {
-                    self.writer.line("    mov rax, QWORD PTR [rbp+" + (16 + (parameterIndex - 6) * 8).toString() + "]")
+                local parameter = function.parameters[parameterIndex]
+                local destination = self.slot("name:" + parameter.name)
+                if self.isFloat(parameter.typeName) && xmmIndex < 8 {
+                    if parameter.typeName == "f32" { self.writer.line("    movd eax, xmm" + xmmIndex.toString()) } else { self.writer.line("    movq rax, xmm" + xmmIndex.toString()) }
                     self.writer.line("    mov " + destination + ", rax")
+                    xmmIndex = xmmIndex + 1
+                } else {
+                    if !self.isFloat(parameter.typeName) && gpIndex < 6 {
+                        self.writer.line("    mov " + destination + ", " + self.argumentRegister(gpIndex))
+                        gpIndex = gpIndex + 1
+                    } else {
+                        self.writer.line("    mov rax, QWORD PTR [rbp+" + (16 + stackIndex * 8).toString() + "]")
+                        self.writer.line("    mov " + destination + ", rax")
+                        stackIndex = stackIndex + 1
+                    }
                 }
                 parameterIndex = parameterIndex + 1
             }
@@ -285,6 +302,18 @@ library X86_64 {{
             if op == "string_constant" {
                 local literal = self.findLiteral(instruction.text!)
                 self.writer.line("    lea rax, [rip+" + literal!.descriptorLabel + "]")
+                self.storeResult(instruction, "rax")
+                return
+            }
+            if op == "float_constant" {
+                local literal = self.findFloatLiteral(instruction.text!, instruction.typeName!)!
+                if instruction.typeName! == "f32" {
+                    self.writer.line("    movss xmm0, DWORD PTR [rip+" + literal.dataLabel + "]")
+                    self.writer.line("    movd eax, xmm0")
+                } else {
+                    self.writer.line("    movsd xmm0, QWORD PTR [rip+" + literal.dataLabel + "]")
+                    self.writer.line("    movq rax, xmm0")
+                }
                 self.storeResult(instruction, "rax")
                 return
             }
@@ -562,7 +591,7 @@ library X86_64 {{
             }
             if op == "convert" {
                 self.load(instruction.first!, "rax")
-                self.normalize("rax", instruction.typeName!)
+                self.convertNumber(instruction.first!.typeName, instruction.typeName!)
                 self.storeResult(instruction, "rax")
                 return
             }
@@ -582,7 +611,12 @@ library X86_64 {{
                 return
             }
             if op == "return" {
-                if instruction.first == null { self.writer.line("    xor eax, eax") } else { self.load(instruction.first!, "rax") }
+                if instruction.first == null { self.writer.line("    xor eax, eax") } else {
+                    self.load(instruction.first!, "rax")
+                    if self.isFloat(instruction.first!.typeName) {
+                        if instruction.first!.typeName == "f32" { self.writer.line("    movd xmm0, eax") } else { self.writer.line("    movq xmm0, rax") }
+                    }
+                }
                 self.writer.line("    jmp " + endLabel)
                 return
             }
@@ -590,7 +624,11 @@ library X86_64 {{
 
         generateUnary(instruction:Ir.Instruction) -> void {
             self.load(instruction.first!, "rax")
-            if instruction.operator! == "-" { self.writer.line("    neg rax") }
+            if instruction.operator! == "-" {
+                if instruction.typeName! == "f32" { self.writer.line("    xor eax, 2147483648") } else {
+                    if instruction.typeName! == "f64" { self.writer.line("    mov rcx, 0x8000000000000000"); self.writer.line("    xor rax, rcx") } else { self.writer.line("    neg rax") }
+                }
+            }
             if instruction.operator! == "!" {
                 self.writer.line("    test rax, rax")
                 self.writer.line("    sete al")
@@ -601,6 +639,7 @@ library X86_64 {{
         }
 
         generateBinary(instruction:Ir.Instruction) -> void {
+            if self.isFloat(instruction.first!.typeName) { self.generateFloatBinary(instruction); return }
             self.load(instruction.first!, "rax")
             self.load(instruction.second!, "rcx")
             local operator = instruction.operator!
@@ -623,51 +662,106 @@ library X86_64 {{
             self.storeResult(instruction, "rax")
         }
 
-        generateCall(instruction:Ir.Instruction) -> void {
-            local index:i64 = 0
-            while index < instruction.arguments.length {
-                if index >= 6 { break }
-                self.load(instruction.arguments[index], self.argumentRegister(index))
-                index = index + 1
+        generateFloatBinary(instruction:Ir.Instruction) -> void {
+            self.load(instruction.first!, "rax")
+            self.load(instruction.second!, "rcx")
+            local suffix = "sd"
+            if instruction.first!.typeName == "f32" { suffix = "ss"; self.writer.line("    movd xmm0, eax"); self.writer.line("    movd xmm1, ecx") } else { self.writer.line("    movq xmm0, rax"); self.writer.line("    movq xmm1, rcx") }
+            local operator = instruction.operator!
+            if operator == "+" || operator == "-" || operator == "*" || operator == "/" {
+                local operation = "add"
+                if operator == "-" { operation = "sub" }
+                if operator == "*" { operation = "mul" }
+                if operator == "/" { operation = "div" }
+                self.writer.line("    " + operation + suffix + " xmm0, xmm1")
+                if instruction.first!.typeName == "f32" { self.writer.line("    movd eax, xmm0") } else { self.writer.line("    movq rax, xmm0") }
+            } else {
+                self.writer.line("    ucomi" + suffix + " xmm0, xmm1")
+                if operator == "!=" { self.writer.line("    setne al"); self.writer.line("    setp dl"); self.writer.line("    or al, dl") }
+                if operator == "==" || operator == "<" || operator == "<=" {
+                    if operator == "==" { self.writer.line("    sete al") }
+                    if operator == "<" { self.writer.line("    setb al") }
+                    if operator == "<=" { self.writer.line("    setbe al") }
+                    self.writer.line("    setnp dl"); self.writer.line("    and al, dl")
+                }
+                if operator == ">" { self.writer.line("    seta al") }
+                if operator == ">=" { self.writer.line("    setae al") }
+                self.writer.line("    movzx rax, al")
             }
-            local stackCount = instruction.arguments.length - 6
-            if stackCount < 0 { stackCount = 0 }
+            self.storeResult(instruction, "rax")
+        }
+
+        convertNumber(fromType:string, toType:string) -> void {
+            if fromType == toType { self.normalize("rax", toType); return }
+            if self.isFloat(fromType) && self.isFloat(toType) {
+                if fromType == "f32" { self.writer.line("    movd xmm0, eax"); self.writer.line("    cvtss2sd xmm0, xmm0"); self.writer.line("    movq rax, xmm0") }
+                else { self.writer.line("    movq xmm0, rax"); self.writer.line("    cvtsd2ss xmm0, xmm0"); self.writer.line("    movd eax, xmm0") }
+                return
+            }
+            if !self.isFloat(fromType) && self.isFloat(toType) {
+                local suffix = "sd"
+                if toType == "f32" { suffix = "ss" }
+                if fromType == "u64" {
+                    local label = self.nextLabel; self.nextLabel = self.nextLabel + 1
+                    self.writer.line("    test rax, rax"); self.writer.line("    jns .Luint_float_" + label.toString())
+                    self.writer.line("    mov rcx, rax"); self.writer.line("    and eax, 1"); self.writer.line("    shr rcx, 1"); self.writer.line("    or rcx, rax")
+                    self.writer.line("    cvtsi2" + suffix + " xmm0, rcx"); self.writer.line("    add" + suffix + " xmm0, xmm0"); self.writer.line("    jmp .Luint_float_done_" + label.toString())
+                    self.writer.line(".Luint_float_" + label.toString() + ":"); self.writer.line("    cvtsi2" + suffix + " xmm0, rax"); self.writer.line(".Luint_float_done_" + label.toString() + ":")
+                } else { self.writer.line("    cvtsi2" + suffix + " xmm0, rax") }
+                if toType == "f32" { self.writer.line("    movd eax, xmm0") } else { self.writer.line("    movq rax, xmm0") }
+                return
+            }
+            if self.isFloat(fromType) {
+                if fromType == "f32" { self.writer.line("    movd xmm0, eax"); self.writer.line("    cvtss2sd xmm0, xmm0") } else { self.writer.line("    movq xmm0, rax") }
+                self.writer.line("    ucomisd xmm0, xmm0"); self.writer.line("    jp .Lfloat_conversion_error")
+                if self.isUnsigned(toType) {
+                    self.writer.line("    ucomisd xmm0, QWORD PTR [rip+.Lfloat_zero]"); self.writer.line("    jb .Lfloat_conversion_error")
+                    self.writer.line("    ucomisd xmm0, QWORD PTR [rip+.Lfloat_" + toType + "_limit]"); self.writer.line("    jae .Lfloat_conversion_error")
+                    if toType == "u64" {
+                        self.writer.line("    ucomisd xmm0, QWORD PTR [rip+.Lfloat_i64_limit]"); self.writer.line("    jb 1f")
+                        self.writer.line("    subsd xmm0, QWORD PTR [rip+.Lfloat_i64_limit]"); self.writer.line("    cvttsd2si rax, xmm0")
+                        self.writer.line("    mov rcx, 0x8000000000000000"); self.writer.line("    add rax, rcx"); self.writer.line("    jmp 2f")
+                        self.writer.line("1:"); self.writer.line("    cvttsd2si rax, xmm0"); self.writer.line("2:")
+                    } else { self.writer.line("    cvttsd2si rax, xmm0"); self.normalize("rax", toType) }
+                } else {
+                    self.writer.line("    ucomisd xmm0, QWORD PTR [rip+.Lfloat_" + toType + "_minimum]"); self.writer.line("    jb .Lfloat_conversion_error")
+                    self.writer.line("    ucomisd xmm0, QWORD PTR [rip+.Lfloat_" + toType + "_limit]"); self.writer.line("    jae .Lfloat_conversion_error")
+                    self.writer.line("    cvttsd2si rax, xmm0"); self.normalize("rax", toType)
+                }
+                return
+            }
+            self.normalize("rax", toType)
+        }
+
+        generateCall(instruction:Ir.Instruction) -> void {
+            self.loadRegisterArguments(instruction.arguments)
+            local stackCount = self.stackArgumentCount(instruction.arguments)
             local padding:i64 = 0
             if stackCount - (stackCount / 2) * 2 == 1 { padding = 8; self.writer.line("    sub rsp, 8") }
-            index = instruction.arguments.length
-            while index > 6 {
-                index = index - 1
-                self.load(instruction.arguments[index], "rax")
-                self.writer.line("    push rax")
-            }
+            self.pushStackArguments(instruction.arguments)
             self.writer.line("    call " + self.functionSymbol(instruction.target!))
             local stackBytes = stackCount * 8 + padding
             if stackBytes > 0 { self.writer.line("    add rsp, " + stackBytes.toString()) }
-            if instruction.result != null { self.normalize("rax", instruction.typeName!); self.storeResult(instruction, "rax") }
+            if instruction.result != null {
+                if self.isFloat(instruction.typeName!) { if instruction.typeName! == "f32" { self.writer.line("    movd eax, xmm0") } else { self.writer.line("    movq rax, xmm0") } }
+                self.normalize("rax", instruction.typeName!); self.storeResult(instruction, "rax")
+            }
         }
 
         generateVirtualCall(instruction:Ir.Instruction) -> void {
-            local index:i64 = 0
-            while index < instruction.arguments.length {
-                if index >= 6 { break }
-                self.load(instruction.arguments[index], self.argumentRegister(index))
-                index = index + 1
-            }
-            local stackCount = instruction.arguments.length - 6
-            if stackCount < 0 { stackCount = 0 }
+            self.loadRegisterArguments(instruction.arguments)
+            local stackCount = self.stackArgumentCount(instruction.arguments)
             local padding:i64 = 0
             if stackCount - (stackCount / 2) * 2 == 1 { padding = 8; self.writer.line("    sub rsp, 8") }
-            index = instruction.arguments.length
-            while index > 6 {
-                index = index - 1
-                self.load(instruction.arguments[index], "rax")
-                self.writer.line("    push rax")
-            }
+            self.pushStackArguments(instruction.arguments)
             self.writer.line("    mov rax, QWORD PTR [rdi]")
             self.writer.line("    call QWORD PTR [rax+" + (40 + instruction.slot * 8).toString() + "]")
             local stackBytes = stackCount * 8 + padding
             if stackBytes > 0 { self.writer.line("    add rsp, " + stackBytes.toString()) }
-            if instruction.result != null { self.normalize("rax", instruction.typeName!); self.storeResult(instruction, "rax") }
+            if instruction.result != null {
+                if self.isFloat(instruction.typeName!) { if instruction.typeName! == "f32" { self.writer.line("    movd eax, xmm0") } else { self.writer.line("    movq rax, xmm0") } }
+                self.normalize("rax", instruction.typeName!); self.storeResult(instruction, "rax")
+            }
         }
 
         generateContractCall(instruction:Ir.Instruction) -> void {
@@ -692,26 +786,67 @@ library X86_64 {{
             self.writer.line(found + ":")
             self.writer.line("    mov rax, QWORD PTR [rdx+8]")
             self.writer.line("    mov r11, QWORD PTR [rax+" + (instruction.slot * 8).toString() + "]")
-            local index:i64 = 0
-            while index < instruction.arguments.length {
-                if index >= 6 { break }
-                self.load(instruction.arguments[index], self.argumentRegister(index))
-                index = index + 1
-            }
-            local stackCount = instruction.arguments.length - 6
-            if stackCount < 0 { stackCount = 0 }
+            self.loadRegisterArguments(instruction.arguments)
+            local stackCount = self.stackArgumentCount(instruction.arguments)
             local padding:i64 = 0
             if stackCount - (stackCount / 2) * 2 == 1 { padding = 8; self.writer.line("    sub rsp, 8") }
-            index = instruction.arguments.length
-            while index > 6 {
-                index = index - 1
-                self.load(instruction.arguments[index], "rax")
-                self.writer.line("    push rax")
-            }
+            self.pushStackArguments(instruction.arguments)
             self.writer.line("    call r11")
             local stackBytes = stackCount * 8 + padding
             if stackBytes > 0 { self.writer.line("    add rsp, " + stackBytes.toString()) }
-            if instruction.result != null { self.normalize("rax", instruction.typeName!); self.storeResult(instruction, "rax") }
+            if instruction.result != null {
+                if self.isFloat(instruction.typeName!) { if instruction.typeName! == "f32" { self.writer.line("    movd eax, xmm0") } else { self.writer.line("    movq rax, xmm0") } }
+                self.normalize("rax", instruction.typeName!); self.storeResult(instruction, "rax")
+            }
+        }
+
+        loadRegisterArguments(arguments:Array<ref Ir.Value>) -> void {
+            local gp:i64 = 0
+            local xmm:i64 = 0
+            local index:i64 = 0
+            while index < arguments.length {
+                local argument = arguments[index]
+                if self.isFloat(argument.typeName) {
+                    if xmm < 8 {
+                        self.load(argument, "rax")
+                        if argument.typeName == "f32" { self.writer.line("    movd xmm" + xmm.toString() + ", eax") } else { self.writer.line("    movq xmm" + xmm.toString() + ", rax") }
+                        xmm = xmm + 1
+                    }
+                } else {
+                    if gp < 6 { self.load(argument, self.argumentRegister(gp)); gp = gp + 1 }
+                }
+                index = index + 1
+            }
+        }
+
+        argumentOnStack(arguments:Array<ref Ir.Value>, target:i64) -> bool {
+            local gp:i64 = 0
+            local xmm:i64 = 0
+            local index:i64 = 0
+            while index <= target {
+                local argument = arguments[index]
+                local stacked:bool = false
+                if self.isFloat(argument.typeName) { if xmm < 8 { xmm = xmm + 1 } else { stacked = true } }
+                else { if gp < 6 { gp = gp + 1 } else { stacked = true } }
+                if index == target { return stacked }
+                index = index + 1
+            }
+            return false
+        }
+
+        stackArgumentCount(arguments:Array<ref Ir.Value>) -> i64 {
+            local count:i64 = 0
+            local index:i64 = 0
+            while index < arguments.length { if self.argumentOnStack(arguments, index) { count = count + 1 }; index = index + 1 }
+            return count
+        }
+
+        pushStackArguments(arguments:Array<ref Ir.Value>) -> void {
+            local index = arguments.length
+            while index > 0 {
+                index = index - 1
+                if self.argumentOnStack(arguments, index) { self.load(arguments[index], "rax"); self.writer.line("    push rax") }
+            }
         }
 
         generateMain() -> void {
@@ -757,6 +892,9 @@ library X86_64 {{
             self.writer.line("    jmp .Lruntime_error")
             self.writer.line(".Lcontract_dispatch_error:")
             self.writer.line("    mov edi, 75")
+            self.writer.line("    jmp .Lruntime_error")
+            self.writer.line(".Lfloat_conversion_error:")
+            self.writer.line("    mov edi, 76")
             self.writer.line("    jmp .Lruntime_error")
             self.writer.line(".Lruntime_error:")
             self.writer.line("    mov eax, 60")
@@ -1696,6 +1834,34 @@ library X86_64 {{
             self.writer.line("")
         }
 
+        floatData() -> void {
+            if self.floatLiterals.length == 0 { return }
+            self.writer.line(".section .rodata")
+            local index:i64 = 0
+            while index < self.floatLiterals.length {
+                local literal = self.floatLiterals[index]
+                if literal.descriptorLabel == "f32" { self.writer.line(".align 4") } else { self.writer.line(".align 8") }
+                self.writer.line(literal.dataLabel + ":")
+                if literal.descriptorLabel == "f32" { self.writer.line("    .float " + literal.value) } else { self.writer.line("    .double " + literal.value) }
+                index = index + 1
+            }
+            self.writer.line("")
+        }
+
+        floatConversionData() -> void {
+            self.writer.line(".section .rodata"); self.writer.line(".align 8")
+            self.writer.line(".Lfloat_zero:"); self.writer.line("    .double 0.0")
+            self.writer.line(".Lfloat_u8_limit:"); self.writer.line("    .double 256.0")
+            self.writer.line(".Lfloat_u16_limit:"); self.writer.line("    .double 65536.0")
+            self.writer.line(".Lfloat_u32_limit:"); self.writer.line("    .double 4294967296.0")
+            self.writer.line(".Lfloat_u64_limit:"); self.writer.line("    .double 18446744073709551616.0")
+            self.writer.line(".Lfloat_i8_minimum:"); self.writer.line("    .double -128.0"); self.writer.line(".Lfloat_i8_limit:"); self.writer.line("    .double 128.0")
+            self.writer.line(".Lfloat_i16_minimum:"); self.writer.line("    .double -32768.0"); self.writer.line(".Lfloat_i16_limit:"); self.writer.line("    .double 32768.0")
+            self.writer.line(".Lfloat_i32_minimum:"); self.writer.line("    .double -2147483648.0"); self.writer.line(".Lfloat_i32_limit:"); self.writer.line("    .double 2147483648.0")
+            self.writer.line(".Lfloat_i64_minimum:"); self.writer.line("    .double -9223372036854775808.0"); self.writer.line(".Lfloat_i64_limit:"); self.writer.line("    .double 9223372036854775808.0")
+            self.writer.line("")
+        }
+
         runtimeData() -> void {
             self.writer.line(".section .bss")
             self.writer.line(".align 8")
@@ -2092,12 +2258,21 @@ library X86_64 {{
 
         loadMemory(address:string, typeName:string, register:string) -> void {
             if typeName == "u8" || typeName == "bool" { self.writer.line("    movzx " + self.register32(register) + ", BYTE PTR " + address); return }
+            if typeName == "i8" { self.writer.line("    movsx " + register + ", BYTE PTR " + address); return }
+            if typeName == "u16" { self.writer.line("    movzx " + self.register32(register) + ", WORD PTR " + address); return }
+            if typeName == "i16" { self.writer.line("    movsx " + register + ", WORD PTR " + address); return }
+            if typeName == "u32" { self.writer.line("    mov " + self.register32(register) + ", DWORD PTR " + address); return }
             if typeName == "i32" { self.writer.line("    movsxd " + register + ", DWORD PTR " + address); return }
+            if typeName == "f32" { self.writer.line("    mov " + self.register32(register) + ", DWORD PTR " + address); return }
             self.writer.line("    mov " + register + ", QWORD PTR " + address)
         }
 
         normalize(register:string, typeName:string) -> void {
             if typeName == "u8" || typeName == "bool" { self.writer.line("    movzx " + self.register32(register) + ", " + self.register8(register)) }
+            if typeName == "i8" { self.writer.line("    movsx " + register + ", " + self.register8(register)) }
+            if typeName == "u16" { self.writer.line("    movzx " + self.register32(register) + ", " + self.register16(register)) }
+            if typeName == "i16" { self.writer.line("    movsx " + register + ", " + self.register16(register)) }
+            if typeName == "u32" { self.writer.line("    mov " + self.register32(register) + ", " + self.register32(register)) }
             if typeName == "i32" { self.writer.line("    movsxd " + register + ", " + self.register32(register)) }
         }
 
@@ -2121,6 +2296,20 @@ library X86_64 {{
             if self.findLiteral(value) != null { return }
             local suffix = self.literals.length.toString()
             self.literals.append(new Literal(value, ".Largon_string_data_" + suffix, ".Largon_string_" + suffix))
+        }
+
+        internFloat(value:string, typeName:string) -> void {
+            if self.findFloatLiteral(value, typeName) != null { return }
+            self.floatLiterals.append(new Literal(value, ".Largon_float_" + self.floatLiterals.length.toString(), typeName))
+        }
+
+        findFloatLiteral(value:string, typeName:string) -> ref Literal? {
+            local index:i64 = 0
+            while index < self.floatLiterals.length {
+                if self.floatLiterals[index].value == value && self.floatLiterals[index].descriptorLabel == typeName { return self.floatLiterals[index] }
+                index = index + 1
+            }
+            return null
         }
 
         findLiteral(value:string) -> ref Literal? {
@@ -2166,8 +2355,9 @@ library X86_64 {{
         }
 
         sizeOf(name:string) -> i64 {
-            if name == "u8" || name == "bool" { return 1 }
-            if name == "i32" { return 4 }
+            if name == "u8" || name == "i8" || name == "bool" { return 1 }
+            if name == "u16" || name == "i16" { return 2 }
+            if name == "u32" || name == "i32" || name == "f32" { return 4 }
             return 8
         }
 
@@ -2179,6 +2369,7 @@ library X86_64 {{
 
         registerForSize(register:string, typeName:string) -> string {
             if self.sizeOf(typeName) == 1 { return self.register8(register) }
+            if self.sizeOf(typeName) == 2 { return self.register16(register) }
             if self.sizeOf(typeName) == 4 { return self.register32(register) }
             return register
         }
@@ -2191,6 +2382,16 @@ library X86_64 {{
             if register == "rsi" { return "sil" }
             if register == "r8" { return "r8b" }
             return "r9b"
+        }
+
+        register16(register:string) -> string {
+            if register == "rax" { return "ax" }
+            if register == "rcx" { return "cx" }
+            if register == "rdx" { return "dx" }
+            if register == "rdi" { return "di" }
+            if register == "rsi" { return "si" }
+            if register == "r8" { return "r8w" }
+            return "r9w"
         }
 
         register32(register:string) -> string {
@@ -2222,7 +2423,8 @@ library X86_64 {{
             return "setge"
         }
 
-        isUnsigned(name:string) -> bool { return name == "u8" || name == "bool" }
+        isUnsigned(name:string) -> bool { return name == "u8" || name == "u16" || name == "u32" || name == "u64" || name == "bool" }
+        isFloat(name:string) -> bool { return name == "f32" || name == "f64" }
         align(value:i64, alignment:i64) -> i64 { return ((value + alignment - 1) / alignment) * alignment }
 
         mangle(name:string) -> string {
