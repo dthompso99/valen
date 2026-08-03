@@ -6,6 +6,7 @@ import Diagnostics from 'libDiagnostics.ar'
 import ModuleLoading from 'libModuleLoader.ar'
 import Semantics from 'libSemantic.ar'
 import Ir from 'libIr.ar'
+import IrValidation from 'libIrValidation.ar'
 import X86_64 from 'libX86_64.ar'
 
 entry {{
@@ -63,6 +64,18 @@ entry {{
         if checkOnly { return 0 }
         local generator = new Ir.Generator(analysis)
         local ir = generator.generate()
+        local irPass = new IrValidation.Pass()
+        local irErrors = irPass.prepare(ir)
+        if irErrors.length > 0 {
+            local errorIndex:i64 = 0
+            while errorIndex < irErrors.length {
+                System.writeError("argon: invalid IR: ")
+                System.writeError(irErrors[errorIndex])
+                System.writeError("\n")
+                errorIndex = errorIndex + 1
+            }
+            return 70
+        }
         local backend = new X86_64.Backend(ir)
         local assembly = backend.generate()
         if outputPath != null {

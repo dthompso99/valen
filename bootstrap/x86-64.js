@@ -1,7 +1,10 @@
+import {prepareIr} from './ir-validation.js';
+
 const argumentRegisters = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9'];
 
 export class X86_64Backend {
     generate(program) {
+        prepareIr(program);
         this.program = program;
         this.functionSymbols = new Map();
         this.fieldOffsets = new Map();

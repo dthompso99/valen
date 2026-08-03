@@ -94,7 +94,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 - [ ] Replace linear compiler symbol collections where profiling justifies it
 - [ ] Add a process-lifetime arena for compiler allocations
 - [ ] Reduce temporary immutable-string allocation during assembly generation
-- [ ] Add IR validation and canonicalization passes
+- [x] Add IR validation and canonicalization passes
 - [ ] Add dead-block, dead-value, and constant-folding passes
 - [ ] Add register allocation
 - [ ] Add instruction selection and peephole optimization

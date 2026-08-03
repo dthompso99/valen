@@ -8,6 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {Parser} from '../parser.js';
 import {SemanticAnalyzer} from '../semantic.js';
 import {IrGenerator} from '../ir.js';
+import {IrCanonicalizer, IrValidationError, IrValidator} from '../ir-validation.js';
 import {X86_64Backend} from '../x86-64.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -857,6 +858,30 @@ test('for loops reject non-iterable values', () => {
     const result = new SemanticAnalyzer().analyze(new Parser().parse(source, 'invalid-for.ar'));
     assert.equal(result.success, false);
     assert.match(result.diagnostics[0].message, /not iterable/);
+});
+
+test('IR canonicalization removes unreachable blocks and instructions after terminators', () => {
+    const fn = {name: 'entry.__', owner: 'entry', parameters: [{name: 'self', type: 'entry'}], returnType: 'void', blocks: [
+        {label: 'entry', instructions: [{op: 'return'}, {op: 'constant', result: '%0', type: 'i64', value: 1}]},
+        {label: 'dead', instructions: [{op: 'return'}]}
+    ]};
+    const program = {types: [{name: 'entry', fields: [], virtualMethods: [], contracts: []}], functions: [fn], externals: [], entry: fn.name};
+    new IrCanonicalizer().run(program);
+    assert.deepEqual(fn.blocks.map(block => block.label), ['entry']);
+    assert.deepEqual(fn.blocks[0].instructions.map(instruction => instruction.op), ['return']);
+    assert.doesNotThrow(() => new IrValidator().validate(program));
+});
+
+test('IR validation rejects malformed control flow and calls before assembly', () => {
+    const fn = {name: 'entry.__', owner: 'entry', parameters: [{name: 'self', type: 'entry'}], returnType: 'void', blocks: [
+        {label: 'entry', instructions: [
+            {op: 'call', target: 'missing.method', arguments: []},
+            {op: 'jump', target: 'missing_block'}
+        ]}
+    ]};
+    const program = {types: [{name: 'entry', fields: [], virtualMethods: [], contracts: []}], functions: [fn], externals: [], entry: fn.name};
+    assert.throws(() => new IrValidator().validate(program), error =>
+        error instanceof IrValidationError && /unknown function/.test(error.message) && /unknown block/.test(error.message));
 });
 
 test('generated primitive executable returns success', t => {

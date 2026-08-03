@@ -1,0 +1,192 @@
+import Ir from 'libIr.ar'
+
+library IrValidation {{
+    Pass {{
+        prepare(program:Ir.Program) -> Array<string> {
+            self.canonicalize(program)
+            return self.validate(program)
+        }
+
+        canonicalize(program:Ir.Program) -> void {
+            local functionIndex:i64 = 0
+            while functionIndex < program.functions.length {
+                local functionNode = program.functions[functionIndex]
+                local blockIndex:i64 = 0
+                while blockIndex < functionNode.blocks.length {
+                    local block = functionNode.blocks[blockIndex]
+                    local instructions = new Array<ref Ir.Instruction>(0)
+                    local instructionIndex:i64 = 0
+                    local terminated:bool = false
+                    while instructionIndex < block.instructions.length {
+                        if !terminated {
+                            local instruction = block.instructions[instructionIndex]
+                            instructions.append(instruction)
+                            if self.isTerminator(instruction.op) { terminated = true }
+                        }
+                        instructionIndex = instructionIndex + 1
+                    }
+                    if !terminated && functionNode.returnType == "void" { instructions.append(new Ir.Instruction("return")) }
+                    block.instructions = instructions
+                    blockIndex = blockIndex + 1
+                }
+                self.removeUnreachable(functionNode)
+                functionIndex = functionIndex + 1
+            }
+        }
+
+        removeUnreachable(functionNode:Ir.Function) -> void {
+            if functionNode.blocks.length == 0 { return }
+            local pending = new Array<string>(0)
+            local reachable = new Array<string>(0)
+            pending.append(functionNode.blocks[0].label)
+            while pending.length > 0 {
+                local label = pending[pending.length - 1]
+                local remaining = new Array<string>(pending.length - 1)
+                local copyIndex:i64 = 0
+                while copyIndex < remaining.length { remaining[copyIndex] = pending[copyIndex]; copyIndex = copyIndex + 1 }
+                pending = remaining
+                if !self.contains(reachable, label) {
+                    local block = self.findBlock(functionNode, label)
+                    if block != null {
+                        reachable.append(label)
+                        if block!.instructions.length > 0 {
+                            local end = block!.instructions[block!.instructions.length - 1]
+                            if end.op == "jump" { pending.append(end.target!) }
+                            if end.op == "branch" { pending.append(end.target!); pending.append(end.alternateTarget!) }
+                        }
+                    }
+                }
+            }
+            local blocks = new Array<ref Ir.Block>(0)
+            local index:i64 = 0
+            while index < functionNode.blocks.length {
+                if self.contains(reachable, functionNode.blocks[index].label) { blocks.append(functionNode.blocks[index]) }
+                index = index + 1
+            }
+            functionNode.blocks = blocks
+        }
+
+        validate(program:Ir.Program) -> Array<string> {
+            local errors = new Array<string>(0)
+            local index:i64 = 0
+            while index < program.types.length {
+                local other:i64 = index + 1
+                while other < program.types.length {
+                    if program.types[index].name == program.types[other].name { errors.append("duplicate type '" + program.types[index].name + "'") }
+                    other = other + 1
+                }
+                local typeNode = program.types[index]
+                if typeNode.baseName != null { if !self.hasType(program, typeNode.baseName!) { errors.append("type '" + typeNode.name + "' has unknown base '" + typeNode.baseName! + "'") } }
+                if typeNode.initializer != null { if !self.findFunction(program, typeNode.initializer!) { errors.append("type '" + typeNode.name + "' has unknown initializer") } }
+                local virtualIndex:i64 = 0
+                while virtualIndex < typeNode.virtualMethods.length {
+                    if !self.findFunction(program, typeNode.virtualMethods[virtualIndex].target) { errors.append("type '" + typeNode.name + "' has unknown virtual target") }
+                    virtualIndex = virtualIndex + 1
+                }
+                index = index + 1
+            }
+            index = 0
+            while index < program.functions.length {
+                local other:i64 = index + 1
+                while other < program.functions.length {
+                    if program.functions[index].name == program.functions[other].name { errors.append("duplicate function '" + program.functions[index].name + "'") }
+                    other = other + 1
+                }
+                self.validateFunction(program, program.functions[index], errors)
+                index = index + 1
+            }
+            if program.entry == null { errors.append("program has no entry function") }
+            else { if self.findDefinedFunction(program, program.entry!) == null { errors.append("entry is not a defined function") } }
+            return errors
+        }
+
+        validateFunction(program:Ir.Program, functionNode:Ir.Function, errors:Array<string>) -> void {
+            local prefix = "function '" + functionNode.name + "'"
+            if functionNode.returnType.length == 0 { errors.append(prefix + " has no return type") }
+            if functionNode.parameters.length > 0 {
+                if functionNode.parameters[0].name == "self" && !self.hasType(program, functionNode.ownerType) { errors.append(prefix + " has unknown owner type") }
+            }
+            if functionNode.blocks.length == 0 { errors.append(prefix + " has no blocks"); return }
+            local blockIndex:i64 = 0
+            while blockIndex < functionNode.blocks.length {
+                local block = functionNode.blocks[blockIndex]
+                local other:i64 = blockIndex + 1
+                while other < functionNode.blocks.length {
+                    if block.label == functionNode.blocks[other].label { errors.append(prefix + " has duplicate block '" + block.label + "'") }
+                    other = other + 1
+                }
+                if block.instructions.length == 0 { errors.append(prefix + " block '" + block.label + "' is empty") }
+                else {
+                    local instructionIndex:i64 = 0
+                    while instructionIndex < block.instructions.length {
+                        self.validateInstruction(program, functionNode, block.instructions[instructionIndex], errors)
+                        instructionIndex = instructionIndex + 1
+                    }
+                    if !self.isTerminator(block.instructions[block.instructions.length - 1].op) { errors.append(prefix + " block '" + block.label + "' has no terminator") }
+                }
+                blockIndex = blockIndex + 1
+            }
+        }
+
+        validateInstruction(program:Ir.Program, functionNode:Ir.Function, instruction:Ir.Instruction, errors:Array<string>) -> void {
+            local prefix = "function '" + functionNode.name + "' instruction '" + instruction.op + "'"
+            if !self.isSupported(instruction.op) { errors.append(prefix + " uses an unsupported opcode") }
+            if instruction.result != null { if instruction.result!.typeName.length == 0 { errors.append(prefix + " has an untyped result") } }
+            if instruction.op == "jump" { if instruction.target == null || self.findBlock(functionNode, instruction.target!) == null { errors.append(prefix + " targets an unknown block") } }
+            if instruction.op == "branch" {
+                if instruction.first == null { errors.append(prefix + " has no condition") }
+                if instruction.target == null || self.findBlock(functionNode, instruction.target!) == null { errors.append(prefix + " has an unknown true target") }
+                if instruction.alternateTarget == null || self.findBlock(functionNode, instruction.alternateTarget!) == null { errors.append(prefix + " has an unknown false target") }
+            }
+            if instruction.op == "call" || instruction.op == "virtual_call" || instruction.op == "contract_call" {
+                local target:Ir.Function? = null
+                local external:Ir.ExternalFunction? = null
+                if instruction.target != null { target = self.findDefinedFunction(program, instruction.target!); external = self.findExternal(program, instruction.target!) }
+                if target == null && external == null { errors.append(prefix + " calls an unknown function") }
+                else {
+                    local expected:i64 = 0
+                    local returnType = "void"
+                    if target != null { expected = target!.parameters.length; returnType = target!.returnType }
+                    else { expected = external!.parameters.length; returnType = external!.returnType }
+                    if instruction.arguments.length != expected { errors.append(prefix + " has incorrect call arity") }
+                    if instruction.result != null { if instruction.result!.typeName != returnType { errors.append(prefix + " has an incorrect result type") } }
+                    else { if returnType != "void" { errors.append(prefix + " discards a non-void result") } }
+                }
+            }
+        }
+
+        findBlock(functionNode:Ir.Function, name:string) -> ref Ir.Block? {
+            local index:i64 = 0
+            while index < functionNode.blocks.length { if functionNode.blocks[index].label == name { return functionNode.blocks[index] }; index = index + 1 }
+            return null
+        }
+
+        findDefinedFunction(program:Ir.Program, name:string) -> ref Ir.Function? {
+            local index:i64 = 0
+            while index < program.functions.length { if program.functions[index].name == name { return program.functions[index] }; index = index + 1 }
+            return null
+        }
+
+        findExternal(program:Ir.Program, name:string) -> ref Ir.ExternalFunction? {
+            local index:i64 = 0
+            while index < program.externals.length { if program.externals[index].name == name { return program.externals[index] }; index = index + 1 }
+            return null
+        }
+
+        findFunction(program:Ir.Program, name:string) -> bool { return self.findDefinedFunction(program, name) != null || self.findExternal(program, name) != null }
+        hasType(program:Ir.Program, name:string) -> bool {
+            local index:i64 = 0
+            while index < program.types.length { if program.types[index].name == name { return true }; index = index + 1 }
+            return false
+        }
+        contains(values:Array<string>, value:string) -> bool {
+            local index:i64 = 0
+            while index < values.length { if values[index] == value { return true }; index = index + 1 }
+            return false
+        }
+        isTerminator(op:string) -> bool { return op == "return" || op == "jump" || op == "branch" }
+        isSupported(op:string) -> bool {
+            return op == "allocate" || op == "array_append" || op == "array_length" || op == "array_load" || op == "array_new" || op == "array_store" || op == "binary" || op == "branch" || op == "builder_append_byte" || op == "builder_append_string" || op == "builder_build" || op == "builder_length" || op == "builder_new" || op == "call" || op == "checked_cast" || op == "constant" || op == "contract_call" || op == "convert" || op == "declare_local" || op == "destroy_array" || op == "destroy_object" || op == "integer_to_string" || op == "jump" || op == "load_field" || op == "load_local" || op == "return" || op == "store_field" || op == "store_local" || op == "string_concat" || op == "string_constant" || op == "string_equal" || op == "string_length" || op == "string_load" || op == "string_slice" || op == "structural_copy" || op == "structural_equal" || op == "structural_hash" || op == "test_expect" || op == "test_failures" || op == "type_test" || op == "unary" || op == "unwrap" || op == "virtual_call"
+        }
+    }}
+}}
