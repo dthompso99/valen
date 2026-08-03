@@ -35,7 +35,7 @@ export const targetFailures = [
 ];
 
 export const compileOnlyPrograms = [
-    {name: 'native HTTP service', source: 'examples/http-native/server.ar'}
+    {name: 'native HTTP service', source: 'examples/http-native/server.ar', live: true}
 ];
 
 export const invalidPrograms = [

@@ -43,8 +43,9 @@
 Platforms without native threads are intended to use `InlineExecutor`; only x86-64 Linux native threading is currently implemented.
 
 IPv4 TCP listen, accept, receive, send, descriptor access, and nonblocking mode are implemented
-directly with x86-64 Linux syscalls. The native HTTP example uses a persistent readiness loop and
-no external libraries. DNS, TLS, and production HTTP parsing remain **WIP**.
+directly with x86-64 Linux syscalls. The native HTTP example uses a persistent readiness loop,
+serves health and configuration routes, and has live generation-1/generation-2 TCP integration
+coverage without external libraries. DNS, TLS, and production HTTP parsing remain **WIP**.
 
 The freestanding language/runtime capability profile is defined for future kernels, firmware,
 and embedded targets.

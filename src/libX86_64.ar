@@ -318,7 +318,8 @@ library X86_64 {{
                 while index < instructions.length {
                     local instruction = instructions[index]
                     if instruction.result != null { self.reserve("temp:" + instruction.result!.name, instruction.result!.typeName) }
-                    if instruction.op == "declare_local" || instruction.op == "store_local" { self.reserve("name:" + instruction.name!, instruction.first!.typeName) }
+                    if instruction.op == "declare_local" { self.reserve("name:" + instruction.name!, instruction.typeName!) }
+                    if instruction.op == "store_local" { self.reserve("name:" + instruction.name!, instruction.first!.typeName) }
                     index = index + 1
                 }
                 blockIndex = blockIndex + 1
@@ -433,7 +434,7 @@ library X86_64 {{
             }
             if op == "declare_local" {
                 if instruction.first == null {
-                    self.writer.line("    mov QWORD PTR " + self.named(instruction.name!) + ", 0")
+                    self.writer.line("    mov " + self.named(instruction.name!) + ", 0")
                 } else {
                     self.load(instruction.first!, "rax")
                     self.writer.line("    mov " + self.named(instruction.name!) + ", rax")
@@ -1745,6 +1746,19 @@ library X86_64 {{
             self.writer.line("    test rax, rax")
             self.writer.line("    js .Lnetwork_error_pop2")
             self.writer.line("    mov r10, rax")
+            self.writer.line("    sub rsp, 16")
+            self.writer.line("    mov DWORD PTR [rsp], 1")
+            self.writer.line("    mov eax, 54")
+            self.writer.line("    mov rdi, r10")
+            self.writer.line("    mov esi, 1")
+            self.writer.line("    mov edx, 2")
+            self.writer.line("    mov r10, rsp")
+            self.writer.line("    mov r8d, 4")
+            self.writer.line("    syscall")
+            self.writer.line("    mov r10, rdi")
+            self.writer.line("    add rsp, 16")
+            self.writer.line("    test rax, rax")
+            self.writer.line("    js .Lnetwork_close_error_pop2")
             self.writer.line("    sub rsp, 16")
             self.writer.line("    mov WORD PTR [rsp], 2")
             self.writer.line("    mov eax, r12d")

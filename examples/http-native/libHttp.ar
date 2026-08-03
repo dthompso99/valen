@@ -1,0 +1,36 @@
+library Http {{
+    Request {{
+        member target:string
+
+        __(target:string) -> void {
+            self.target = target
+        }
+    }}
+
+    Response {{
+        member status:string
+        member body:string
+
+        __(status:string, body:string) -> void {
+            self.status = status
+            self.body = body
+        }
+
+        serialize() -> string {
+            return "HTTP/1.1 " + self.status + "\r\nContent-Type: text/plain\r\nContent-Length: " + self.body.length.toString() + "\r\nConnection: close\r\n\r\n" + self.body
+        }
+    }}
+
+    parse(input:string) -> Request? {
+        if input.length < 7 || input.slice(0, 4) != "GET " { return null }
+        local index:i64 = 4
+        while index < input.length {
+            if input[index] == 32 {
+                if index == 4 { return null }
+                return new Request(input.slice(4, index - 4))
+            }
+            index = index + 1
+        }
+        return null
+    }
+}}

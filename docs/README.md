@@ -5,6 +5,7 @@ If you are new to the project, read these in order:
 1. [Quickstart](quickstart.md) — build the compiler and run a small program.
 2. [Language guide](language-guide.md) — learn the syntax and current semantics.
 3. [Project status](project-status.md) — see what works and what remains **WIP**.
+4. [HTTP service friction report](service-friction/http-health-config.md) — see what the first real service taught us.
 
 For compiler contributors:
 

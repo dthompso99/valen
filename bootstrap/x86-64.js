@@ -153,6 +153,9 @@ export class X86_64Backend {
             '    push rbx', '    push r12', '    push r13', '    mov r12d, edi', '    mov ebx, esi',
             '    mov eax, 41', '    mov edi, 2', '    mov esi, 1', '    xor edx, edx', '    syscall',
             '    test rax, rax', '    js .Lnetwork_error_pop2', '    mov r10, rax',
+            '    sub rsp, 16', '    mov DWORD PTR [rsp], 1', '    mov eax, 54', '    mov rdi, r10',
+            '    mov esi, 1', '    mov edx, 2', '    mov r10, rsp', '    mov r8d, 4', '    syscall',
+            '    mov r10, rdi', '    add rsp, 16', '    test rax, rax', '    js .Lnetwork_close_error_pop2',
             '    sub rsp, 16', '    mov WORD PTR [rsp], 2', '    mov eax, r12d', '    rol ax, 8',
             '    mov WORD PTR [rsp+2], ax', '    mov DWORD PTR [rsp+4], 0', '    mov QWORD PTR [rsp+8], 0',
             '    mov eax, 49', '    mov rdi, r10', '    mov rsi, rsp', '    mov edx, 16', '    syscall', '    add rsp, 16',
@@ -365,7 +368,7 @@ export class X86_64Backend {
                 if (instruction.value) {
                     lines.push(...this.load(instruction.value, 'rax'));
                     lines.push(`    mov ${this.named(instruction.name)}, rax`);
-                } else lines.push(`    mov QWORD PTR ${this.named(instruction.name)}, 0`);
+                } else lines.push(`    mov ${this.named(instruction.name)}, 0`);
                 break;
             case 'load_local':
                 lines.push(`    mov rax, ${this.named(instruction.name)}`, `    mov ${this.temp(instruction.result)}, rax`);

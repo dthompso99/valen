@@ -124,7 +124,7 @@ function encodeModRm(sink, regCode, operand) {
         sink.emit(0xc0 | ((regCode & 7) << 3) | (operand.code & 7));
         return;
     }
-    if (operand.kind !== 'mem') throw new Error(`Expected register or memory operand`);
+    if (operand.kind !== 'mem') throw new Error(`Expected register or memory operand, received '${operand.kind}'`);
     if (operand.base?.name === 'rip') {
         sink.emit(((regCode & 7) << 3) | 5);
         if (operand.symbol) {

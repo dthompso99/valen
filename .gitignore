@@ -1,6 +1,7 @@
 # Reproducible root-level compiler and sample outputs
 /valen
 /valen.s
+/valen.o
 /nested
 /nested.s
 /sample

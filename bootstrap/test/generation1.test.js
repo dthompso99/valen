@@ -2,13 +2,79 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {spawnSync} from 'node:child_process';
+import net from 'node:net';
+import {spawn, spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {Compiler} from '../compiler.js';
 import {compileOnlyPrograms, expectedFailures, invalidPrograms, targetFailures, validPrograms} from './conformance-manifest.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
+const exchange = request => new Promise((resolve, reject) => {
+    const socket = net.createConnection({host: '127.0.0.1', port: 18080});
+    let response = '';
+    socket.setEncoding('utf8');
+    socket.setTimeout(3000, () => socket.destroy(new Error('HTTP service response timed out')));
+    socket.once('connect', () => socket.end(request));
+    socket.on('data', chunk => { response += chunk; });
+    socket.once('end', () => resolve(response));
+    socket.once('error', reject);
+});
+
+async function runHttpService(executable, environment) {
+    const child = spawn(executable, [], {
+        cwd: projectRoot,
+        env: {...environment, VALEN_SERVICE_NAME: 'conformance'}
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    const exited = new Promise(resolve => child.once('close', (status, signal) => resolve({status, signal})));
+    try {
+        await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error(`HTTP service did not become ready\n${stderr || stdout}`)), 3000);
+            const inspect = () => {
+                if (!stdout.includes('valen-http: ready')) return;
+                clearTimeout(timeout);
+                resolve();
+            };
+            child.stdout.on('data', inspect);
+            child.once('exit', status => {
+                if (!stdout.includes('valen-http: ready')) {
+                    clearTimeout(timeout);
+                    reject(new Error(`HTTP service exited before readiness with status ${status}\n${stderr || stdout}`));
+                }
+            });
+            inspect();
+        });
+
+        const health = await exchange('GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n');
+        assert.match(health, /^HTTP\/1\.1 200 OK\r\n/);
+        assert.match(health, /\r\nContent-Length: 3\r\n/);
+        assert.match(health, /\r\n\r\nok\n$/);
+
+        const config = await exchange('GET /config HTTP/1.1\r\nHost: localhost\r\n\r\n');
+        assert.match(config, /^HTTP\/1\.1 200 OK\r\n/);
+        assert.match(config, /\r\n\r\nservice=conformance\n$/);
+
+        const missing = await exchange('GET /missing HTTP/1.1\r\nHost: localhost\r\n\r\n');
+        assert.match(missing, /^HTTP\/1\.1 404 Not Found\r\n/);
+        assert.match(missing, /\r\n\r\nnot found\n$/);
+
+        const malformed = await exchange('POST /health HTTP/1.1\r\nHost: localhost\r\n\r\n');
+        assert.match(malformed, /^HTTP\/1\.1 400 Bad Request\r\n/);
+        assert.match(malformed, /\r\n\r\nbad request\n$/);
+
+        const result = await exited;
+        assert.equal(result.status, 0, stderr || stdout || `HTTP service terminated by ${result.signal}`);
+    } finally {
+        if (child.exitCode == null && child.signalCode == null) child.kill('SIGKILL');
+    }
+}
 
 test('generation 1 passes the native compiler conformance suite', async t => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-generation1-'));
@@ -165,7 +231,7 @@ test('generation 1 passes the native compiler conformance suite', async t => {
 
         await t.test('generation 1 and 2 build standalone native services', async t => {
             for (const fixture of compileOnlyPrograms) {
-                await t.test(fixture.name, () => {
+                await t.test(fixture.name, async () => {
                     const sourcePath = path.join(projectRoot, fixture.source);
                     for (const [generation, compiler] of [[1, compilerPath], [2, generation2Path]]) {
                         const executable = path.join(directory, `service-${generation}-${sequence++}`);
@@ -176,6 +242,7 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                         const dynamic = spawnSync('readelf', ['-d', executable], {encoding: 'utf8'});
                         assert.equal(dynamic.status, 0, dynamic.stderr);
                         assert.doesNotMatch(dynamic.stdout, /NEEDED/, `${fixture.source} unexpectedly requires a shared library`);
+                        if (fixture.live) await runHttpService(executable, environment);
                     }
                 });
             }

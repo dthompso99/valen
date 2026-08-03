@@ -1,20 +1,26 @@
 import Network from 'libNetwork.ar'
 import EventLoop from 'libEventLoop.ar'
 import System from 'libSystem.ar'
+import Http from 'libHttp.ar'
 
 entry {{
+    member serviceName:string
+
     __() -> i32 {
         System.enableProcessArena()
-        local listener = Network.listen(8080, 16)
+        local configuredName = System.environmentVariable("VALEN_SERVICE_NAME")
+        if configuredName == null { self.serviceName = "Valen" } else { self.serviceName = configuredName! }
+        local listener = Network.listen(18080, 16)
         if listener == null {
             System.writeError("valen-http: listen failed\n")
+            System.print(Network.lastError())
             return 1
         }
         if !Network.makeListenerNonblocking(listener!) {
             Network.closeListener(listener!)
             return 2
         }
-        System.write("valen-http: serving four requests on http://127.0.0.1:8080\n")
+        System.write("valen-http: ready on http://127.0.0.1:18080\n")
         local descriptors = new Array<i64>(0)
         local interests = new Array<i64>(0)
         descriptors.append(Network.listenerDescriptor(listener!))
@@ -46,12 +52,29 @@ entry {{
             Network.closeConnection(connection!)
             return Network.lastError()
         }
-        local response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\nConnection: close\r\n\r\nHello, Valen!"
-        if Network.send(connection!, response) != response.length {
+        local parsed = Http.parse(request!)
+        local response:Http.Response
+        if parsed == null {
+            response = new Http.Response("400 Bad Request", "bad request\n")
+        } else {
+            response = self.route(parsed!)
+        }
+        local output = response.serialize()
+        if Network.send(connection!, output) != output.length {
             Network.closeConnection(connection!)
             return Network.lastError()
         }
         Network.closeConnection(connection!)
         return 0
+    }
+
+    route(request:Http.Request) -> Http.Response {
+        if request.target == "/health" {
+            return new Http.Response("200 OK", "ok\n")
+        }
+        if request.target == "/config" {
+            return new Http.Response("200 OK", "service=" + self.serviceName + "\n")
+        }
+        return new Http.Response("404 Not Found", "not found\n")
     }
 }}
