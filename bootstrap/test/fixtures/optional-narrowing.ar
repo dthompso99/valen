@@ -1,0 +1,47 @@
+Box {{
+    member value:i64
+    __(value:i64) -> void { self.value = value }
+}}
+
+Checks {{
+    branch(box:Box?) -> i64 {
+        if box != null { return box.value }
+        return 0
+    }
+
+    alternate(box:Box?) -> i64 {
+        if box == null { return 0 } else { return box.value }
+    }
+
+    guard(box:Box?) -> i64 {
+        if box == null { return 0 }
+        return box.value
+    }
+
+    logical(box:Box?) -> bool {
+        return box != null && box.value == 42
+    }
+
+    loop(box:Box?) -> i64 {
+        local total:i64 = 0
+        local current:Box? = box
+        while current != null {
+            total = current.value
+            current = null
+        }
+        return total
+    }
+}}
+
+entry {{
+    __() -> i32 {
+        local checks = new Checks()
+        local box:Box? = new Box(42)
+        if checks.branch(box) != 42 { return 1 }
+        if checks.alternate(box) != 42 { return 2 }
+        if checks.guard(box) != 42 { return 3 }
+        if !checks.logical(box) { return 4 }
+        if checks.loop(box) != 42 { return 5 }
+        return 0
+    }
+}}

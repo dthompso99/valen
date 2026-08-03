@@ -24,7 +24,8 @@
 - **WIP:** array literals, insertion/removal, capacity controls, and slices
 - **WIP:** Unicode code-point and grapheme-aware strings
 - **WIP:** string interpolation and richer formatting
-- **WIP:** optional primitive values and flow-sensitive optional narrowing
+- flow-sensitive optional narrowing for stable locals and parameters
+- **WIP:** optional primitive values
 - **WIP:** generic constraints and generic methods
 - **WIP:** implicit numeric promotion rules
 - **WIP:** `else if`, expression-valued conditionals, and matching

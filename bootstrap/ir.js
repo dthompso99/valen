@@ -548,8 +548,8 @@ export class IrGenerator {
             });
         }
         const local = this.locals.get(expression.semanticSymbol);
-        if (local?.kind === 'parameter') return {kind: 'parameter', name: local.name, type: local.type};
-        if (local) return this.result('load_local', local.type, {name: local.name});
+        if (local?.kind === 'parameter') return {kind: 'parameter', name: local.name, type: expression.inferredType};
+        if (local) return this.result('load_local', expression.inferredType, {name: local.name});
         throw new Error(`Identifier '${expression.name}' does not produce an IR value`);
     }
 

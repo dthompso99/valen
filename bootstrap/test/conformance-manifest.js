@@ -16,6 +16,7 @@ export const validPrograms = [
     {name: 'garbage collection', source: 'bootstrap/test/fixtures/garbage-collection.ar'},
     {name: 'repeated garbage collection', source: 'bootstrap/test/fixtures/garbage-collection-repeated.ar'},
     {name: 'optional diagnostics', source: 'bootstrap/test/fixtures/diagnostics.ar'},
+    {name: 'flow-sensitive optional narrowing', source: 'bootstrap/test/fixtures/optional-narrowing.ar'},
     {name: 'safe result propagation', source: 'bootstrap/test/fixtures/result-propagation.ar'},
     {name: 'operation state', source: 'bootstrap/test/fixtures/operation-state.ar'},
     {name: 'native synchronization and threading', source: 'bootstrap/test/fixtures/threading.ar'},

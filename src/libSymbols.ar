@@ -57,11 +57,15 @@ library Symbols {{
         member name:string
         member parent:Scope?
         member symbols:Array<ref Symbol>
+        member narrowedSymbols:Array<ref Symbol>
+        member narrowedTypes:Array<string>
 
         __(name:string, parent:Scope?) -> void {
             self.name = name
             self.parent = parent
             self.symbols = new Array<ref Symbol>(0)
+            self.narrowedSymbols = new Array<ref Symbol>(0)
+            self.narrowedTypes = new Array<string>(0)
         }
 
         define(symbol:Symbol) -> bool {
@@ -104,6 +108,32 @@ library Symbols {{
             while current != null {
                 local found = current!.lookupLocal(name)
                 if found != null { return found }
+                current = current!.parent
+            }
+            return null
+        }
+
+        narrow(symbol:Symbol, typeName:string) -> void {
+            self.narrowedSymbols.append(symbol)
+            self.narrowedTypes.append(typeName)
+        }
+
+        invalidateNarrowing(symbol:Symbol) -> void {
+            self.narrowedSymbols.append(symbol)
+            self.narrowedTypes.append("")
+        }
+
+        narrowedType(symbol:Symbol) -> string? {
+            local current:Scope? = self
+            while current != null {
+                local index = current!.narrowedSymbols.length
+                while index > 0 {
+                    index = index - 1
+                    if current!.narrowedSymbols[index] === symbol {
+                        if current!.narrowedTypes[index].length == 0 { return null }
+                        return current!.narrowedTypes[index]
+                    }
+                }
                 current = current!.parent
             }
             return null

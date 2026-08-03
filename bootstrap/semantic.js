@@ -682,17 +682,26 @@ export class SemanticAnalyzer {
             case 'IfStatement': {
                 const condition = this.analyzeExpression(statement.condition, scope, object);
                 this.requireAssignable(condition, BOOL, statement.condition.span, statement.condition);
-                const consequentReturns = this.analyzeBlock(statement.consequent, scope, object, method);
+                const consequentScope = new Scope(scope, 'if consequent');
+                this.applyOptionalNarrowing(statement.condition, true, consequentScope);
+                const consequentReturns = this.analyzeBlock(statement.consequent, consequentScope, object, method);
                 const alternateReturns = statement.alternate
-                    ? this.analyzeBlock(statement.alternate, scope, object, method)
+                    ? (() => {
+                        const alternateScope = new Scope(scope, 'if alternate');
+                        this.applyOptionalNarrowing(statement.condition, false, alternateScope);
+                        return this.analyzeBlock(statement.alternate, alternateScope, object, method);
+                    })()
                     : false;
+                if (!statement.alternate && consequentReturns) this.applyOptionalNarrowing(statement.condition, false, scope);
                 return consequentReturns && alternateReturns;
             }
             case 'WhileStatement': {
                 const condition = this.analyzeExpression(statement.condition, scope, object);
                 this.requireAssignable(condition, BOOL, statement.condition.span, statement.condition);
                 this.loopDepth++;
-                this.analyzeBlock(statement.body, scope, object, method);
+                const bodyScope = new Scope(scope, 'while body');
+                this.applyOptionalNarrowing(statement.condition, true, bodyScope);
+                this.analyzeBlock(statement.body, bodyScope, object, method);
                 this.loopDepth--;
                 return false;
             }
@@ -756,6 +765,31 @@ export class SemanticAnalyzer {
         }
     }
 
+    applyOptionalNarrowing(expression, truthy, scope) {
+        if (expression.kind === 'UnaryExpression' && expression.operator === '!') {
+            this.applyOptionalNarrowing(expression.operand, !truthy, scope);
+            return;
+        }
+        if (expression.kind !== 'BinaryExpression') return;
+        if (expression.operator === '&&' && truthy) {
+            this.applyOptionalNarrowing(expression.left, true, scope);
+            this.applyOptionalNarrowing(expression.right, true, scope);
+            return;
+        }
+        if (expression.operator === '||' && !truthy) {
+            this.applyOptionalNarrowing(expression.left, false, scope);
+            this.applyOptionalNarrowing(expression.right, false, scope);
+            return;
+        }
+        if (expression.operator !== '==' && expression.operator !== '!=') return;
+        const candidate = expression.left.kind === 'NullLiteral' ? expression.right
+            : expression.right.kind === 'NullLiteral' ? expression.left : null;
+        const symbol = candidate?.semanticSymbol;
+        if (!symbol || !['Local', 'Parameter'].includes(symbol.kind) || !this.isOptionalType(symbol.type)) return;
+        const nonNull = expression.operator === '!=' ? truthy : !truthy;
+        if (nonNull) scope.narrow(symbol, this.optionalBaseType(symbol.type));
+    }
+
     analyzeExpression(expression, scope, object) {
         let type = UNKNOWN;
         let symbol = null;
@@ -781,7 +815,7 @@ export class SemanticAnalyzer {
                 symbol = scope.lookup(expression.name);
                 if (!symbol) this.report(expression.span, `Unknown identifier '${expression.name}'`);
                 else if (!expression.isAssignmentTarget) this.validateBorrow(symbol, expression.span);
-                type = symbol?.type ?? UNKNOWN;
+                type = expression.isAssignmentTarget ? symbol?.type ?? UNKNOWN : scope.narrowedType(symbol) ?? symbol?.type ?? UNKNOWN;
                 break;
             case 'MemberExpression': {
                 const ownerType = this.analyzeExpression(expression.object, scope, object);
@@ -898,6 +932,7 @@ export class SemanticAnalyzer {
                 }
                 const valueType = this.analyzeExpression(expression.value, scope, object);
                 this.requireAssignable(valueType, targetType, expression.value.span, expression.value);
+                if (targetSymbol) scope.invalidateNarrowing(targetSymbol);
                 if (this.isOwnedReferenceType(targetType)) {
                     if (targetSymbol?.kind === 'Field' && targetSymbol.ownership === 'member-owned') {
                         expression.ownership = 'transfer';
@@ -935,7 +970,9 @@ export class SemanticAnalyzer {
             case 'UnwrapExpression': {
                 const optionalType = this.analyzeExpression(expression.expression, scope, object);
                 if (!this.isOptionalType(optionalType)) {
-                    this.report(expression.span, `Cannot unwrap non-optional type '${optionalType}'`);
+                    const declaredType = expression.expression.semanticSymbol?.type;
+                    if (this.isOptionalType(declaredType)) type = optionalType;
+                    else this.report(expression.span, `Cannot unwrap non-optional type '${optionalType}'`);
                 } else type = this.optionalBaseType(optionalType);
                 break;
             }
@@ -1001,7 +1038,12 @@ export class SemanticAnalyzer {
             }
             case 'BinaryExpression': {
                 let left = this.analyzeExpression(expression.left, scope, object);
-                let right = this.analyzeExpression(expression.right, scope, object);
+                let right;
+                if (expression.operator === '&&' || expression.operator === '||') {
+                    const rightScope = new Scope(scope, 'logical right');
+                    this.applyOptionalNarrowing(expression.left, expression.operator === '&&', rightScope);
+                    right = this.analyzeExpression(expression.right, rightScope, object);
+                } else right = this.analyzeExpression(expression.right, scope, object);
                 if (expression.operator === 'is') {
                     const source = this.findObjectType(this.isOptionalType(left) ? this.optionalBaseType(left) : left);
                     const target = expression.right.semanticSymbol;
@@ -1629,6 +1671,7 @@ class Scope {
         this.name = name;
         this.moduleId = moduleId;
         this.symbols = new Map();
+        this.narrowings = new Map();
     }
 
     define(name, symbol, span, diagnostics) {
@@ -1642,6 +1685,19 @@ class Scope {
 
     lookup(name) {
         return this.symbols.get(name) ?? this.parent?.lookup(name) ?? null;
+    }
+
+    narrow(symbol, type) {
+        this.narrowings.set(symbol, type);
+    }
+
+    invalidateNarrowing(symbol) {
+        this.narrowings.set(symbol, null);
+    }
+
+    narrowedType(symbol) {
+        if (this.narrowings.has(symbol)) return this.narrowings.get(symbol);
+        return this.parent?.narrowedType(symbol) ?? null;
     }
 }
 

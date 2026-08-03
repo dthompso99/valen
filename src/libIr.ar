@@ -972,8 +972,8 @@ library Ir {{
             }
             local binding = self.findBinding(symbol)
             if binding == null { return new Value("symbol", symbol.qualifiedName, expression.inferredType!) }
-            if binding!.value.kind == "parameter" { return binding!.value }
-            local instruction = self.temporary("load_local", binding!.value.typeName)
+            if binding!.value.kind == "parameter" { return new Value("parameter", binding!.value.name, expression.inferredType!) }
+            local instruction = self.temporary("load_local", expression.inferredType!)
             instruction.name = binding!.value.name
             return instruction.result!
         }

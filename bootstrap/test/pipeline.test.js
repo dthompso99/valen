@@ -934,6 +934,24 @@ test('optional propagation is restricted to optional-returning methods', () => {
     assert.match(result.diagnostics[0].message, /enclosing method to return an optional type/);
 });
 
+test('optional locals and parameters narrow across branches, guards, logical expressions, and loops', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/optional-narrowing.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    assert.doesNotThrow(() => new X86_64Backend().generate(ir));
+});
+
+test('assignment invalidates optional narrowing', () => {
+    const source = `Box {{ member value:i64 }} entry {{ read(box:Box?) -> i64 {
+        if box != null { box = null; return box.value }
+        return 0
+    } __() -> void {} }}`;
+    const result = new SemanticAnalyzer().analyze(new Parser().parse(source, 'narrowing-assignment.ar'));
+    assert.equal(result.success, false);
+    assert.match(result.diagnostics.at(-1).message, /Type 'Box\?' has no members/);
+});
+
 test('result propagation unwraps valid values and returns invalid results', () => {
     const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/result-propagation.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});

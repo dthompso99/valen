@@ -45,7 +45,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 - [x] Add general-purpose generic objects beyond `Array<T>` using invariant monomorphized specializations
 - [ ] Define generic constraints using interfaces or another contract mechanism
 - [ ] Add optional value types for stack primitives
-- [ ] Add flow-sensitive optional narrowing
+- [x] Add flow-sensitive optional narrowing
 - [x] Generalize safe `Result` propagation
 - [x] Add floating-point types, literals, conversions, arithmetic, NaN rules, and ABI support
 - [ ] Define numeric promotion and mixed-width arithmetic rules

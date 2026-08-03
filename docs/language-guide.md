@@ -180,7 +180,7 @@ if engine != null {
 }
 ```
 
-`!` performs a checked unwrap. Safe propagation is available in optional-returning methods. Optional primitive values and flow-sensitive narrowing that removes the need for `!` are **WIP**.
+`!` performs a checked unwrap. Safe propagation is available in optional-returning methods. Locals and parameters are narrowed automatically after null checks inside `if`, `else`, `while`, short-circuit expressions, and after a returning guard clause. Assignment invalidates the narrowing. Optional primitive values remain **WIP**.
 
 ## Ownership and lifetime
 

@@ -1002,8 +1002,16 @@ library Semantics {{
                 self.requireCompatible("bool", conditionType, statement.condition!.span)
                 local childLoop = inLoop
                 if statement.kind == "While" { childLoop = true }
-                self.analyzeBlock(statement.body!, scope, moduleScope, returnType, childLoop)
-                if statement.alternate != null { self.analyzeBlock(statement.alternate!, scope, moduleScope, returnType, inLoop) }
+                local bodyScope = new Symbols.Scope("condition body", scope)
+                self.applyOptionalNarrowing(statement.condition!, true, bodyScope)
+                self.analyzeBlock(statement.body!, bodyScope, moduleScope, returnType, childLoop)
+                if statement.alternate != null {
+                    local alternateScope = new Symbols.Scope("condition alternate", scope)
+                    self.applyOptionalNarrowing(statement.condition!, false, alternateScope)
+                    self.analyzeBlock(statement.alternate!, alternateScope, moduleScope, returnType, inLoop)
+                } else {
+                    if statement.kind == "If" && self.blockDefinitelyReturns(statement.body!) { self.applyOptionalNarrowing(statement.condition!, false, scope) }
+                }
                 return
             }
             if statement.kind == "For" {
@@ -1049,6 +1057,43 @@ library Semantics {{
             if statement.expression != null { self.analyzeExpression(statement.expression!, scope, moduleScope) }
         }
 
+        blockDefinitelyReturns(block:Ast.Block) -> bool {
+            if block.statements.length == 0 { return false }
+            local statement = block.statements[block.statements.length - 1]
+            if statement.kind == "Return" { return true }
+            if statement.kind == "Block" { return self.blockDefinitelyReturns(statement.body!) }
+            if statement.kind == "If" && statement.alternate != null {
+                return self.blockDefinitelyReturns(statement.body!) && self.blockDefinitelyReturns(statement.alternate!)
+            }
+            return false
+        }
+
+        applyOptionalNarrowing(expression:Ast.Expression, truthy:bool, scope:Symbols.Scope) -> void {
+            if expression.kind == "Unary" && expression.operator! == "!" { self.applyOptionalNarrowing(expression.left!, !truthy, scope); return }
+            if expression.kind != "Binary" { return }
+            if expression.operator! == "&&" && truthy {
+                self.applyOptionalNarrowing(expression.left!, true, scope)
+                self.applyOptionalNarrowing(expression.right!, true, scope)
+                return
+            }
+            if expression.operator! == "||" && !truthy {
+                self.applyOptionalNarrowing(expression.left!, false, scope)
+                self.applyOptionalNarrowing(expression.right!, false, scope)
+                return
+            }
+            if expression.operator! != "==" && expression.operator! != "!=" { return }
+            local candidate:Ast.Expression? = null
+            if expression.left!.kind == "Null" { candidate = expression.right }
+            if expression.right!.kind == "Null" { candidate = expression.left }
+            if candidate == null || candidate!.symbol == null { return }
+            local symbol = candidate!.symbol!
+            if symbol.kind != "Local" && symbol.kind != "Parameter" { return }
+            if symbol.typeName == null || !self.isOptional(symbol.typeName!) { return }
+            local nonNull = truthy
+            if expression.operator! == "==" { nonNull = !truthy }
+            if nonNull { scope.narrow(symbol, symbol.typeName!.slice(0, symbol.typeName!.length - 1)) }
+        }
+
         analyzeExpression(expression:Ast.Expression, scope:Symbols.Scope, moduleScope:Symbols.Scope) -> string {
             if expression.kind == "Integer" { return self.typed(expression, "i64") }
             if expression.kind == "Float" { return self.typed(expression, "f64") }
@@ -1061,7 +1106,13 @@ library Semantics {{
                 if symbol == null { self.error(expression.span, "Unknown name '" + expression.name! + "'"); return self.typed(expression, "error") }
                 if expression.ownership != "assignment-target" { self.validateBorrow(symbol!, expression.span) }
                 expression.symbol = symbol
-                if symbol!.typeName != null { return self.typed(expression, symbol!.typeName!) }
+                if symbol!.typeName != null {
+                    if expression.ownership != "assignment-target" {
+                        local narrowed = scope.narrowedType(symbol!)
+                        if narrowed != null { return self.typed(expression, narrowed!) }
+                    }
+                    return self.typed(expression, symbol!.typeName!)
+                }
                 if symbol!.returnType != null { return self.typed(expression, symbol!.returnType!) }
                 return self.typed(expression, "error")
             }
@@ -1229,6 +1280,7 @@ library Semantics {{
                 local target = self.analyzeExpression(expression.left!, scope, moduleScope)
                 local value = self.analyzeExpression(expression.right!, scope, moduleScope)
                 self.requireCompatible(target, value, expression.span)
+                if expression.left!.symbol != null { scope.invalidateNarrowing(expression.left!.symbol!) }
                 if self.isOwnedReference(target) {
                     if expression.left!.kind == "Index" {
                         if expression.left!.text != null {
@@ -1309,7 +1361,11 @@ library Semantics {{
             }
             if expression.kind == "Unwrap" {
                 local optional = self.analyzeExpression(expression.left!, scope, moduleScope)
-                if !self.isOptional(optional) { self.error(expression.span, "Operator requires an optional value"); return self.typed(expression, "error") }
+                if !self.isOptional(optional) {
+                    if expression.left!.symbol != null && expression.left!.symbol!.typeName != null && self.isOptional(expression.left!.symbol!.typeName!) { return self.typed(expression, optional) }
+                    self.error(expression.span, "Operator requires an optional value")
+                    return self.typed(expression, "error")
+                }
                 return self.typed(expression, optional.slice(0, optional.length - 1))
             }
             if expression.kind == "Propagate" {
@@ -1406,8 +1462,13 @@ library Semantics {{
 
         analyzeBinary(expression:Ast.Expression, scope:Symbols.Scope, moduleScope:Symbols.Scope) -> string {
             local left = self.analyzeExpression(expression.left!, scope, moduleScope)
-            local right = self.analyzeExpression(expression.right!, scope, moduleScope)
             local operator = expression.operator!
+            local right = "error"
+            if operator == "&&" || operator == "||" {
+                local rightScope = new Symbols.Scope("logical right", scope)
+                self.applyOptionalNarrowing(expression.left!, operator == "&&", rightScope)
+                right = self.analyzeExpression(expression.right!, rightScope, moduleScope)
+            } else { right = self.analyzeExpression(expression.right!, scope, moduleScope) }
             if operator == "is" {
                 local sourceBase = left
                 if self.isOptional(sourceBase) { sourceBase = sourceBase.slice(0, sourceBase.length - 1) }
