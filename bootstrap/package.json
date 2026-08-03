@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node test/pipeline.test.js && node test/generation1.test.js"
+    "test": "node test/pipeline.test.js && node test/generation1.test.js",
+    "benchmark": "node ../scripts/benchmark.mjs"
   },
   "author": "",
   "license": "ISC",

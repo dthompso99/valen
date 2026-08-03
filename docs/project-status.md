@@ -50,7 +50,7 @@ Platforms without native threads are intended to use `InlineExecutor`; only x86-
 - **WIP:** package metadata, versioning, and compiled libraries
 - **WIP:** optimization levels, register allocation, and peephole optimization
 - **WIP:** direct ELF object emission and an integrated linker
-- **WIP:** benchmarks for compile time, memory, executable size, and runtime speed
+- Repeatable compiler and generated-code benchmarks report compile time, memory, executable size, and runtime speed; expanding the workload corpus remains **WIP**.
 
 ## Maturity
 

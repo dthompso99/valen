@@ -66,6 +66,14 @@ Run native generation-1 conformance:
 node bootstrap/test/generation1.test.js
 ```
 
+Run compiler and generated-code benchmarks:
+
+```sh
+node scripts/benchmark.mjs
+```
+
+CI stores the JSON and Markdown results as build artifacts. See `benchmarks/README.md` for comparison rules and the optional generation-2 measurement.
+
 Check JavaScript after modifying the bootstrap:
 
 ```sh

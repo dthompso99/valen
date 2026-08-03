@@ -1,0 +1,15 @@
+import System from 'libSystem.ar'
+
+entry {{
+    __() -> i32 {
+        local index:i64 = 0
+        local checksum:i64 = 0
+        while index < 10000000 {
+            local value = index * 17
+            checksum = checksum + (value - ((value / 251) * 251))
+            index = index + 1
+        }
+        System.print(checksum)
+        return 0
+    }
+}}
