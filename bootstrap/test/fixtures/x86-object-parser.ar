@@ -24,4 +24,28 @@ test X86ObjectParserTests {{
         expect(parser.integer("-128") == -128)
         expect(parser.integer("0x7fffffff") == 2147483647)
     }
+
+    encodesCoreInstructionsAndRelocations() -> void {
+        local parser = new X86Object.Parser()
+        local encoder = new X86Object.Encoder(".text", 0)
+        local move = new Array<X86Object.Operand>(0)
+        move.append(parser.operand("rax")); move.append(parser.operand("rbx"))
+        expect(encoder.instruction("mov", move))
+        local subtract = new Array<X86Object.Operand>(0)
+        subtract.append(parser.operand("rsp")); subtract.append(parser.operand("32"))
+        expect(encoder.instruction("sub", subtract))
+        expect(encoder.bytes.length() == 10)
+        expect(encoder.bytes.values[0] == 72 && encoder.bytes.values[1] == 139 && encoder.bytes.values[2] == 195)
+        expect(encoder.bytes.values[3] == 72 && encoder.bytes.values[4] == 129 && encoder.bytes.values[5] == 236)
+
+        local relative = new X86Object.Encoder(".text", 20)
+        local load = new Array<X86Object.Operand>(0)
+        load.append(parser.operand("rax")); load.append(parser.operand("QWORD PTR [rip+value]"))
+        expect(relative.instruction("mov", load))
+        expect(relative.fixups.length == 1)
+        expect(relative.fixups[0].symbol == "value")
+        expect(relative.fixups[0].offset == 23)
+        expect(relative.fixups[0].relocationType == 2)
+        expect(relative.fixups[0].addend == -4)
+    }
 }}

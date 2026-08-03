@@ -53,6 +53,146 @@ library X86Object {{
         offset() -> i64 { if self.type == 8 { return self.logicalSize }; return self.bytes.length() }
     }}
 
+    Encoder {{
+        member section:string
+        member offset:i64
+        member bytes:Elf.Bytes
+        member fixups:Array<Fixup>
+
+        __(section:string, offset:i64) -> void {
+            self.section = section; self.offset = offset; self.bytes = new Elf.Bytes(); self.fixups = new Array<Fixup>(0)
+        }
+
+        byte(value:i64) -> void { self.bytes.byte(value) }
+        little(value:i64, size:i64) -> void { self.bytes.unsigned(value, size) }
+        operandPrefix(size:i64) -> void { if size == 2 { self.byte(102) } }
+        rex(w:bool, r:i64, x:i64, b:i64, force:bool) -> void {
+            local value:i64 = 64 + (r / 8) * 4 + (x / 8) * 2 + b / 8
+            if w { value = value + 8 }
+            if value != 64 || force { self.byte(value) }
+        }
+        rmBase(operand:Operand) -> i64 { if operand.kind == "memory" { if operand.base < 0 { return 0 }; return operand.base }; return operand.code }
+        rmIndex(operand:Operand) -> i64 { if operand.kind == "memory" { if operand.index < 0 { return 0 }; return operand.index }; return 0 }
+
+        relocation(symbol:string, type:i64, addend:i64) -> void {
+            self.fixups.append(new Fixup(self.section, self.offset + self.bytes.length(), symbol, 0, type, addend))
+        }
+
+        modRm(regCode:i64, operand:Operand) -> void {
+            if operand.kind == "register" || operand.kind == "xmm" {
+                self.byte(192 + (regCode - regCode / 8 * 8) * 8 + operand.code - operand.code / 8 * 8)
+                return
+            }
+            if operand.base == 16 {
+                self.byte((regCode - regCode / 8 * 8) * 8 + 5)
+                if operand.symbol != null { self.relocation(operand.symbol!, 2, operand.displacement - 4); self.little(0, 4) }
+                else { self.little(operand.displacement, 4) }
+                return
+            }
+            local base = operand.base
+            local index = operand.index
+            local baseLow:i64 = 0
+            if base >= 0 { baseLow = base - base / 8 * 8 }
+            local needsSib = index >= 0 || base < 0 || baseLow == 4
+            local displacementSize:i64 = 0
+            if base < 0 || operand.symbol != null { displacementSize = 4 }
+            else { if operand.displacement != 0 || baseLow == 5 {
+                if operand.displacement >= -128 && operand.displacement <= 127 { displacementSize = 1 } else { displacementSize = 4 }
+            }}
+            local mod:i64 = 0
+            if displacementSize == 1 { mod = 1 }
+            if displacementSize == 4 { mod = 2 }
+            local rm = baseLow
+            if needsSib { rm = 4 }
+            self.byte(mod * 64 + (regCode - regCode / 8 * 8) * 8 + rm)
+            if needsSib {
+                local scaleCode:i64 = 0
+                if operand.scale == 2 { scaleCode = 1 }
+                if operand.scale == 4 { scaleCode = 2 }
+                if operand.scale == 8 { scaleCode = 3 }
+                local indexCode:i64 = 4
+                if index >= 0 { indexCode = index - index / 8 * 8 }
+                local sibBase:i64 = 5
+                if base >= 0 { sibBase = baseLow }
+                self.byte(scaleCode * 64 + indexCode * 8 + sibBase)
+            }
+            if operand.symbol != null { self.relocation(operand.symbol!, 11, operand.displacement); self.little(0, 4) }
+            else { if displacementSize > 0 { self.little(operand.displacement, displacementSize) } }
+        }
+
+        regRm(opcode:i64, destination:Operand, source:Operand, size:i64) -> void {
+            self.operandPrefix(size)
+            local base = self.rmBase(source); local index = self.rmIndex(source)
+            self.rex(size == 8, destination.code, index, base, size == 1 && (destination.code >= 4 || base >= 4))
+            self.byte(opcode); self.modRm(destination.code, source)
+        }
+        rmReg(opcode:i64, destination:Operand, source:Operand, size:i64) -> void {
+            self.operandPrefix(size)
+            local base = self.rmBase(destination); local index = self.rmIndex(destination)
+            self.rex(size == 8, source.code, index, base, size == 1 && (source.code >= 4 || base >= 4))
+            self.byte(opcode); self.modRm(source.code, destination)
+        }
+        immediateRm(destination:Operand, extension:i64, value:i64, size:i64, byteOpcode:i64, opcode:i64) -> void {
+            self.operandPrefix(size)
+            local base = self.rmBase(destination); local index = self.rmIndex(destination)
+            self.rex(size == 8, 0, index, base, size == 1 && base >= 4)
+            if size == 1 { self.byte(byteOpcode) } else { self.byte(opcode) }
+            self.modRm(extension, destination)
+            if size == 1 { self.little(value, 1) } else { self.little(value, 4) }
+        }
+        size(left:Operand, right:Operand) -> i64 { if left.size > 0 { return left.size }; return right.size }
+
+        binary(mnemonic:string, left:Operand, right:Operand) -> void {
+            local base:i64 = 0; local extension:i64 = 0
+            if mnemonic == "or" { base = 8; extension = 1 }
+            if mnemonic == "and" { base = 32; extension = 4 }
+            if mnemonic == "sub" { base = 40; extension = 5 }
+            if mnemonic == "xor" { base = 48; extension = 6 }
+            if mnemonic == "cmp" { base = 56; extension = 7 }
+            local width = self.size(left, right)
+            if right.kind == "immediate" { self.immediateRm(left, extension, right.value, width, 128, 129); return }
+            if left.kind == "register" { if width == 1 { self.regRm(base + 2, left, right, width) } else { self.regRm(base + 3, left, right, width) }; return }
+            if width == 1 { self.rmReg(base, left, right, width) } else { self.rmReg(base + 1, left, right, width) }
+        }
+
+        instruction(mnemonic:string, operands:Array<Operand>) -> bool {
+            if mnemonic == "ret" { self.byte(195); return true }
+            if mnemonic == "leave" { self.byte(201); return true }
+            if mnemonic == "syscall" { self.byte(15); self.byte(5); return true }
+            if mnemonic == "ud2" { self.byte(15); self.byte(11); return true }
+            if mnemonic == "cqo" { self.byte(72); self.byte(153); return true }
+            if mnemonic == "pause" { self.byte(243); self.byte(144); return true }
+            if mnemonic == "movsb" { self.byte(164); return true }
+            if mnemonic == "cmpsb" { self.byte(166); return true }
+            if mnemonic == "add" || mnemonic == "or" || mnemonic == "and" || mnemonic == "sub" || mnemonic == "xor" || mnemonic == "cmp" {
+                self.binary(mnemonic, operands[0], operands[1]); return true
+            }
+            if mnemonic == "mov" {
+                local left = operands[0]; local right = operands[1]; local width = self.size(left, right)
+                if right.kind == "immediate" {
+                    if left.kind == "register" {
+                        self.operandPrefix(width); self.rex(width == 8, 0, 0, left.code, width == 1 && left.code >= 4)
+                        local opcode:i64 = 184
+                        if width == 1 { opcode = 176 }
+                        self.byte(opcode + left.code - left.code / 8 * 8); self.little(right.value, width); return true
+                    }
+                    self.immediateRm(left, 0, right.value, width, 198, 199); return true
+                }
+                if left.kind == "register" { if width == 1 { self.regRm(138, left, right, width) } else { self.regRm(139, left, right, width) }; return true }
+                if width == 1 { self.rmReg(136, left, right, width) } else { self.rmReg(137, left, right, width) }
+                return true
+            }
+            if mnemonic == "lea" { self.regRm(141, operands[0], operands[1], operands[0].size); return true }
+            if mnemonic == "test" { local width = self.size(operands[0], operands[1]); if width == 1 { self.rmReg(132, operands[0], operands[1], width) } else { self.rmReg(133, operands[0], operands[1], width) }; return true }
+            if mnemonic == "push" || mnemonic == "pop" {
+                local operand = operands[0]; self.rex(false, 0, 0, operand.code, false)
+                if mnemonic == "push" { self.byte(80 + operand.code - operand.code / 8 * 8) } else { self.byte(88 + operand.code - operand.code / 8 * 8) }
+                return true
+            }
+            return false
+        }
+    }}
+
     Parser {{
         trim(value:string) -> string {
             local start:i64 = 0
