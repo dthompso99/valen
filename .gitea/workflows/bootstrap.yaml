@@ -83,7 +83,7 @@ jobs:
         env:
           REGISTRY_HOST: gitea.hallrd.click
           NAMESPACE: dthompson
-          IMAGE_AGENT: valen
+          IMAGE_AGENT: valen-builder
         run: |
           set -euo pipefail
           docker tag valen:test $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:latest

@@ -7,3 +7,6 @@
 /sample
 /sample.s
 /.valen-cache/
+/server
+/server.o
+/build

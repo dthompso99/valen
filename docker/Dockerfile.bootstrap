@@ -56,5 +56,5 @@ RUN ls -al dist
 CMD ["/bin/sh"]
 
 FROM scratch AS scratch-runtime
-COPY --from=stage3 /app/dist/simple /valen-smoke
-ENTRYPOINT ["/valen-smoke"]
+COPY --from=stage2 /app/dist/valen .
+ENTRYPOINT ["/valen"]
