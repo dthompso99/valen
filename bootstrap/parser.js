@@ -549,19 +549,24 @@ export class Parser {
 const binaryPrecedence = {
     OR: 1,
     AND: 2,
-    EQUAL_EQUAL: 3,
-    BANG_EQUAL: 3,
-    EQUAL_EQUAL_EQUAL: 3,
-    BANG_EQUAL_EQUAL: 3,
-    IS: 3,
-    LESS: 4,
-    LESS_EQUAL: 4,
-    GREATER: 4,
-    GREATER_EQUAL: 4,
-    PLUS: 5,
-    MINUS: 5,
-    STAR: 6,
-    SLASH: 6
+    BIT_OR: 3,
+    BIT_XOR: 4,
+    BIT_AND: 5,
+    EQUAL_EQUAL: 6,
+    BANG_EQUAL: 6,
+    EQUAL_EQUAL_EQUAL: 6,
+    BANG_EQUAL_EQUAL: 6,
+    IS: 6,
+    LESS: 7,
+    LESS_EQUAL: 7,
+    GREATER: 7,
+    GREATER_EQUAL: 7,
+    SHIFT_LEFT: 8,
+    SHIFT_RIGHT: 8,
+    PLUS: 9,
+    MINUS: 9,
+    STAR: 10,
+    SLASH: 10
 };
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

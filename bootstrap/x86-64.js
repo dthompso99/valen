@@ -628,7 +628,7 @@ export class X86_64Backend {
     binary(instruction) {
         if (this.isFloat(instruction.left.type)) return this.floatBinary(instruction);
         const lines = [...this.load(instruction.left, 'rax'), ...this.load(instruction.right, 'rcx')];
-        const simple = {'+': 'add rax, rcx', '-': 'sub rax, rcx', '*': 'imul rax, rcx', '&&': 'and rax, rcx', '||': 'or rax, rcx'};
+        const simple = {'+': 'add rax, rcx', '-': 'sub rax, rcx', '*': 'imul rax, rcx', '&&': 'and rax, rcx', '||': 'or rax, rcx', '&': 'and rax, rcx', '|': 'or rax, rcx', '^': 'xor rax, rcx', '<<': 'shl rax, cl', '>>': this.isUnsigned(instruction.left.type) ? 'shr rax, cl' : 'sar rax, cl'};
         const condition = {'==': 'sete', '!=': 'setne', '===': 'sete', '!==': 'setne', '<': 'setl', '<=': 'setle', '>': 'setg', '>=': 'setge'};
         if (simple[instruction.operator]) lines.push(`    ${simple[instruction.operator]}`);
         else if (instruction.operator === '/') {

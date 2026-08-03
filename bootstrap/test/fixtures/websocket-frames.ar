@@ -1,0 +1,21 @@
+import WebSocket from 'libWebSocket.ar'
+
+entry {{
+    __() -> i32 {
+        local wire = new StringBuilder()
+        wire.appendByte(129); wire.appendByte(133)
+        wire.appendByte(55); wire.appendByte(250); wire.appendByte(33); wire.appendByte(61)
+        wire.appendByte(127); wire.appendByte(159); wire.appendByte(77); wire.appendByte(81); wire.appendByte(88)
+        local protocol = new WebSocket.Protocol()
+        local decoded = protocol.decodeClient(wire.build(), 104857600)
+        if decoded.status != 1 || decoded.frame == null { return 1 }
+        if decoded.frame!.opcode != 1 || decoded.frame!.payload != "Hello" || decoded.frame!.consumed != 11 { return 2 }
+        local encoded = protocol.encode(1, "Hello")
+        if encoded.length != 7 || encoded[0] != 129 || encoded[1] != 5 || encoded.slice(2, 5) != "Hello" { return 3 }
+        local incomplete = protocol.decodeClient(wire.build().slice(0, 8), 104857600)
+        if incomplete.status != 0 { return 4 }
+        local oversized = protocol.decodeClient(wire.build(), 4)
+        if oversized.status != 3 { return 5 }
+        return 0
+    }
+}}

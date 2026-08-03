@@ -1,0 +1,192 @@
+library WebSocket {{
+    Frame {{
+        member fin:bool
+        member opcode:i64
+        member payload:string
+        member consumed:i64
+        __(fin:bool, opcode:i64, payload:string, consumed:i64) -> void {
+            self.fin = fin; self.opcode = opcode; self.payload = payload; self.consumed = consumed
+        }
+    }}
+
+    DecodeResult {{
+        member status:i64
+        member frame:Frame?
+        __(status:i64, frame:Frame?=null) -> void { self.status = status; self.frame = frame }
+    }}
+
+    Protocol {{
+        validOpcode(opcode:i64) -> bool {
+            return opcode == 0 || opcode == 1 || opcode == 2 || opcode == 8 || opcode == 9 || opcode == 10
+        }
+
+        decodeClient(input:string, maximumPayload:i64) -> DecodeResult {
+            if input.length < 2 { return new DecodeResult(0) }
+            local first = input[0] as i64
+            local second = input[1] as i64
+            local fin = (first & 128) != 0
+            local opcode = first & 15
+            if (first & 112) != 0 || !self.validOpcode(opcode) || (second & 128) == 0 { return new DecodeResult(2) }
+            local length = second & 127
+            local offset:i64 = 2
+            if length == 126 {
+                if input.length < 4 { return new DecodeResult(0) }
+                length = ((input[2] as i64) << 8) | (input[3] as i64)
+                offset = 4
+            } else {
+                if length == 127 {
+                    if input.length < 10 { return new DecodeResult(0) }
+                    if (input[2] & 128) != 0 { return new DecodeResult(2) }
+                    length = 0
+                    local index:i64 = 2
+                    while index < 10 {
+                        if length > (maximumPayload >> 8) { return new DecodeResult(3) }
+                        length = (length << 8) | (input[index] as i64)
+                        index = index + 1
+                    }
+                    offset = 10
+                }
+            }
+            if length > maximumPayload { return new DecodeResult(3) }
+            if opcode >= 8 && (!fin || length > 125) { return new DecodeResult(2) }
+            if input.length < offset + 4 { return new DecodeResult(0) }
+            local payloadOffset = offset + 4
+            if input.length < payloadOffset + length { return new DecodeResult(0) }
+            local payload = new StringBuilder()
+            local index:i64 = 0
+            while index < length {
+                payload.appendByte(input[payloadOffset + index] ^ input[offset + (index & 3)])
+                index = index + 1
+            }
+            return new DecodeResult(1, new Frame(fin, opcode, payload.build(), payloadOffset + length))
+        }
+
+        encode(opcode:i64, payload:string, fin:bool=true) -> string {
+            local output = new StringBuilder()
+            local first = opcode & 15
+            if fin { first = first | 128 }
+            output.appendByte(first as u8)
+            if payload.length < 126 { output.appendByte(payload.length as u8) }
+            else {
+                if payload.length <= 65535 {
+                    output.appendByte(126)
+                    output.appendByte(((payload.length >> 8) & 255) as u8)
+                    output.appendByte((payload.length & 255) as u8)
+                } else {
+                    output.appendByte(127)
+                    local shift:i64 = 56
+                    while shift >= 0 { output.appendByte(((payload.length >> shift) & 255) as u8); shift = shift - 8 }
+                }
+            }
+            output.append(payload)
+            return output.build()
+        }
+    }}
+
+    Handshake {{
+        rotateLeft(value:i64, count:i64) -> i64 {
+            return ((value << count) | (value >> (32 - count))) & 4294967295
+        }
+
+        base64(input:Array<i64>) -> string {
+            local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+            local output = new StringBuilder()
+            local index:i64 = 0
+            while index < input.length {
+                local remaining = input.length - index
+                local first = input[index]
+                local second:i64 = 0
+                local third:i64 = 0
+                if remaining > 1 { second = input[index + 1] }
+                if remaining > 2 { third = input[index + 2] }
+                local value = (first << 16) | (second << 8) | third
+                output.appendByte(alphabet[(value >> 18) & 63])
+                output.appendByte(alphabet[(value >> 12) & 63])
+                if remaining > 1 { output.appendByte(alphabet[(value >> 6) & 63]) } else { output.appendByte(61) }
+                if remaining > 2 { output.appendByte(alphabet[value & 63]) } else { output.appendByte(61) }
+                index = index + 3
+            }
+            return output.build()
+        }
+
+        accept(clientKey:string) -> string {
+            local source = clientKey + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+            local message = new Array<i64>(0)
+            local index:i64 = 0
+            while index < source.length { message.append(source[index] as i64); index = index + 1 }
+            local bitLength = message.length * 8
+            message.append(128)
+            while (message.length & 63) != 56 { message.append(0) }
+            local shift:i64 = 56
+            while shift >= 0 {
+                message.append((bitLength >> shift) & 255)
+                shift = shift - 8
+            }
+
+            local h0:i64 = 1732584193
+            local h1:i64 = 4023233417
+            local h2:i64 = 2562383102
+            local h3:i64 = 271733878
+            local h4:i64 = 3285377520
+            local block:i64 = 0
+            while block < message.length {
+                local words = new Array<i64>(80)
+                index = 0
+                while index < 16 {
+                    local offset = block + index * 4
+                    words[index] = (message[offset] << 24) | (message[offset + 1] << 16) | (message[offset + 2] << 8) | message[offset + 3]
+                    index = index + 1
+                }
+                while index < 80 {
+                    words[index] = self.rotateLeft(words[index - 3] ^ words[index - 8] ^ words[index - 14] ^ words[index - 16], 1)
+                    index = index + 1
+                }
+
+                local a = h0
+                local b = h1
+                local c = h2
+                local d = h3
+                local e = h4
+                index = 0
+                while index < 80 {
+                    local f:i64 = 0
+                    local k:i64 = 0
+                    if index < 20 { f = (b & c) | ((4294967295 ^ b) & d); k = 1518500249 }
+                    else {
+                        if index < 40 { f = b ^ c ^ d; k = 1859775393 }
+                        else {
+                            if index < 60 { f = (b & c) | (b & d) | (c & d); k = 2400959708 }
+                            else { f = b ^ c ^ d; k = 3395469782 }
+                        }
+                    }
+                    local temporary = (self.rotateLeft(a, 5) + f + e + k + words[index]) & 4294967295
+                    e = d
+                    d = c
+                    c = self.rotateLeft(b, 30)
+                    b = a
+                    a = temporary
+                    index = index + 1
+                }
+                h0 = (h0 + a) & 4294967295
+                h1 = (h1 + b) & 4294967295
+                h2 = (h2 + c) & 4294967295
+                h3 = (h3 + d) & 4294967295
+                h4 = (h4 + e) & 4294967295
+                block = block + 64
+            }
+
+            local digest = new Array<i64>(0)
+            local hashes = new Array<i64>(0)
+            hashes.append(h0); hashes.append(h1); hashes.append(h2); hashes.append(h3); hashes.append(h4)
+            index = 0
+            while index < hashes.length {
+                digest.append((hashes[index] >> 24) & 255)
+                digest.append((hashes[index] >> 16) & 255)
+                digest.append((hashes[index] >> 8) & 255)
+                digest.append(hashes[index] & 255)
+                index = index + 1
+            }
+            return self.base64(digest)
+        }
+    }}
+}}

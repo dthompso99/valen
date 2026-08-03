@@ -1388,6 +1388,11 @@ library Semantics {{
                 return self.typed(expression, "bool")
             }
             if operator == "&&" || operator == "||" { self.requireCompatible("bool", left, expression.left!.span); self.requireCompatible("bool", right, expression.right!.span); return self.typed(expression, "bool") }
+            if operator == "&" || operator == "|" || operator == "^" || operator == "<<" || operator == ">>" {
+                if !self.isInteger(left) || !self.isInteger(right) { self.error(expression.span, "Operator '" + operator + "' requires integer operands"); return self.typed(expression, "error") }
+                self.requireCompatible(left, right, expression.right!.span)
+                return self.typed(expression, left)
+            }
             if operator == "==" || operator == "!=" {
                 if self.isReference(left) || self.isReference(right) {
                     local compatible = self.isReference(left) && (self.isReference(right) || right == "null")

@@ -1,0 +1,9 @@
+import WebSocket from 'libWebSocket.ar'
+
+entry {{
+    __() -> i32 {
+        local handshake = new WebSocket.Handshake()
+        if handshake.accept("dGhlIHNhbXBsZSBub25jZQ==") != "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" { return 1 }
+        return 0
+    }
+}}

@@ -456,10 +456,14 @@ library Parsing {{
         precedence(kind:string) -> i64 {
             if kind == "OR" { return 1 }
             if kind == "AND" { return 2 }
-            if kind == "EQUAL_EQUAL" || kind == "BANG_EQUAL" || kind == "EQUAL_EQUAL_EQUAL" || kind == "BANG_EQUAL_EQUAL" || kind == "IS" { return 3 }
-            if kind == "LESS" || kind == "LESS_EQUAL" || kind == "GREATER" || kind == "GREATER_EQUAL" { return 4 }
-            if kind == "PLUS" || kind == "MINUS" { return 5 }
-            if kind == "STAR" || kind == "SLASH" { return 6 }
+            if kind == "BIT_OR" { return 3 }
+            if kind == "BIT_XOR" { return 4 }
+            if kind == "BIT_AND" { return 5 }
+            if kind == "EQUAL_EQUAL" || kind == "BANG_EQUAL" || kind == "EQUAL_EQUAL_EQUAL" || kind == "BANG_EQUAL_EQUAL" || kind == "IS" { return 6 }
+            if kind == "LESS" || kind == "LESS_EQUAL" || kind == "GREATER" || kind == "GREATER_EQUAL" { return 7 }
+            if kind == "SHIFT_LEFT" || kind == "SHIFT_RIGHT" { return 8 }
+            if kind == "PLUS" || kind == "MINUS" { return 9 }
+            if kind == "STAR" || kind == "SLASH" { return 10 }
             return 0
         }
 

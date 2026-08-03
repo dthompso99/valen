@@ -283,10 +283,12 @@ library X86Object {{
                 self.operandPrefix(target.size); self.rex(target.size == 8, 0, self.rmIndex(target), self.rmBase(target), false)
                 if mnemonic == "inc" || mnemonic == "dec" { self.byte(255) } else { self.byte(247) }; self.modRm(extension, target); return true
             }
-            if mnemonic == "shl" || mnemonic == "shr" || mnemonic == "rol" {
+            if mnemonic == "shl" || mnemonic == "shr" || mnemonic == "sar" || mnemonic == "rol" {
                 local target = operands[0]; local extension:i64 = 4
-                if mnemonic == "shr" { extension = 5 }; if mnemonic == "rol" { extension = 0 }
+                if mnemonic == "shr" { extension = 5 }; if mnemonic == "sar" { extension = 7 }; if mnemonic == "rol" { extension = 0 }
                 self.operandPrefix(target.size); self.rex(target.size == 8, 0, self.rmIndex(target), self.rmBase(target), false)
+                if operands[1].kind == "register" && operands[1].name == "cl" { self.byte(211); self.modRm(extension, target); return true }
+                if operands[1].kind != "immediate" { return false }
                 self.byte(193); self.modRm(extension, target); self.byte(operands[1].value); return true
             }
             if mnemonic == "imul" {

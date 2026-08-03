@@ -249,26 +249,23 @@ library Compiler {{
             }
             if character == 60 {
                 kind = "LESS"
-                if self.matchByte(61) {
-                    kind = "LESS_EQUAL"
-                }
+                if self.matchByte(60) { kind = "SHIFT_LEFT" }
+                else { if self.matchByte(61) { kind = "LESS_EQUAL" } }
             }
             if character == 62 {
                 kind = "GREATER"
-                if self.matchByte(61) {
-                    kind = "GREATER_EQUAL"
-                }
+                if self.matchByte(62) { kind = "SHIFT_RIGHT" }
+                else { if self.matchByte(61) { kind = "GREATER_EQUAL" } }
             }
             if character == 38 {
-                if self.matchByte(38) {
-                    kind = "AND"
-                }
+                kind = "BIT_AND"
+                if self.matchByte(38) { kind = "AND" }
             }
             if character == 124 {
-                if self.matchByte(124) {
-                    kind = "OR"
-                }
+                kind = "BIT_OR"
+                if self.matchByte(124) { kind = "OR" }
             }
+            if character == 94 { kind = "BIT_XOR" }
             if character == 43 { kind = "PLUS" }
             if character == 42 { kind = "STAR" }
             if character == 47 { kind = "SLASH" }

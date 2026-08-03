@@ -995,6 +995,7 @@ export class SemanticAnalyzer {
                     break;
                 }
                 const logical = expression.operator === '&&' || expression.operator === '||';
+                const bitwise = ['&', '|', '^', '<<', '>>'].includes(expression.operator);
                 const identity = expression.operator === '===' || expression.operator === '!==';
                 const comparison = identity || ['==', '!=', '<', '<=', '>', '>='].includes(expression.operator);
                 if (identity) {
@@ -1023,6 +1024,11 @@ export class SemanticAnalyzer {
                     this.requireAssignable(left, BOOL, expression.left.span, expression.left);
                     this.requireAssignable(right, BOOL, expression.right.span, expression.right);
                     type = BOOL;
+                } else if (bitwise) {
+                    if (!integerTypes.has(left) || !integerTypes.has(right)) {
+                        this.report(expression.span, `Operator '${expression.operator}' requires integer operands`);
+                    } else this.requireAssignable(right, left, expression.right.span, expression.right);
+                    type = left;
                 } else if (['==', '!='].includes(expression.operator) && this.isReferenceType(left) && this.isReferenceType(right)) {
                     const compatible = left === right || this.conformsTo(left, right) || this.conformsTo(right, left);
                     if (!compatible) this.report(expression.span, `Structural equality requires compatible references, got '${left}' and '${right}'`);

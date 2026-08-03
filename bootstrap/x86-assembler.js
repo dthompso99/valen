@@ -281,8 +281,13 @@ function encodeInstruction(sink, mnemonic, operands) {
         const extension = {neg: 3, div: 6, idiv: 7, inc: 0, dec: 1}[mnemonic];
         const bits = rmRexBits(left); operandPrefix(sink, left.size); rex(sink, {w: left.size === 8, ...bits}); sink.emit(mnemonic === 'inc' || mnemonic === 'dec' ? 0xff : 0xf7); encodeModRm(sink, extension, left); return;
     }
-    if (mnemonic === 'shl' || mnemonic === 'shr' || mnemonic === 'rol') {
-        const bits = rmRexBits(left); operandPrefix(sink, left.size); rex(sink, {w: left.size === 8, ...bits}); sink.emit(0xc1); encodeModRm(sink, mnemonic === 'rol' ? 0 : mnemonic === 'shl' ? 4 : 5, left); sink.emit(Number(right.value & 255n)); return;
+    if (mnemonic === 'shl' || mnemonic === 'shr' || mnemonic === 'sar' || mnemonic === 'rol') {
+        const bits = rmRexBits(left);
+        const extension = mnemonic === 'rol' ? 0 : mnemonic === 'shl' ? 4 : mnemonic === 'shr' ? 5 : 7;
+        operandPrefix(sink, left.size); rex(sink, {w: left.size === 8, ...bits});
+        if (right.kind === 'reg' && right.name === 'cl') { sink.emit(0xd3); encodeModRm(sink, extension, left); return; }
+        if (right.kind !== 'imm') throw new Error(`Shift count must be an immediate or cl`);
+        sink.emit(0xc1); encodeModRm(sink, extension, left); sink.emit(Number(right.value & 255n)); return;
     }
     if (mnemonic === 'imul') {
         if (!right) { const bits = rmRexBits(left); rex(sink, {w: true, ...bits}); sink.emit(0xf7); encodeModRm(sink, 5, left); return; }

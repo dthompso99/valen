@@ -1,0 +1,13 @@
+entry {{
+    __() -> i32 {
+        local left:i64 = 240
+        local right:i64 = 204
+        local shift:i64 = 2
+        if (left & right) != 192 { return 1 }
+        if (left | right) != 252 { return 2 }
+        if (left ^ right) != 60 { return 3 }
+        if (60 << shift) != 240 { return 4 }
+        if (left >> shift) != 60 { return 5 }
+        return 0
+    }
+}}

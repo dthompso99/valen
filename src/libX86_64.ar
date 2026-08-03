@@ -787,6 +787,14 @@ library X86_64 {{
             if operator == "*" { self.writer.line("    imul rax, rcx") }
             if operator == "&&" { self.writer.line("    and rax, rcx") }
             if operator == "||" { self.writer.line("    or rax, rcx") }
+            if operator == "&" { self.writer.line("    and rax, rcx") }
+            if operator == "|" { self.writer.line("    or rax, rcx") }
+            if operator == "^" { self.writer.line("    xor rax, rcx") }
+            if operator == "<<" { self.writer.line("    shl rax, cl") }
+            if operator == ">>" {
+                if self.isUnsigned(instruction.first!.typeName) { self.writer.line("    shr rax, cl") }
+                else { self.writer.line("    sar rax, cl") }
+            }
             if operator == "/" {
                 self.writer.line("    test rcx, rcx")
                 self.writer.line("    jz .Ldivision_by_zero_error")
