@@ -6,13 +6,13 @@ This guide documents syntax implemented by the current compiler. Features marked
 
 Source files use the `.ar` extension. Import a named library from another source file:
 
-```argon
+```valen
 import System from 'libSystem.ar'
 ```
 
-Resolution checks the importing file’s directory and then directories in `ARGON_LIBRARY_PATH`.
+Resolution checks the importing file’s directory and then directories in `VALEN_LIBRARY_PATH`.
 
-```argon
+```valen
 library Tools {{
     useful() -> bool { return true }
 }}
@@ -25,7 +25,7 @@ Package metadata, library versions, compiled modules, and finalized search-path 
 `libNetwork.ar` provides blocking TCP sockets through the target runtime. On x86-64 Linux these
 operations use kernel syscalls directly and do not require libc or another shared library:
 
-```argon
+```valen
 local listener = Network.listen(8080, 16)
 local connection = Network.accept(listener!)
 local request = Network.receive(connection!, 4096)
@@ -42,7 +42,7 @@ TLS and production protocol handling are **WIP**.
 
 Objects use doubled braces:
 
-```argon
+```valen
 Engine {{
     member version:i64
 
@@ -56,7 +56,7 @@ Engine {{
 
 Create an object with `new`:
 
-```argon
+```valen
 local engine = new Engine()
 ```
 
@@ -66,7 +66,7 @@ Fields are allocated and zero-initialized before `__` runs. Members and methods 
 
 `inherits` takes on a parent’s fields and methods. A compatible child method automatically overrides the parent method.
 
-```argon
+```valen
 Animal {{
     describe() -> string { return "animal" }
 }}
@@ -79,9 +79,9 @@ Dog inherits Animal {{
 
 Parent fields are laid out before child fields. `super()` optionally calls the parent constructor.
 
-Argon uses ordinary object declarations as contracts:
+Valen uses ordinary object declarations as contracts:
 
-```argon
+```valen
 Printable {{
     print() -> void {}
 }}
@@ -107,7 +107,7 @@ Implemented primitive types include:
 
 Conversions are explicit:
 
-```argon
+```valen
 local small:i32 = 10
 local wide = small as i64
 local decimal = wide as f64
@@ -117,7 +117,7 @@ Implicit mixed-width numeric promotion is **WIP**. Strings currently expose UTF-
 
 ## Locals and control flow
 
-```argon
+```valen
 local total:i64 = 0
 
 while total < 10 {
@@ -131,7 +131,7 @@ Parentheses around conditions are optional. Statements may be separated by newli
 
 Arrays and strings support `for` iteration:
 
-```argon
+```valen
 local values = new Array<i64>(0)
 values.append(4)
 values.append(8)
@@ -147,16 +147,16 @@ for value in values {
 
 Arrays are dynamically sized:
 
-```argon
+```valen
 local names = new Array<string>(0)
-names.append("argon")
+names.append("valen")
 local first = names[0]
 local count = names.length
 ```
 
 Generic objects are monomorphized:
 
-```argon
+```valen
 Box<T> {{
     member value:T
     __(value:T) -> void { self.value = value }
@@ -173,7 +173,7 @@ Strings support byte indexing, length, equality, concatenation, slicing, integer
 
 Reference optionals use `?`:
 
-```argon
+```valen
 local engine:Engine? = null
 if engine != null {
     engine!.start()
@@ -186,7 +186,7 @@ if engine != null {
 
 New objects and ordinary object fields are owning references. Passing an object normally borrows it; an `own` parameter transfers ownership:
 
-```argon
+```valen
 Store {{
     member engine:Engine?
     keep(own engine:Engine) -> void { self.engine = engine }
@@ -195,13 +195,13 @@ Store {{
 
 Use `copy` for a cycle-safe structural copy:
 
-```argon
+```valen
 local second = copy engine
 ```
 
 Non-owning members are explicit:
 
-```argon
+```valen
 member ref observer:Observer?
 member weak cached:Engine?
 ```
@@ -218,7 +218,7 @@ Weak references become `null` after logical destruction. `delete value` performs
 
 All ordinary method calls are synchronous. Work that may finish later returns an `Operations.Operation`:
 
-```argon
+```valen
 local executor:Operations.Executor = new Operations.InlineExecutor()
 local operation = executor.submit(new MyWork())
 local result = operation.wait()
@@ -234,7 +234,7 @@ are **WIP**.
 
 Compiler-provided runtime methods use `native`. C ABI calls identify a library and must be called inside `unsafe`:
 
-```argon
+```valen
 library Posix {{
     unsafe native processId() -> i32 from "c" as "getpid"
 }}
@@ -249,9 +249,9 @@ See the [FFI reference](../ffi.md) for supported boundary types.
 
 ## Tests
 
-Argon has source-level tests:
+Valen has source-level tests:
 
-```argon
+```valen
 test arithmetic {{
     addition() -> void {
         expect(2 + 2 == 4)

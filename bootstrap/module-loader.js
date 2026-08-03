@@ -3,7 +3,7 @@ import path from 'path';
 import {Parser} from './parser.js';
 
 export class ModuleLoader {
-    constructor({sourceRoot, libraryPath = process.env.ARGON_LIBRARY_PATH} = {}) {
+    constructor({sourceRoot, libraryPath = process.env.VALEN_LIBRARY_PATH ?? process.env.ARGON_LIBRARY_PATH} = {}) {
         this.sourceRoot = sourceRoot ? path.resolve(sourceRoot) : null;
         this.libraryPaths = (libraryPath ?? '').split(path.delimiter).filter(Boolean).map(entry => path.resolve(entry));
         this.modules = new Map();

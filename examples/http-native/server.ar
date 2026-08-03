@@ -7,14 +7,14 @@ entry {{
         System.enableProcessArena()
         local listener = Network.listen(8080, 16)
         if listener == null {
-            System.writeError("argon-http: listen failed\n")
+            System.writeError("valen-http: listen failed\n")
             return 1
         }
         if !Network.makeListenerNonblocking(listener!) {
             Network.closeListener(listener!)
             return 2
         }
-        System.write("argon-http: serving four requests on http://127.0.0.1:8080\n")
+        System.write("valen-http: serving four requests on http://127.0.0.1:8080\n")
         local descriptors = new Array<i64>(0)
         local interests = new Array<i64>(0)
         descriptors.append(Network.listenerDescriptor(listener!))
@@ -28,7 +28,7 @@ entry {{
             local result = self.serve(listener!)
             if result != 0 {
                 Network.closeListener(listener!)
-                System.writeError("argon-http: request failed\n")
+                System.writeError("valen-http: request failed\n")
                 System.print(result)
                 return 4
             }
@@ -46,7 +46,7 @@ entry {{
             Network.closeConnection(connection!)
             return Network.lastError()
         }
-        local response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\nConnection: close\r\n\r\nHello, Argon!"
+        local response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\nConnection: close\r\n\r\nHello, Valen!"
         if Network.send(connection!, response) != response.length {
             Network.closeConnection(connection!)
             return Network.lastError()

@@ -2,16 +2,16 @@
 
 ## Verified baseline
 
-- The JavaScript bootstrap compiler and Argon compiler both support inheritance, contracts, inherited fields, constructor chaining, subtyping, runtime type checks, checked downcasts, virtual dispatch, and direct `super.method()` calls.
+- The JavaScript bootstrap compiler and Valen compiler both support inheritance, contracts, inherited fields, constructor chaining, subtyping, runtime type checks, checked downcasts, virtual dispatch, and direct `super.method()` calls.
 - `cd bootstrap && npm test` passes 22 tests; one executable test is skipped when Node cannot spawn `cc` in the sandbox.
-- Executables generated through both the bootstrap and native Argon compiler pass the inheritance and subtype fixtures with exit status 0.
+- Executables generated through both the bootstrap and native Valen compiler pass the inheritance and subtype fixtures with exit status 0.
 - The multi-module operation-contract stress fixture passes through both compilers and native execution. It covers inherited and multiple contracts, identity, runtime checks, checked recovery, fields, arrays, parameters, returns, cancellation state, progress, and explicit waiting.
 
 ## Start here
 
 1. Build on the completed one-word contract-reference and dispatch model:
 
-   ```argon
+   ```valen
    local printable:Printable = new Report()
    printable.print()
    ```

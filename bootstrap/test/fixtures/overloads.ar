@@ -32,11 +32,11 @@ entry {{
     __() -> i32 {
         local number = new Base(7)
         local text = new Base("four")
-        local child = new Child(10, "argon")
+        local child = new Child(10, "valen")
         if number.value != 7 { return 1 }
         if text.value != 4 { return 2 }
         if child.add(2, 3) != 6 { return 3 }
-        if child.add("ar", "gon") != "argon" { return 4 }
+        if child.add("ar", "gon") != "valen" { return 4 }
         local chooser = new Chooser()
         if chooser.choose(new Puppy()) != 2 { return 5 }
         return 0

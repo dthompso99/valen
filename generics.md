@@ -1,8 +1,8 @@
 # Generic objects
 
-Argon generic objects declare one or more type parameters after the object name:
+Valen generic objects declare one or more type parameters after the object name:
 
-```argon
+```valen
 Pair<Left, Right> {{
     member left:Left
     member right:Right
@@ -11,7 +11,7 @@ Pair<Left, Right> {{
 
 A generic object must always be specialized with the exact number of arguments:
 
-```argon
+```valen
 local pair:Pair<string, i64>
 local box = new Box<Engine>(engine)
 ```

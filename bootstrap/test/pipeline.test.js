@@ -66,9 +66,9 @@ entry {{
 const stringProgram = `
 entry {{
     __() -> i64 {
-        local joined:string = "ar" + "gon"
+        local joined:string = "va" + "len"
         local sliced:string = joined.slice(1, 3)
-        if joined.length == 5 && joined[1] == 114 && joined == "argon" && joined != "other" && sliced == "rgo" {
+        if joined.length == 5 && joined[1] == 97 && joined == "valen" && joined != "other" && sliced == "ale" {
             return 0
         } else {
             return 1
@@ -200,9 +200,9 @@ test('process arguments and exit lower to native runtime facilities', () => {
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     const ir = new IrGenerator().generate(semantic);
     const assembly = new X86_64Backend().generate(ir);
-    assert.match(assembly, /argon_System_arguments:/);
-    assert.match(assembly, /argon_System_exit:/);
-    assert.match(assembly, /argon_process_argv/);
+    assert.match(assembly, /valen_System_arguments:/);
+    assert.match(assembly, /valen_System_exit:/);
+    assert.match(assembly, /valen_process_argv/);
 });
 
 test('standard output and error lower to distinct native descriptors', () => {
@@ -210,8 +210,8 @@ test('standard output and error lower to distinct native descriptors', () => {
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
-    assert.match(assembly, /argon_System_write:[\s\S]*?mov edi, 1/);
-    assert.match(assembly, /argon_System_writeError:[\s\S]*?mov edi, 2/);
+    assert.match(assembly, /valen_System_write:[\s\S]*?mov edi, 1/);
+    assert.match(assembly, /valen_System_writeError:[\s\S]*?mov edi, 2/);
 });
 
 test('file operations lower to native open, read, write, and close facilities', () => {
@@ -220,7 +220,7 @@ test('file operations lower to native open, read, write, and close facilities', 
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
     for (const symbol of ['openRead', 'openWrite', 'read', 'writeFile', 'close']) {
-        assert.match(assembly, new RegExp(`argon_System_${symbol}:`));
+        assert.match(assembly, new RegExp(`valen_System_${symbol}:`));
     }
 });
 
@@ -229,7 +229,7 @@ test('self-hosted ELF writer lowers binary object output without string conversi
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
-    assert.match(assembly, /argon_System_writeBytes:/);
+    assert.match(assembly, /valen_System_writeBytes:/);
     assert.match(assembly, /mov rsi, QWORD PTR \[rsi\+16\]/);
 });
 
@@ -241,7 +241,7 @@ test('native networking lowers socket lifecycle operations without foreign libra
     assert.deepEqual(ir.foreignLibraries, []);
     const assembly = new X86_64Backend().generate(ir);
     for (const symbol of ['listen', 'accept', 'receive', 'send', 'closeListener', 'closeConnection', 'lastError']) {
-        assert.match(assembly, new RegExp(`argon_Network_${symbol}:`));
+        assert.match(assembly, new RegExp(`valen_Network_${symbol}:`));
     }
     for (const syscall of [41, 49, 50, 43]) assert.match(assembly, new RegExp(`mov eax, ${syscall}`));
 });
@@ -285,7 +285,7 @@ test('unsafe native operations require an explicit lexical unsafe boundary', () 
     assert.equal(valid.success, true, JSON.stringify(valid.diagnostics));
     const ir = new IrGenerator().generate(valid);
     assert.ok(ir.externals.some(external => external.displayName === 'Raw.touch'));
-    assert.throws(() => new X86_64Backend().generate(ir), /runtime does not provide argon_Raw_touch/);
+    assert.throws(() => new X86_64Backend().generate(ir), /runtime does not provide valen_Raw_touch/);
 
     const invalid = new SemanticAnalyzer().analyze(new Parser().parse(`
         library Raw {{ unsafe native touch(bytes:Array<u8>) -> void }}
@@ -406,14 +406,14 @@ test('runtime paths, filesystem errors, allocation checks, and memory operations
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
     for (const symbol of ['lastError', 'currentDirectory', 'memoryCopy', 'memoryCompare']) {
-        assert.match(assembly, new RegExp(`argon_System_${symbol}:`));
+        assert.match(assembly, new RegExp(`valen_System_${symbol}:`));
     }
     assert.match(assembly, /\.Lallocation_error:/);
-    assert.match(assembly, /argon_arena_cursor:/);
-    assert.match(assembly, /argon_System_enableProcessArena:/);
+    assert.match(assembly, /valen_arena_cursor:/);
+    assert.match(assembly, /valen_System_enableProcessArena:/);
     assert.match(assembly, /mov rsi, 1048576/);
     assert.match(assembly, /lea r12, \[rdi\+15\]/);
-    assert.match(assembly, /argon_gc_array_finalize:\n    cmp DWORD PTR \[rip\+argon_arena_enabled\], 0/);
+    assert.match(assembly, /valen_gc_array_finalize:\n    cmp DWORD PTR \[rip\+valen_arena_enabled\], 0/);
     assert.match(assembly, /\.Lalloc_direct:/);
 });
 
@@ -444,8 +444,8 @@ test('contract dispatch preserves register and stack arguments', () => {
     assert.match(assembly, /mov r11, QWORD PTR \[rax\+\d+\][\s\S]*call r11/);
 });
 
-test('Argon compiler source foundation and tokenizer load and lower', () => {
-    const filePath = path.join(projectRoot, 'src/argon.ar');
+test('Valen compiler source foundation and tokenizer load and lower', () => {
+    const filePath = path.join(projectRoot, 'src/valen.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     const ir = new IrGenerator().generate(semantic);
@@ -482,7 +482,7 @@ test('Argon compiler source foundation and tokenizer load and lower', () => {
     assert.doesNotThrow(() => new X86_64Backend().generate(ir));
 });
 
-test('module imports fall back to ARGON_LIBRARY_PATH after importer-relative resolution', () => {
+test('module imports fall back to VALEN_LIBRARY_PATH after importer-relative resolution', () => {
     const fixtureRoot = path.join(projectRoot, 'bootstrap/test/fixtures/library-path');
     const semantic = new SemanticAnalyzer().analyzeFile(path.join(fixtureRoot, 'app/main.ar'), {
         sourceRoot: fixtureRoot,
@@ -492,7 +492,7 @@ test('module imports fall back to ARGON_LIBRARY_PATH after importer-relative res
     assert.ok([...semantic.modules.values()].some(module => module.path.endsWith('/lib/shared.ar')));
 });
 
-test('Argon symbols support duplicate checks, parent lookup, and shadowing', () => {
+test('Valen symbols support duplicate checks, parent lookup, and shadowing', () => {
     const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/native-symbols.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
@@ -592,7 +592,7 @@ test('native synchronization and single-worker execution lower through the porta
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     const ir = new IrGenerator().generate(semantic);
     const assembly = new X86_64Backend().generate(ir);
-    assert.match(assembly, /argon_Operations_threadStart:/);
+    assert.match(assembly, /valen_Operations_threadStart:/);
     assert.match(assembly, /call pthread_create/);
     assert.match(assembly, /lock cmpxchg DWORD PTR/);
     assert.match(assembly, /lock xadd QWORD PTR/);
@@ -603,8 +603,8 @@ test('readiness work lowers through the event-loop executor and poll runtime', (
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
-    assert.match(assembly, /argon_EventLoop_available:/);
-    assert.match(assembly, /argon_EventLoop_wait:[\s\S]*?mov eax, 7/);
+    assert.match(assembly, /valen_EventLoop_available:/);
+    assert.match(assembly, /valen_EventLoop_wait:[\s\S]*?mov eax, 7/);
 });
 
 test('members default public while private members stay owner-only and non-virtual', () => {
@@ -850,7 +850,7 @@ test('array insertion transfers element ownership through semantic analysis and 
     assert.ok(instructions.some(instruction => instruction.op === 'array_store' && instruction.elementOwnership === 'owned'));
     assert.ok(instructions.some(instruction => instruction.op === 'array_load' && instruction.elementOwnership === 'weak'));
     const assembly = new X86_64Backend().generate(ir);
-    assert.match(assembly, /call argon_array_append/);
+    assert.match(assembly, /call valen_array_append/);
     assert.match(assembly, /mov QWORD PTR \[rdx\+8\], 0/);
     assert.match(assembly, /cmp QWORD PTR \[rax\+8\], 0/);
 });
@@ -860,12 +860,12 @@ test('managed objects publish precise roots, trace callbacks, and runtime finali
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot, libraryPath: path.join(projectRoot, 'lib')});
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
-    assert.match(assembly, /argon_gc_roots/);
-    assert.match(assembly, /call argon_gc_mark/);
-    assert.match(assembly, /argon_gc_collect:/);
-    assert.match(assembly, /argon_gc_array_finalize:/);
+    assert.match(assembly, /valen_gc_roots/);
+    assert.match(assembly, /call valen_gc_mark/);
+    assert.match(assembly, /valen_gc_collect:/);
+    assert.match(assembly, /valen_gc_array_finalize:/);
     assert.match(assembly, /call rax\n\.Lgc_unmap:/);
-    assert.match(assembly, /argon_System_collectGarbage:/);
+    assert.match(assembly, /valen_System_collectGarbage:/);
 });
 
 test('UTF-8 strings support length, byte indexing, equality, concatenation, and slicing', () => {
@@ -916,10 +916,10 @@ test('test suites lower expectations into a native failure-counting runner', () 
     const semantic = new SemanticAnalyzer().analyze(new Parser().parse(source, 'tests.ar'));
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     const ir = new IrGenerator().generate(semantic);
-    assert.equal(ir.entry, '$argon.test.run');
+    assert.equal(ir.entry, '$valen.test.run');
     assert.equal(ir.functions.filter(fn => fn.name.startsWith('arithmetic.')).length, 2);
     assert.ok(ir.functions.flatMap(fn => fn.blocks).flatMap(block => block.instructions).some(instruction => instruction.op === 'test_expect'));
-    assert.match(new X86_64Backend().generate(ir), /argon_test_failures/);
+    assert.match(new X86_64Backend().generate(ir), /valen_test_failures/);
 });
 
 test('expect is rejected outside test suites', () => {
@@ -986,7 +986,7 @@ test('IR validation rejects malformed control flow and calls before assembly', (
 test('generated primitive executable is self-starting and has no implicit shared libraries', t => {
     const semantic = new SemanticAnalyzer().analyze(new Parser().parse(primitiveProgram, 'primitives.ar'));
     const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'argon-test-'));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-test-'));
     const assemblyPath = path.join(directory, 'primitives.s');
     const executablePath = path.join(directory, 'primitives');
     fs.writeFileSync(assemblyPath, assembly);

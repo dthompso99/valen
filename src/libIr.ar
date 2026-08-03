@@ -385,9 +385,9 @@ library Ir {{
                 moduleIndex = moduleIndex + 1
             }
             if testCount == 0 { return }
-            local owner = "$argon.test.runner"
+            local owner = "$valen.test.runner"
             self.program.types.append(new Type(owner, owner))
-            self.beginFunction("$argon.test.run", "$argon.test.run", owner, "i64")
+            self.beginFunction("$valen.test.run", "$valen.test.run", owner, "i64")
             self.currentFunction!.parameters.append(new Parameter("self", owner))
             moduleIndex = 0
             while moduleIndex < self.analysis.graph.modules.length {
@@ -415,7 +415,7 @@ library Ir {{
             local returned = new Instruction("return")
             returned.first = failures.result
             self.emit(returned)
-            self.program.entry = "$argon.test.run"
+            self.program.entry = "$valen.test.run"
             self.finishFunction()
         }
 
@@ -599,7 +599,7 @@ library Ir {{
                 if method.foreignLibrary != null { runtimeName = method.foreignSymbol! }
                 local external = new ExternalFunction(symbol.qualifiedName, symbol.qualifiedName, runtimeName, symbol.returnType!)
                 external.foreignLibrary = method.foreignLibrary
-                if runtimeName == "argon_Operations_threadStart" {
+                if runtimeName == "valen_Operations_threadStart" {
                     self.addForeignLibrary("pthread")
                     self.addForeignLibrary("c")
                 }
@@ -882,7 +882,7 @@ library Ir {{
         }
 
         runtimeName(symbol:Symbols.Symbol) -> string {
-            return "argon_" + symbol.owner!.name + "_" + symbol.name
+            return "valen_" + symbol.owner!.name + "_" + symbol.name
         }
 
         lowerExpression(expression:Ast.Expression) -> ref Value {

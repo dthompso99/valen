@@ -1,14 +1,14 @@
 # Contributor and agent guide
 
-This page is for humans and coding agents making changes to Argon.
+This page is for humans and coding agents making changes to Valen.
 
 ## Start with the current implementation
 
-Read the relevant bootstrap and self-hosted files before editing. Argon intentionally evolves in small, testable steps; do not infer syntax from another language when the fixtures and compiler can answer the question.
+Read the relevant bootstrap and self-hosted files before editing. Valen intentionally evolves in small, testable steps; do not infer syntax from another language when the fixtures and compiler can answer the question.
 
 ## Preserve the bootstrap boundary
 
-The JavaScript compiler only needs enough capability to compile the native Argon compiler. A feature may be implemented only in the native language/library when generation 0 does not need to parse or lower it.
+The JavaScript compiler only needs enough capability to compile the native Valen compiler. A feature may be implemented only in the native language/library when generation 0 does not need to parse or lower it.
 
 Before using a new language construct inside `src/`, confirm the JavaScript bootstrap supports it. Otherwise generation 0 will stop building generation 1.
 

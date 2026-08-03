@@ -6,49 +6,49 @@ RUN npm install --omit=dev
 COPY bootstrap/ ./
 COPY src/ ./src/
 COPY lib/ ./lib/
-ENV ARGON_LIBRARY_PATH=/app/lib
+ENV VALEN_LIBRARY_PATH=/app/lib
 
 RUN mkdir dist
-RUN ["node", "compiler.js", "src/argon.ar", "dist/argon"]
-CMD ["ls", "-l", "dist/argon"]
+RUN ["node", "compiler.js", "src/valen.ar", "dist/valen"]
+CMD ["ls", "-l", "dist/valen"]
 
 FROM alpine:3.20 AS stage2
 RUN apk update && apk add --no-cache build-base
 WORKDIR /app
-COPY --from=bootstrap /app/dist/argon .
-RUN chmod +x argon
+COPY --from=bootstrap /app/dist/valen .
+RUN chmod +x valen
 COPY src/ ./src/
 COPY lib/ ./lib/
 
-ENV ARGON_LIBRARY_PATH=/app/lib
+ENV VALEN_LIBRARY_PATH=/app/lib
 RUN mkdir dist
-RUN ["./argon", "src/argon.ar", "-o", "dist/argon"]
+RUN ["./valen", "src/valen.ar", "-o", "dist/valen"]
 RUN ls -al dist
 
 
 FROM alpine:3.20 AS stage3
 RUN apk update && apk add --no-cache build-base
 WORKDIR /app
-COPY --from=stage2 /app/dist/argon .
+COPY --from=stage2 /app/dist/valen .
 #for now, we'll use stage3 as a testing stage.
 COPY examples/ ./examples/
 COPY bootstrap/test/fixtures/native-tests.ar ./tests/native-tests.ar
 COPY bootstrap/test/fixtures/native-tests-failing.ar ./tests/native-tests-failing.ar
 COPY lib/ ./lib/
-ENV ARGON_LIBRARY_PATH=/app/lib
+ENV VALEN_LIBRARY_PATH=/app/lib
 RUN mkdir dist
 RUN ls -al ./examples
-RUN ["./argon", "examples/simple/simple.ar", "-o", "dist/simple"]
+RUN ["./valen", "examples/simple/simple.ar", "-o", "dist/simple"]
 RUN ["dist/simple"]
-RUN ["./argon", "examples/nested/nested.ar", "-o", "dist/nested"]
+RUN ["./valen", "examples/nested/nested.ar", "-o", "dist/nested"]
 RUN ["dist/nested"]
-RUN ["./argon", "tests/native-tests.ar", "-o", "dist/native-tests"]
+RUN ["./valen", "tests/native-tests.ar", "-o", "dist/native-tests"]
 RUN ["dist/native-tests"]
-RUN ["./argon", "tests/native-tests-failing.ar", "-o", "dist/native-tests-failing"]
+RUN ["./valen", "tests/native-tests-failing.ar", "-o", "dist/native-tests-failing"]
 RUN /bin/sh -c 'dist/native-tests-failing >/tmp/test.stdout 2>/tmp/test.stderr; status=$?; test "$status" -eq 1; grep -q "test failed" /tmp/test.stderr'
 RUN ls -al dist
 CMD ["/bin/sh"]
 
 FROM scratch AS scratch-runtime
-COPY --from=stage3 /app/dist/simple /argon-smoke
-ENTRYPOINT ["/argon-smoke"]
+COPY --from=stage3 /app/dist/simple /valen-smoke
+ENTRYPOINT ["/valen-smoke"]

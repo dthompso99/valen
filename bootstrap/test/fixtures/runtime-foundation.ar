@@ -13,7 +13,7 @@ entry {{
             return 3
         }
 
-        local missing = System.openRead("/path/that/argon/does/not/have")
+        local missing = System.openRead("/path/that/valen/does/not/have")
         if missing != null || System.lastError() == 0 {
             return 4
         }

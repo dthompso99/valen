@@ -62,10 +62,12 @@ entry {{
 
         local cwd = System.currentDirectory()
         if cwd == null {
-            System.writeError("argon: could not determine current directory\n")
+            System.writeError("valen: could not determine current directory\n")
             return 74
         }
-        local loader = new ModuleLoading.ModuleLoader(cwd!, System.environmentVariable("ARGON_LIBRARY_PATH"))
+        local libraryPath = System.environmentVariable("VALEN_LIBRARY_PATH")
+        if libraryPath == null { libraryPath = System.environmentVariable("ARGON_LIBRARY_PATH") }
+        local loader = new ModuleLoading.ModuleLoader(cwd!, libraryPath)
         local graph = loader.load(sourcePath!)
         if graph.diagnostics.hasErrors() {
             Diagnostics.write(graph.diagnostics)
@@ -78,7 +80,7 @@ entry {{
                 if emitObjectOnly { return self.emitObject(cached!.assembly, outputPath!) }
                 local cachedLinkResult = self.link(cached!.assembly, outputPath!, cached!.libraries)
                 if cachedLinkResult != 0 {
-                    System.writeError("argon: linker exited with status ")
+                    System.writeError("valen: linker exited with status ")
                     System.writeError(cachedLinkResult.toString())
                     System.writeError("\n")
                     return 69
@@ -100,7 +102,7 @@ entry {{
         if irErrors.length > 0 {
             local errorIndex:i64 = 0
             while errorIndex < irErrors.length {
-                System.writeError("argon: invalid IR: ")
+                System.writeError("valen: invalid IR: ")
                 System.writeError(irErrors[errorIndex])
                 System.writeError("\n")
                 errorIndex = errorIndex + 1
@@ -117,7 +119,7 @@ entry {{
         if runtimeErrors.length > 0 {
             local runtimeErrorIndex:i64 = 0
             while runtimeErrorIndex < runtimeErrors.length {
-                System.writeError("argon: target: ")
+                System.writeError("valen: target: ")
                 System.writeError(runtimeErrors[runtimeErrorIndex])
                 System.writeError("\n")
                 runtimeErrorIndex = runtimeErrorIndex + 1
@@ -130,7 +132,7 @@ entry {{
             if emitObjectOnly { return self.emitObject(assembly, outputPath!) }
             local linkResult = self.link(assembly, outputPath!, ir.foreignLibraries)
             if linkResult != 0 {
-                System.writeError("argon: linker exited with status ")
+                System.writeError("valen: linker exited with status ")
                 System.writeError(linkResult.toString())
                 System.writeError("\n")
                 return 69
@@ -145,7 +147,7 @@ entry {{
         local assembler = new X86Object.Assembler()
         local object = assembler.assemble(assembly)
         if object == null {
-            System.writeError("argon: native object encoder does not support generated assembly: "); System.writeError(assembler.error); System.writeError("\n")
+            System.writeError("valen: native object encoder does not support generated assembly: "); System.writeError(assembler.error); System.writeError("\n")
             return 69
         }
         if !self.writeObject(objectPath, object!) { return 74 }
@@ -168,12 +170,12 @@ entry {{
     writeObject(path:string, object:Array<u8>) -> bool {
         local output = System.openWrite(path)
         if output == null {
-            System.writeError("argon: could not open object output; OS error "); System.writeError(System.lastError().toString()); System.writeError("\n"); return false
+            System.writeError("valen: could not open object output; OS error "); System.writeError(System.lastError().toString()); System.writeError("\n"); return false
         }
         local written = System.writeBytes(output!, object)
         local closeResult = System.close(output!)
         if written != object.length || closeResult != 0 {
-            System.writeError("argon: could not write object output; OS error "); System.writeError(System.lastError().toString()); System.writeError("\n"); return false
+            System.writeError("valen: could not write object output; OS error "); System.writeError(System.lastError().toString()); System.writeError("\n"); return false
         }
         return true
     }
@@ -181,7 +183,7 @@ entry {{
     writeAssembly(path:string, assembly:string) -> bool {
         local output = System.openWrite(path)
         if output == null {
-            System.writeError("argon: could not open '")
+            System.writeError("valen: could not open '")
             System.writeError(path)
             System.writeError("' for writing; OS error ")
             System.writeError(System.lastError().toString())
@@ -191,7 +193,7 @@ entry {{
         local written = System.writeFile(output!, assembly)
         local closeResult = System.close(output!)
         if written != assembly.length || closeResult != 0 {
-            System.writeError("argon: could not write assembly output; OS error ")
+            System.writeError("valen: could not write assembly output; OS error ")
             System.writeError(System.lastError().toString())
             System.writeError("\n")
             return false
@@ -201,10 +203,10 @@ entry {{
 
     writeUsage() -> void {
         System.write("usage:\n")
-        System.write("  argon <source-file>\n")
-        System.write("  argon <source-file> -o <executable>\n")
-        System.write("  argon --check <source-file>\n")
-        System.write("  argon --emit-ir <source-file>\n")
-        System.write("  argon --emit-object <source-file> -o <object-file>\n")
+        System.write("  valen <source-file>\n")
+        System.write("  valen <source-file> -o <executable>\n")
+        System.write("  valen --check <source-file>\n")
+        System.write("  valen --emit-ir <source-file>\n")
+        System.write("  valen --emit-object <source-file> -o <object-file>\n")
     }
 }}

@@ -1,6 +1,6 @@
 # Operation model
 
-All ordinary Argon calls are synchronous. A method represents unfinished work by returning an object implementing `Operations.Operation`; threading, event loops, child processes, interrupts, or inline execution are hidden execution policies.
+All ordinary Valen calls are synchronous. A method represents unfinished work by returning an object implementing `Operations.Operation`; threading, event loops, child processes, interrupts, or inline execution are hidden execution policies.
 
 ## State
 

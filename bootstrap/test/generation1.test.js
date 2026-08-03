@@ -11,11 +11,11 @@ import {compileOnlyPrograms, expectedFailures, invalidPrograms, targetFailures, 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 test('generation 1 passes the native compiler conformance suite', async t => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'argon-generation1-'));
-    const compilerPath = path.join(directory, 'argon');
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-generation1-'));
+    const compilerPath = path.join(directory, 'valen');
     try {
         try {
-            new Compiler().compile(path.join(projectRoot, 'src/argon.ar'), compilerPath, {sourceRoot: projectRoot});
+            new Compiler().compile(path.join(projectRoot, 'src/valen.ar'), compilerPath, {sourceRoot: projectRoot});
         } catch (error) {
             if (error?.code === 'EPERM') {
                 t.skip('process sandbox does not allow Node to spawn the system compiler');
@@ -28,7 +28,7 @@ test('generation 1 passes the native compiler conformance suite', async t => {
         assert.equal(compilerObject.status, 0, compilerObject.stderr);
         assert.match(compilerObject.stdout, /Type:\s+REL/);
 
-        const environment = {...process.env, ARGON_LIBRARY_PATH: path.join(projectRoot, 'lib')};
+        const environment = {...process.env, VALEN_LIBRARY_PATH: path.join(projectRoot, 'lib')};
         const compilerDynamic = spawnSync('readelf', ['-d', compilerPath], {encoding: 'utf8'});
         assert.equal(compilerDynamic.status, 0, compilerDynamic.stderr);
         assert.doesNotMatch(compilerDynamic.stdout, /NEEDED/, 'generation 1 unexpectedly requires a shared library');
@@ -36,7 +36,7 @@ test('generation 1 passes the native compiler conformance suite', async t => {
         await t.test('native compiler cache hits, invalidates, and preserves foreign libraries', () => {
             const cachePath = path.join(directory, 'cache');
             fs.mkdirSync(cachePath);
-            const cacheEnvironment = {...environment, ARGON_CACHE_PATH: cachePath, ARGON_CACHE_TRACE: '1'};
+            const cacheEnvironment = {...environment, VALEN_CACHE_PATH: cachePath, VALEN_CACHE_TRACE: '1'};
             const sourcePath = path.join(directory, 'cached.ar');
             const writeProgram = status => fs.writeFileSync(sourcePath, `entry {{ __() -> i32 { return ${status} } }}\n`);
             const compile = (source, name) => spawnSync(compilerPath, [source, '-o', path.join(directory, name)], {
@@ -46,28 +46,28 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             writeProgram(0);
             const cold = compile(sourcePath, 'cache-cold');
             assert.equal(cold.status, 0, cold.stderr);
-            assert.match(cold.stderr, /argon: cache miss/);
-            assert.match(cold.stderr, /argon: cache stored/);
+            assert.match(cold.stderr, /valen: cache miss/);
+            assert.match(cold.stderr, /valen: cache stored/);
             assert.equal(fs.existsSync(path.join(directory, 'cache-cold.o')), true, 'native compiler did not emit a relocatable object');
             assert.equal(fs.existsSync(path.join(directory, 'cache-cold.s')), false, 'native compiler unexpectedly fell back to assembly');
 
             const warm = compile(sourcePath, 'cache-warm');
             assert.equal(warm.status, 0, warm.stderr);
-            assert.match(warm.stderr, /argon: cache hit/);
+            assert.match(warm.stderr, /valen: cache hit/);
             assert.equal(spawnSync(path.join(directory, 'cache-warm')).status, 0);
 
             const [cacheEntry] = fs.readdirSync(cachePath);
-            fs.writeFileSync(path.join(cachePath, cacheEntry), 'not an Argon cache artifact');
+            fs.writeFileSync(path.join(cachePath, cacheEntry), 'not a Valen cache artifact');
             const recovered = compile(sourcePath, 'cache-recovered');
             assert.equal(recovered.status, 0, recovered.stderr);
-            assert.match(recovered.stderr, /argon: cache invalid/);
-            assert.match(recovered.stderr, /argon: cache stored/);
+            assert.match(recovered.stderr, /valen: cache invalid/);
+            assert.match(recovered.stderr, /valen: cache stored/);
             assert.equal(spawnSync(path.join(directory, 'cache-recovered')).status, 0);
 
             writeProgram(7);
             const changed = compile(sourcePath, 'cache-changed');
             assert.equal(changed.status, 0, changed.stderr);
-            assert.match(changed.stderr, /argon: cache miss/);
+            assert.match(changed.stderr, /valen: cache miss/);
             assert.equal(spawnSync(path.join(directory, 'cache-changed')).status, 7);
 
             const foreignSource = path.join(projectRoot, 'bootstrap/test/fixtures/foreign-libc.ar');
@@ -75,7 +75,7 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             assert.equal(foreignCold.status, 0, foreignCold.stderr);
             const foreignWarm = compile(foreignSource, 'cache-foreign-warm');
             assert.equal(foreignWarm.status, 0, foreignWarm.stderr);
-            assert.match(foreignWarm.stderr, /argon: cache hit/);
+            assert.match(foreignWarm.stderr, /valen: cache hit/);
             assert.equal(spawnSync(path.join(directory, 'cache-foreign-warm')).status, 0);
         });
 
@@ -100,8 +100,8 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             });
         }
 
-        const generation2Path = path.join(directory, 'argon-generation2');
-        const build = spawnSync(compilerPath, [path.join(projectRoot, 'src/argon.ar'), '-o', generation2Path], {
+        const generation2Path = path.join(directory, 'valen-generation2');
+        const build = spawnSync(compilerPath, [path.join(projectRoot, 'src/valen.ar'), '-o', generation2Path], {
             encoding: 'utf8', env: environment, cwd: projectRoot, maxBuffer: 64 * 1024 * 1024
         });
         assert.equal(build.status, 0, build.stderr || build.stdout || `generation 2 build terminated by ${build.signal ?? 'an unknown signal'}`);

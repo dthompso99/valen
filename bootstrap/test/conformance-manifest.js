@@ -30,7 +30,7 @@ export const targetFailures = [
         name: 'unsupported target native',
         source: 'bootstrap/test/fixtures/unsupported-native.ar',
         status: 69,
-        stderr: /argon: target: x86_64-linux runtime does not provide argon_Missing_value/
+        stderr: /valen: target: x86_64-linux runtime does not provide valen_Missing_value/
     }
 ];
 

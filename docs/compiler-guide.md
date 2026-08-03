@@ -2,14 +2,14 @@
 
 ## The bootstrap model
 
-Argon is developed through two compiler implementations:
+Valen is developed through two compiler implementations:
 
 1. `bootstrap/` is generation 0, written in JavaScript.
-2. `src/` is the compiler written in Argon.
-3. Generation 0 compiles `src/argon.ar` into a native generation-1 compiler.
+2. `src/` is the compiler written in Valen.
+3. Generation 0 compiles `src/valen.ar` into a native generation-1 compiler.
 4. Generation 1 compiles and executes the conformance programs.
 
-The JavaScript bootstrap is intentionally retained as Argon's stable path from zero. It does not need every language feature: it needs the subset required to compile the current native compiler source. If `src/` begins using a new feature, generation 0 must understand that feature before the bootstrap remains valid.
+The JavaScript bootstrap is intentionally retained as Valen's stable path from zero. It does not need every language feature: it needs the subset required to compile the current native compiler source. If `src/` begins using a new feature, generation 0 must understand that feature before the bootstrap remains valid.
 
 Generation 1 builds a working generation-2 compiler within a 3.25 GiB peak-RSS budget. The shared conformance corpus also verifies that generations 1 and 2 emit identical normalized target-independent IR.
 
@@ -25,7 +25,7 @@ source -> tokens -> AST -> module graph -> semantic symbols
 
 - Tokenization records source spans for diagnostics.
 - Parsing constructs object, member, statement, and expression nodes.
-- Module loading resolves relative imports and `ARGON_LIBRARY_PATH`.
+- Module loading resolves relative imports and `VALEN_LIBRARY_PATH`.
 - Semantic analysis binds names, checks types/contracts, and enforces ownership.
 - IR lowering produces target-independent blocks and instructions.
 - Validation rejects malformed IR before backend generation.
@@ -34,10 +34,10 @@ source -> tokens -> AST -> module graph -> semantic symbols
   invoked only for linking.
 
 Native executable builds can reuse validated backend artifacts by setting
-`ARGON_CACHE_PATH` to an existing writable directory. Cache keys include every loaded module's
+`VALEN_CACHE_PATH` to an existing writable directory. Cache keys include every loaded module's
 canonical path and source text plus the cache format and target. A changed entry point or
 dependency therefore produces a cold build; a matching build skips semantic analysis, IR
-lowering and validation, and backend generation. Set `ARGON_CACHE_TRACE=1` to report cache hits,
+lowering and validation, and backend generation. Set `VALEN_CACHE_TRACE=1` to report cache hits,
 misses, and writes. Missing, unwritable, or invalid entries fall back to an ordinary build.
 
 Object emission and linking are separate policy choices. Direct ELF emission does not imply a
@@ -48,7 +48,7 @@ provider, not the removal of hosted linking. Generation 0 can stop after object 
 `node bootstrap/compiler.js --emit-object <source> <output.o>`.
 
 The self-hosted compiler can stop at the same boundary with
-`argon --emit-object <source> -o <output.o>`.
+`valen --emit-object <source> -o <output.o>`.
 
 An integrated linker, register allocation, and optimization levels are **WIP**.
 
@@ -58,8 +58,8 @@ An integrated linker, register allocation, and optimization levels are **WIP**.
 | --- | --- |
 | `bootstrap/` | JavaScript generation-0 compiler and tests |
 | `src/` | Self-hosted compiler and standard runtime source |
-| `lib/` | Libraries resolved through `ARGON_LIBRARY_PATH` |
-| `examples/` | Small runnable Argon programs |
+| `lib/` | Libraries resolved through `VALEN_LIBRARY_PATH` |
+| `examples/` | Small runnable Valen programs |
 | `docs/` | User and contributor documentation |
 | `docker/` | Multi-stage bootstrap proof |
 | `language_checklist.md` | Detailed feature roadmap snapshot |
@@ -71,7 +71,7 @@ The main parallel files are intentionally easy to recognize: for example, `boots
 Build generation 1:
 
 ```sh
-node bootstrap/compiler.js src/argon.ar /tmp/argon-stage1
+node bootstrap/compiler.js src/valen.ar /tmp/valen-stage1
 ```
 
 Run bootstrap tests:
@@ -89,7 +89,7 @@ node bootstrap/test/generation1.test.js
 Inspect the deterministic target-independent IR emitted by a native compiler:
 
 ```sh
-./argon --emit-ir examples/simple/simple.ar
+./valen --emit-ir examples/simple/simple.ar
 ```
 
 This length-delimited form includes types, fields, dispatch tables, functions, blocks,
@@ -124,7 +124,7 @@ The usual implementation order is:
 7. Add a focused bootstrap test and, when supported by generation 1, a conformance fixture.
 8. Update docs and the tracked Gitea issue.
 
-Do not duplicate a feature in generation 0 merely for symmetry. Do update generation 0 before using an otherwise unsupported feature in the compiler written in Argon.
+Do not duplicate a feature in generation 0 merely for symmetry. Do update generation 0 before using an otherwise unsupported feature in the compiler written in Valen.
 
 ## Native runtime boundary
 

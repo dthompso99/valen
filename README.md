@@ -1,10 +1,10 @@
-# Argon
+# Valen
 
-Argon is a native, object-oriented programming language being built from the ground up. It combines a deliberately small, readable syntax with explicit ownership, contracts, native interoperability, and a self-hosting compiler.
+Valen is a native, object-oriented programming language being built from the ground up. It combines a deliberately small, readable syntax with explicit ownership, contracts, native interoperability, and a self-hosting compiler.
 
-This is no longer only a parser experiment: Argon source can compile to native x86-64 Linux executables, and the compiler written in Argon can compile and run the project’s conformance programs.
+This is no longer only a parser experiment: Valen source can compile to native x86-64 Linux executables, and the compiler written in Valen can compile and run the project’s conformance programs.
 
-```argon
+```valen
 import System from 'libSystem.ar'
 
 Greeter {{
@@ -33,9 +33,9 @@ entry {{
 - References and ownership exist, but ordinary code does not manipulate raw pointers.
 - Native calls, unsafe boundaries, garbage collection, explicit deletion, and weak references coexist.
 - Synchronous method calls stay simple; unfinished work is represented by operation objects and optional executors.
-- The JavaScript bootstrap compiler builds the compiler written in Argon, which can then compile Argon programs itself.
+- The JavaScript bootstrap compiler builds the compiler written in Valen, which can then compile Valen programs itself.
 
-Argon is usable as a language-development prototype and self-hosting compiler today. It is not yet a production language: portability, packaging, optimization, editor tooling, and parts of the standard library remain **WIP**.
+Valen is usable as a language-development prototype and self-hosting compiler today. It is not yet a production language: portability, packaging, optimization, editor tooling, and parts of the standard library remain **WIP**.
 
 ## Start here
 
@@ -48,7 +48,7 @@ Argon is usable as a language-development prototype and self-hosting compiler to
 
 ## Current target
 
-The supported native target is x86-64 Linux. Both generation 0 and the self-hosted compiler encode ELF64 objects directly, then use the system linker for executables. Node.js is required only to build generation 0; programs compiled by the native Argon compiler do not require Node.js.
+The supported native target is x86-64 Linux. Both generation 0 and the self-hosted compiler encode ELF64 objects directly, then use the system linker for executables. Node.js is required only to build generation 0; programs compiled by the native Valen compiler do not require Node.js.
 
 The [freestanding profile](docs/freestanding.md) defines the language/runtime boundary for future kernel and embedded targets; freestanding code generation remains **WIP**.
 

@@ -11,7 +11,7 @@ entry {{
         if output == null {
             return 2
         }
-        if System.writeFile(output!, "argon file io\n") != 14 {
+        if System.writeFile(output!, "valen file io\n") != 14 {
             return 3
         }
         if System.close(output!) != 0 {
@@ -29,7 +29,7 @@ entry {{
         if System.close(input!) != 0 {
             return 7
         }
-        if contents! != "argon file io\n" {
+        if contents! != "valen file io\n" {
             return 8
         }
         return 0

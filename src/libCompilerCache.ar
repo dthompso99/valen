@@ -18,8 +18,11 @@ library CompilerCache {{
         member trace:bool
 
         __() -> void {
-            self.directory = System.environmentVariable("ARGON_CACHE_PATH")
-            self.trace = System.environmentVariable("ARGON_CACHE_TRACE") != null
+            self.directory = System.environmentVariable("VALEN_CACHE_PATH")
+            if self.directory == null { self.directory = System.environmentVariable("ARGON_CACHE_PATH") }
+            local traceValue = System.environmentVariable("VALEN_CACHE_TRACE")
+            if traceValue == null { traceValue = System.environmentVariable("ARGON_CACHE_TRACE") }
+            self.trace = traceValue != null
         }
 
         enabled() -> bool {
@@ -40,8 +43,8 @@ library CompilerCache {{
                 return null
             }
             local content = source!.content
-            local header = "ARGON-CACHE-1\n"
-            local footer = "\nARGON-CACHE-END\n"
+            local header = "VALEN-CACHE-1\n"
+            local footer = "\nVALEN-CACHE-END\n"
             if content.length < header.length + footer.length || content.slice(0, header.length) != header || content.slice(content.length - footer.length, footer.length) != footer {
                 self.log("invalid", cachePath!)
                 return null
@@ -66,7 +69,7 @@ library CompilerCache {{
                 return
             }
             local builder = new StringBuilder()
-            builder.append("ARGON-CACHE-1\n")
+            builder.append("VALEN-CACHE-1\n")
             local index:i64 = 0
             while index < libraries.length {
                 if index > 0 { builder.append(",") }
@@ -75,7 +78,7 @@ library CompilerCache {{
             }
             builder.append("\n")
             builder.append(assembly)
-            builder.append("\nARGON-CACHE-END\n")
+            builder.append("\nVALEN-CACHE-END\n")
             local content = builder.build()
             local written = System.writeFile(output!, content)
             local closeResult = System.close(output!)
@@ -88,7 +91,7 @@ library CompilerCache {{
 
         fingerprint(graph:ModuleLoading.ModuleGraph) -> i64 {
             local value:i64 = 1469598103934665603
-            value = self.mix(value, "argon-cache-v1:x86_64-linux")
+            value = self.mix(value, "valen-cache-v1:x86_64-linux")
             local index:i64 = 0
             while index < graph.modules.length {
                 local module = graph.modules[index]
@@ -133,7 +136,7 @@ library CompilerCache {{
 
         log(action:string, path:string) -> void {
             if !self.trace { return }
-            System.writeError("argon: cache " + action + " " + path + "\n")
+            System.writeError("valen: cache " + action + " " + path + "\n")
         }
     }}
 }}

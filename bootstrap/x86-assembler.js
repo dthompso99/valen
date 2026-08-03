@@ -320,7 +320,7 @@ function encodeInstruction(sink, mnemonic, operands) {
     throw new Error(`Unsupported x86-64 instruction '${mnemonic}'`);
 }
 
-/** Assembles the strict Intel-syntax subset emitted by Argon's x86-64 backend. */
+/** Assembles the strict Intel-syntax subset emitted by Valen's x86-64 backend. */
 export class X86Assembler {
     assemble(source) {
         const lines = source.split('\n').map(line => line.trim()).filter(Boolean);

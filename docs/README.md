@@ -1,4 +1,4 @@
-# Argon documentation
+# Valen documentation
 
 If you are new to the project, read these in order:
 

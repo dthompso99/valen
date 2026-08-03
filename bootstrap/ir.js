@@ -194,7 +194,7 @@ export class IrGenerator {
                 this.program.foreignLibraries.push(foreignLibrary);
             }
             const runtimeSymbol = foreignLibrary ? declaration.foreignSymbol : this.runtimeSymbol(symbol);
-            if (runtimeSymbol === 'argon_Operations_threadStart') {
+            if (runtimeSymbol === 'valen_Operations_threadStart') {
                 for (const library of ['pthread', 'c']) {
                     if (!this.program.foreignLibraries.includes(library)) this.program.foreignLibraries.push(library);
                 }
@@ -693,7 +693,7 @@ export class IrGenerator {
     }
 
     lowerTestRunner(tests) {
-        const owner = '$argon.test.runner';
+        const owner = '$valen.test.runner';
         this.program.types.push({kind: 'IrType', name: owner, displayName: owner, base: null, virtualMethods: [], contracts: [], initializer: null, fields: []});
         const instructions = [];
         for (const suite of tests) {
@@ -703,7 +703,7 @@ export class IrGenerator {
         }
         instructions.push({op: 'test_failures', result: '%0', type: 'i64'});
         instructions.push({op: 'return', value: {kind: 'temporary', name: '%0', type: 'i64'}});
-        const runner = {kind: 'IrFunction', name: '$argon.test.run', displayName: '$argon.test.run', owner,
+        const runner = {kind: 'IrFunction', name: '$valen.test.run', displayName: '$valen.test.run', owner,
             parameters: [{name: 'self', type: owner}], returnType: 'i64',
             blocks: [{label: 'entry', instructions}], temporaryCount: 1, localCount: 0};
         this.program.functions.push(runner);
@@ -825,7 +825,7 @@ export class IrGenerator {
     }
 
     runtimeSymbol(method) {
-        return `argon_${method.owner.name}_${method.name}`.replace(/[^A-Za-z0-9_]/g, '_');
+        return `valen_${method.owner.name}_${method.name}`.replace(/[^A-Za-z0-9_]/g, '_');
     }
 }
 

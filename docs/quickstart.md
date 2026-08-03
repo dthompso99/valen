@@ -2,7 +2,7 @@
 
 ## Requirements
 
-Argon currently targets x86-64 Linux. You need:
+Valen currently targets x86-64 Linux. You need:
 
 - Node.js 20 or newer for the bootstrap compiler
 - a C compiler available as `cc`
@@ -15,53 +15,55 @@ Other architectures and operating systems are **WIP**.
 From the repository root:
 
 ```sh
-node bootstrap/compiler.js src/argon.ar argon
+node bootstrap/compiler.js src/valen.ar valen
 ```
 
-This uses the JavaScript generation-0 compiler to build the compiler written in Argon.
+This uses the JavaScript generation-0 compiler to build the compiler written in Valen.
 
 Tell the compiler where the standard source libraries live:
 
 ```sh
-export ARGON_LIBRARY_PATH="$PWD/lib"
+export VALEN_LIBRARY_PATH="$PWD/lib"
 ```
+
+The former `ARGON_LIBRARY_PATH`, `ARGON_CACHE_PATH`, and `ARGON_CACHE_TRACE` names remain temporary compatibility aliases. New tooling should use the `VALEN_*` names.
 
 For repeat native builds, create a cache directory and opt into compiler caching:
 
 ```sh
-mkdir -p .argon-cache
-export ARGON_CACHE_PATH="$PWD/.argon-cache"
+mkdir -p .valen-cache
+export VALEN_CACHE_PATH="$PWD/.valen-cache"
 ```
 
 Now compile and run an example:
 
 ```sh
-./argon examples/simple/simple.ar -o simple
+./valen examples/simple/simple.ar -o simple
 ./simple
 ```
 
 The compiler also provides a semantic-check-only mode:
 
 ```sh
-./argon --check examples/simple/simple.ar
+./valen --check examples/simple/simple.ar
 ```
 
 To stop at a relocatable ELF object without selecting a linker:
 
 ```sh
-./argon --emit-object examples/simple/simple.ar -o simple.o
+./valen --emit-object examples/simple/simple.ar -o simple.o
 ```
 
 ## Create a program
 
 Save this as `hello.ar`:
 
-```argon
+```valen
 import System from 'libSystem.ar'
 
 entry {{
     __() -> i32 {
-        System.write("Hello from Argon!\n")
+        System.write("Hello from Valen!\n")
         return 0
     }
 }}
@@ -70,7 +72,7 @@ entry {{
 Compile and run it:
 
 ```sh
-./argon hello.ar -o hello
+./valen hello.ar -o hello
 ./hello
 ```
 
@@ -90,7 +92,7 @@ The first command tests the JavaScript bootstrap pipeline. The second builds the
 The repository also contains a multi-stage bootstrap build:
 
 ```sh
-docker build -f docker/Dockerfile.bootstrap -t argon:test .
+docker build -f docker/Dockerfile.bootstrap -t valen:test .
 ```
 
 It builds the native compiler in successive stages and runs representative programs. Packaging a general-purpose compiler image is **WIP**.
@@ -98,8 +100,8 @@ It builds the native compiler in successive stages and runs representative progr
 The self-contained native output can also run in an otherwise empty container:
 
 ```sh
-docker build --target scratch-runtime -f docker/Dockerfile.bootstrap -t argon:scratch .
-docker run --rm argon:scratch
+docker build --target scratch-runtime -f docker/Dockerfile.bootstrap -t valen:scratch .
+docker run --rm valen:scratch
 ```
 
 That final image is built `FROM scratch` and contains only the compiled smoke-test executable. It proves the self-contained ELF path does not require a shell, libc, a dynamic loader, or runtime files. A future libc-linked output mode can remain a separate compiler option.

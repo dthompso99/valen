@@ -1,8 +1,8 @@
-# Freestanding Argon profile
+# Freestanding Valen profile
 
-Freestanding Argon is the language and runtime contract for kernels, firmware, bootloaders,
+Freestanding Valen is the language and runtime contract for kernels, firmware, bootloaders,
 and other targets that cannot assume an operating system or C library. It is a capability
-profile, not a separate syntax or a permanently reduced version of Argon.
+profile, not a separate syntax or a permanently reduced version of Valen.
 
 The current x86-64 Linux backend is hosted, but its ordinary executables own their `_start`
 adapter and link without the C runtime. It does not yet emit fully freestanding binaries. This
@@ -48,7 +48,7 @@ produce new strings or collections require `managed-memory`.
 
 ## Native declarations
 
-Plain `native` declarations name facilities supplied by the selected Argon target runtime or
+Plain `native` declarations name facilities supplied by the selected Valen target runtime or
 by explicit application hooks. Freestanding compilation must diagnose any unresolved native
 symbol before linking.
 
@@ -62,7 +62,7 @@ depend on narrow capability modules supplied by their target rather than import 
 
 ## Entry and failure behavior
 
-A target chooses whether it constructs `entry`, exports named Argon functions, or uses a
+A target chooses whether it constructs `entry`, exports named Valen functions, or uses a
 platform adapter. The existing `entry.__` return rules remain valid when an entry adapter is
 used, but a bare-metal target defines what happens to the returned status.
 
@@ -73,9 +73,9 @@ before trapping.
 ## Toolchain boundary
 
 Freestanding describes the produced program's dependencies, not which linker produced it. Direct
-object emission removes the assembler dependency while leaving link policy selectable. An Argon
+object emission removes the assembler dependency while leaving link policy selectable. An Valen
 object can be linked into a self-contained image, linked by the hosted system toolchain with
-explicit libraries such as libc, or eventually linked by Argon's integrated linker. Supporting
+explicit libraries such as libc, or eventually linked by Valen's integrated linker. Supporting
 one route must not remove the others.
 
 ## Current implementation status
@@ -87,7 +87,7 @@ one route must not remove the others.
 - Ordinary x86-64 Linux executables provide `_start`, link with `-nostdlib`, and have no implicit
   shared-library dependency. Target-native symbols are validated before linking.
 - Foreign C calls and native threading add their libraries explicitly; an unavailable capability
-  still requires an Argon implementation or an explicit target/application provider.
+  still requires an Valen implementation or an explicit target/application provider.
 - General capability manifests, non-Linux startup, injectable runtime hooks, and fully
   freestanding linking are **WIP**.
 - Additional architectures and operating systems remain tracked separately by issue #56.

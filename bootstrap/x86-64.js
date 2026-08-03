@@ -41,37 +41,37 @@ export class X86_64Backend {
             }
         }
         const supportedRuntimeSymbols = new Set([
-            'argon_System_print',
-            'argon_System_arguments',
-            'argon_System_exit',
-            'argon_System_write',
-            'argon_System_writeError',
-            'argon_System_openRead',
-            'argon_System_openWrite',
-            'argon_System_read',
-            'argon_System_writeFile',
-            'argon_System_writeBytes',
-            'argon_System_close',
-            'argon_System_lastError',
-            'argon_System_currentDirectory',
-            'argon_System_environmentVariable',
-            'argon_System_collectGarbage',
-            'argon_System_enableProcessArena',
-            'argon_System_link',
-            'argon_System_memoryCopy',
-            'argon_System_memoryCompare',
-            'argon_System_fileDescriptor', 'argon_System_makeFileNonblocking',
-            'argon_Network_listen', 'argon_Network_accept', 'argon_Network_receive',
-            'argon_Network_send', 'argon_Network_closeListener', 'argon_Network_closeConnection',
-            'argon_Network_lastError',
-            'argon_Network_listenerDescriptor', 'argon_Network_connectionDescriptor',
-            'argon_Network_makeListenerNonblocking', 'argon_Network_makeConnectionNonblocking',
-            'argon_Operations_threadAvailable', 'argon_Operations_threadStart', 'argon_Operations_threadJoin',
-            'argon_Operations_mutexLock', 'argon_Operations_mutexUnlock',
-            'argon_Operations_conditionWait', 'argon_Operations_conditionNotifyOne', 'argon_Operations_conditionNotifyAll',
-            'argon_Operations_atomicLoad', 'argon_Operations_atomicStore', 'argon_Operations_atomicExchange',
-            'argon_Operations_atomicCompareExchange', 'argon_Operations_atomicAdd',
-            'argon_EventLoop_available', 'argon_EventLoop_wait'
+            'valen_System_print',
+            'valen_System_arguments',
+            'valen_System_exit',
+            'valen_System_write',
+            'valen_System_writeError',
+            'valen_System_openRead',
+            'valen_System_openWrite',
+            'valen_System_read',
+            'valen_System_writeFile',
+            'valen_System_writeBytes',
+            'valen_System_close',
+            'valen_System_lastError',
+            'valen_System_currentDirectory',
+            'valen_System_environmentVariable',
+            'valen_System_collectGarbage',
+            'valen_System_enableProcessArena',
+            'valen_System_link',
+            'valen_System_memoryCopy',
+            'valen_System_memoryCompare',
+            'valen_System_fileDescriptor', 'valen_System_makeFileNonblocking',
+            'valen_Network_listen', 'valen_Network_accept', 'valen_Network_receive',
+            'valen_Network_send', 'valen_Network_closeListener', 'valen_Network_closeConnection',
+            'valen_Network_lastError',
+            'valen_Network_listenerDescriptor', 'valen_Network_connectionDescriptor',
+            'valen_Network_makeListenerNonblocking', 'valen_Network_makeConnectionNonblocking',
+            'valen_Operations_threadAvailable', 'valen_Operations_threadStart', 'valen_Operations_threadJoin',
+            'valen_Operations_mutexLock', 'valen_Operations_mutexUnlock',
+            'valen_Operations_conditionWait', 'valen_Operations_conditionNotifyOne', 'valen_Operations_conditionNotifyAll',
+            'valen_Operations_atomicLoad', 'valen_Operations_atomicStore', 'valen_Operations_atomicExchange',
+            'valen_Operations_atomicCompareExchange', 'valen_Operations_atomicAdd',
+            'valen_EventLoop_available', 'valen_EventLoop_wait'
         ]);
         for (const external of program.externals) {
             if (!external.foreignLibrary && !supportedRuntimeSymbols.has(external.runtimeSymbol)) {
@@ -81,15 +81,15 @@ export class X86_64Backend {
         }
 
         const runtimeSymbols = new Set(program.externals.map(external => external.runtimeSymbol));
-        this.needsProcessArguments = runtimeSymbols.has('argon_System_arguments') || runtimeSymbols.has('argon_System_link') || runtimeSymbols.has('argon_System_environmentVariable');
+        this.needsProcessArguments = runtimeSymbols.has('valen_System_arguments') || runtimeSymbols.has('valen_System_link') || runtimeSymbols.has('valen_System_environmentVariable');
         this.needsFilesystemState = [
-            'argon_System_openRead', 'argon_System_openWrite', 'argon_System_read',
-            'argon_System_writeFile', 'argon_System_writeBytes', 'argon_System_close', 'argon_System_lastError',
-            'argon_System_currentDirectory'
+            'valen_System_openRead', 'valen_System_openWrite', 'valen_System_read',
+            'valen_System_writeFile', 'valen_System_writeBytes', 'valen_System_close', 'valen_System_lastError',
+            'valen_System_currentDirectory'
         ].some(symbol => runtimeSymbols.has(symbol));
 
         const lines = ['.intel_syntax noprefix', '.text'];
-        if (runtimeSymbols.has('argon_Operations_threadStart')) lines.push('.extern pthread_create', '.extern pthread_join');
+        if (runtimeSymbols.has('valen_Operations_threadStart')) lines.push('.extern pthread_create', '.extern pthread_join');
         for (const external of program.externals) {
             if (external.foreignLibrary) lines.push(`.extern ${external.runtimeSymbol}`);
         }
@@ -99,30 +99,30 @@ export class X86_64Backend {
         lines.push(...this.gcTraceFunctions());
         lines.push(...this.gcArrayTraceFunctions());
 
-        if (runtimeSymbols.has('argon_System_print')) lines.push(...this.printI64Runtime());
+        if (runtimeSymbols.has('valen_System_print')) lines.push(...this.printI64Runtime());
         if (this.needsProcessArguments) lines.push(...this.argumentsRuntime());
-        if (runtimeSymbols.has('argon_System_exit')) lines.push(...this.exitRuntime());
-        if (runtimeSymbols.has('argon_System_write')) lines.push(...this.writeRuntime('argon_System_write', 1));
-        if (runtimeSymbols.has('argon_System_writeError')) lines.push(...this.writeRuntime('argon_System_writeError', 2));
-        if (runtimeSymbols.has('argon_System_openRead')) lines.push(...this.openRuntime('argon_System_openRead', 0));
-        if (runtimeSymbols.has('argon_System_openWrite')) lines.push(...this.openRuntime('argon_System_openWrite', 577));
-        if (runtimeSymbols.has('argon_System_read')) lines.push(...this.fileReadRuntime());
-        if (runtimeSymbols.has('argon_System_writeFile')) lines.push(...this.fileWriteRuntime());
-        if (runtimeSymbols.has('argon_System_writeBytes')) lines.push(...this.fileWriteBytesRuntime());
-        if (runtimeSymbols.has('argon_System_close')) lines.push(...this.fileCloseRuntime());
-        if (runtimeSymbols.has('argon_System_lastError')) lines.push(...this.lastErrorRuntime());
-        if (runtimeSymbols.has('argon_System_currentDirectory')) lines.push(...this.currentDirectoryRuntime());
-        if (runtimeSymbols.has('argon_System_environmentVariable')) lines.push(...this.environmentVariableRuntime());
-        if (runtimeSymbols.has('argon_System_collectGarbage')) lines.push('.globl argon_System_collectGarbage', 'argon_System_collectGarbage:', '    jmp argon_gc_collect', '');
-        if (runtimeSymbols.has('argon_System_enableProcessArena')) lines.push('.globl argon_System_enableProcessArena', 'argon_System_enableProcessArena:', '    mov DWORD PTR [rip+argon_arena_enabled], 1', '    ret', '');
-        if (runtimeSymbols.has('argon_System_link')) lines.push(...this.linkRuntime());
-        if (runtimeSymbols.has('argon_System_memoryCopy')) lines.push(...this.memoryCopyRuntime());
-        if (runtimeSymbols.has('argon_System_memoryCompare')) lines.push(...this.memoryCompareRuntime());
-        if (runtimeSymbols.has('argon_System_fileDescriptor')) lines.push(...this.descriptorRuntime('argon_System_fileDescriptor'));
-        if (runtimeSymbols.has('argon_System_makeFileNonblocking')) lines.push(...this.nonblockingRuntime('argon_System_makeFileNonblocking'));
-        if ([...runtimeSymbols].some(symbol => symbol.startsWith('argon_Network_'))) lines.push(...this.networkRuntime());
-        if ([...runtimeSymbols].some(symbol => symbol.startsWith('argon_EventLoop_'))) lines.push(...this.eventLoopRuntime(runtimeSymbols));
-        if ([...runtimeSymbols].some(symbol => symbol.startsWith('argon_Operations_'))) lines.push(...this.operationsRuntime(runtimeSymbols));
+        if (runtimeSymbols.has('valen_System_exit')) lines.push(...this.exitRuntime());
+        if (runtimeSymbols.has('valen_System_write')) lines.push(...this.writeRuntime('valen_System_write', 1));
+        if (runtimeSymbols.has('valen_System_writeError')) lines.push(...this.writeRuntime('valen_System_writeError', 2));
+        if (runtimeSymbols.has('valen_System_openRead')) lines.push(...this.openRuntime('valen_System_openRead', 0));
+        if (runtimeSymbols.has('valen_System_openWrite')) lines.push(...this.openRuntime('valen_System_openWrite', 577));
+        if (runtimeSymbols.has('valen_System_read')) lines.push(...this.fileReadRuntime());
+        if (runtimeSymbols.has('valen_System_writeFile')) lines.push(...this.fileWriteRuntime());
+        if (runtimeSymbols.has('valen_System_writeBytes')) lines.push(...this.fileWriteBytesRuntime());
+        if (runtimeSymbols.has('valen_System_close')) lines.push(...this.fileCloseRuntime());
+        if (runtimeSymbols.has('valen_System_lastError')) lines.push(...this.lastErrorRuntime());
+        if (runtimeSymbols.has('valen_System_currentDirectory')) lines.push(...this.currentDirectoryRuntime());
+        if (runtimeSymbols.has('valen_System_environmentVariable')) lines.push(...this.environmentVariableRuntime());
+        if (runtimeSymbols.has('valen_System_collectGarbage')) lines.push('.globl valen_System_collectGarbage', 'valen_System_collectGarbage:', '    jmp valen_gc_collect', '');
+        if (runtimeSymbols.has('valen_System_enableProcessArena')) lines.push('.globl valen_System_enableProcessArena', 'valen_System_enableProcessArena:', '    mov DWORD PTR [rip+valen_arena_enabled], 1', '    ret', '');
+        if (runtimeSymbols.has('valen_System_link')) lines.push(...this.linkRuntime());
+        if (runtimeSymbols.has('valen_System_memoryCopy')) lines.push(...this.memoryCopyRuntime());
+        if (runtimeSymbols.has('valen_System_memoryCompare')) lines.push(...this.memoryCompareRuntime());
+        if (runtimeSymbols.has('valen_System_fileDescriptor')) lines.push(...this.descriptorRuntime('valen_System_fileDescriptor'));
+        if (runtimeSymbols.has('valen_System_makeFileNonblocking')) lines.push(...this.nonblockingRuntime('valen_System_makeFileNonblocking'));
+        if ([...runtimeSymbols].some(symbol => symbol.startsWith('valen_Network_'))) lines.push(...this.networkRuntime());
+        if ([...runtimeSymbols].some(symbol => symbol.startsWith('valen_EventLoop_'))) lines.push(...this.eventLoopRuntime(runtimeSymbols));
+        if ([...runtimeSymbols].some(symbol => symbol.startsWith('valen_Operations_'))) lines.push(...this.operationsRuntime(runtimeSymbols));
         lines.push(...this.runtimeErrorRuntime());
         lines.push(...this.allocationRuntime());
         lines.push(...this.garbageCollectorRuntime());
@@ -135,13 +135,13 @@ export class X86_64Backend {
         lines.push(...this.floatConversionData());
         lines.push(...this.typeData());
         lines.push(...this.gcData());
-        if (program.functions.some(fn => fn.name === '$argon.test.run')) {
-            lines.push('.section .rodata', 'argon_test_failure_message:', '    .ascii "test failed\\n"',
-                '.bss', '.align 8', 'argon_test_failures:', '    .zero 8', '.text');
+        if (program.functions.some(fn => fn.name === '$valen.test.run')) {
+            lines.push('.section .rodata', 'valen_test_failure_message:', '    .ascii "test failed\\n"',
+                '.bss', '.align 8', 'valen_test_failures:', '    .zero 8', '.text');
         }
         if (this.needsProcessArguments) lines.push(...this.processData());
         if (this.needsFilesystemState) lines.push(...this.filesystemData());
-        if ([...runtimeSymbols].some(symbol => symbol.startsWith('argon_Network_'))) lines.push('.bss', '.align 8', 'argon_network_error:', '    .zero 8', '.text');
+        if ([...runtimeSymbols].some(symbol => symbol.startsWith('valen_Network_'))) lines.push('.bss', '.align 8', 'valen_network_error:', '    .zero 8', '.text');
         lines.push('.section .note.GNU-stack,"",@progbits');
         return `${lines.join('\n')}\n`;
     }
@@ -149,7 +149,7 @@ export class X86_64Backend {
     networkRuntime() {
         const close = name => ['.globl '+name, name+':', '    mov rdi, QWORD PTR [rdi]', '    mov eax, 3', '    syscall', '    ret', ''];
         return [
-            '.globl argon_Network_listen', 'argon_Network_listen:',
+            '.globl valen_Network_listen', 'valen_Network_listen:',
             '    push rbx', '    push r12', '    push r13', '    mov r12d, edi', '    mov ebx, esi',
             '    mov eax, 41', '    mov edi, 2', '    mov esi, 1', '    xor edx, edx', '    syscall',
             '    test rax, rax', '    js .Lnetwork_error_pop2', '    mov r10, rax',
@@ -159,37 +159,37 @@ export class X86_64Backend {
             '    test rax, rax', '    js .Lnetwork_close_error_pop2',
             '    mov eax, 50', '    mov rdi, r10', '    mov esi, ebx', '    syscall',
             '    test rax, rax', '    js .Lnetwork_close_error_pop2', '    mov r12, r10',
-            '    mov edi, 8', '    call argon_alloc', '    mov QWORD PTR [rax], r12',
-            '    mov QWORD PTR [rip+argon_network_error], 0', '    pop r13', '    pop r12', '    pop rbx', '    ret',
+            '    mov edi, 8', '    call valen_alloc', '    mov QWORD PTR [rax], r12',
+            '    mov QWORD PTR [rip+valen_network_error], 0', '    pop r13', '    pop r12', '    pop rbx', '    ret',
             '.Lnetwork_close_error_pop2:', '    mov r12, rax', '    mov eax, 3', '    mov rdi, r10', '    syscall', '    mov rax, r12',
-            '.Lnetwork_error_pop2:', '    neg rax', '    mov QWORD PTR [rip+argon_network_error], rax', '    xor eax, eax', '    pop r13', '    pop r12', '    pop rbx', '    ret', '',
-            '.globl argon_Network_accept', 'argon_Network_accept:',
+            '.Lnetwork_error_pop2:', '    neg rax', '    mov QWORD PTR [rip+valen_network_error], rax', '    xor eax, eax', '    pop r13', '    pop r12', '    pop rbx', '    ret', '',
+            '.globl valen_Network_accept', 'valen_Network_accept:',
             '    mov rdi, QWORD PTR [rdi]', '    mov eax, 43', '    xor esi, esi', '    xor edx, edx', '    syscall',
-            '    test rax, rax', '    js .Lnetwork_error', '    push rbx', '    mov rbx, rax', '    mov edi, 8', '    call argon_alloc',
-            '    mov QWORD PTR [rax], rbx', '    pop rbx', '    mov QWORD PTR [rip+argon_network_error], 0', '    ret',
-            '.globl argon_Network_receive', 'argon_Network_receive:',
+            '    test rax, rax', '    js .Lnetwork_error', '    push rbx', '    mov rbx, rax', '    mov edi, 8', '    call valen_alloc',
+            '    mov QWORD PTR [rax], rbx', '    pop rbx', '    mov QWORD PTR [rip+valen_network_error], 0', '    ret',
+            '.globl valen_Network_receive', 'valen_Network_receive:',
             '    test rsi, rsi', '    js .Lnetwork_invalid', '    push rbx', '    push r12', '    push r13',
-            '    mov r12, QWORD PTR [rdi]', '    mov r13, rsi', '    mov rdi, r13', '    call argon_alloc', '    mov rbx, rax',
+            '    mov r12, QWORD PTR [rdi]', '    mov r13, rsi', '    mov rdi, r13', '    call valen_alloc', '    mov rbx, rax',
             '    xor eax, eax', '    mov rdi, r12', '    mov rsi, rbx', '    mov rdx, r13', '    syscall',
-            '    test rax, rax', '    js .Lnetwork_error_pop3', '    mov r12, rax', '    mov edi, 16', '    call argon_alloc',
-            '    mov QWORD PTR [rax], rbx', '    mov QWORD PTR [rax+8], r12', '    mov QWORD PTR [rip+argon_network_error], 0',
+            '    test rax, rax', '    js .Lnetwork_error_pop3', '    mov r12, rax', '    mov edi, 16', '    call valen_alloc',
+            '    mov QWORD PTR [rax], rbx', '    mov QWORD PTR [rax+8], r12', '    mov QWORD PTR [rip+valen_network_error], 0',
             '    pop r13', '    pop r12', '    pop rbx', '    ret',
-            '.Lnetwork_error_pop3:', '    neg rax', '    mov QWORD PTR [rip+argon_network_error], rax', '    xor eax, eax', '    pop r13', '    pop r12', '    pop rbx', '    ret',
-            '.Lnetwork_invalid:', '    mov QWORD PTR [rip+argon_network_error], 22', '    xor eax, eax', '    ret',
-            '.globl argon_Network_send', 'argon_Network_send:',
+            '.Lnetwork_error_pop3:', '    neg rax', '    mov QWORD PTR [rip+valen_network_error], rax', '    xor eax, eax', '    pop r13', '    pop r12', '    pop rbx', '    ret',
+            '.Lnetwork_invalid:', '    mov QWORD PTR [rip+valen_network_error], 22', '    xor eax, eax', '    ret',
+            '.globl valen_Network_send', 'valen_Network_send:',
             '    mov r8, QWORD PTR [rdi]', '    mov rdx, QWORD PTR [rsi+8]', '    mov rsi, QWORD PTR [rsi]', '    xor r9d, r9d',
             '.Lnetwork_send_next:', '    test rdx, rdx', '    je .Lnetwork_send_done', '    mov eax, 1', '    mov rdi, r8', '    syscall',
             '    cmp rax, -4', '    je .Lnetwork_send_next', '    test rax, rax', '    js .Lnetwork_send_error',
             '    add r9, rax', '    add rsi, rax', '    sub rdx, rax', '    jmp .Lnetwork_send_next',
-            '.Lnetwork_send_done:', '    mov QWORD PTR [rip+argon_network_error], 0', '    mov rax, r9', '    ret',
-            '.Lnetwork_send_error:', '    mov r10, rax', '    neg r10', '    mov QWORD PTR [rip+argon_network_error], r10', '    test r9, r9', '    cmovnz rax, r9', '    ret', '',
-            ...close('argon_Network_closeListener'), ...close('argon_Network_closeConnection'),
-            ...this.descriptorRuntime('argon_Network_listenerDescriptor'),
-            ...this.descriptorRuntime('argon_Network_connectionDescriptor'),
-            ...this.nonblockingRuntime('argon_Network_makeListenerNonblocking'),
-            ...this.nonblockingRuntime('argon_Network_makeConnectionNonblocking'),
-            '.globl argon_Network_lastError', 'argon_Network_lastError:', '    mov rax, QWORD PTR [rip+argon_network_error]', '    ret', '',
-            '.Lnetwork_error:', '    neg rax', '    mov QWORD PTR [rip+argon_network_error], rax', '    xor eax, eax', '    ret', ''
+            '.Lnetwork_send_done:', '    mov QWORD PTR [rip+valen_network_error], 0', '    mov rax, r9', '    ret',
+            '.Lnetwork_send_error:', '    mov r10, rax', '    neg r10', '    mov QWORD PTR [rip+valen_network_error], r10', '    test r9, r9', '    cmovnz rax, r9', '    ret', '',
+            ...close('valen_Network_closeListener'), ...close('valen_Network_closeConnection'),
+            ...this.descriptorRuntime('valen_Network_listenerDescriptor'),
+            ...this.descriptorRuntime('valen_Network_connectionDescriptor'),
+            ...this.nonblockingRuntime('valen_Network_makeListenerNonblocking'),
+            ...this.nonblockingRuntime('valen_Network_makeConnectionNonblocking'),
+            '.globl valen_Network_lastError', 'valen_Network_lastError:', '    mov rax, QWORD PTR [rip+valen_network_error]', '    ret', '',
+            '.Lnetwork_error:', '    neg rax', '    mov QWORD PTR [rip+valen_network_error], rax', '    xor eax, eax', '    ret', ''
         ];
     }
 
@@ -207,13 +207,13 @@ export class X86_64Backend {
 
     eventLoopRuntime(symbols) {
         const lines = [];
-        if (symbols.has('argon_EventLoop_available')) lines.push('.globl argon_EventLoop_available', 'argon_EventLoop_available:', '    mov eax, 1', '    ret', '');
-        if (symbols.has('argon_EventLoop_wait')) lines.push(
-            '.globl argon_EventLoop_wait', 'argon_EventLoop_wait:',
+        if (symbols.has('valen_EventLoop_available')) lines.push('.globl valen_EventLoop_available', 'valen_EventLoop_available:', '    mov eax, 1', '    ret', '');
+        if (symbols.has('valen_EventLoop_wait')) lines.push(
+            '.globl valen_EventLoop_wait', 'valen_EventLoop_wait:',
             '    push rbx', '    push r12', '    push r13', '    push r14', '    push r15',
             '    mov r12, QWORD PTR [rdi]', '    cmp r12, QWORD PTR [rsi]', '    jne .Lio_wait_early',
             '    test r12, r12', '    je .Lio_wait_early', '    mov r13, QWORD PTR [rdi+16]',
-            '    mov r14, QWORD PTR [rsi+16]', '    mov r15, rdx', '    lea rdi, [r12*8]', '    call argon_alloc',
+            '    mov r14, QWORD PTR [rsi+16]', '    mov r15, rdx', '    lea rdi, [r12*8]', '    call valen_alloc',
             '    mov rbx, rax', '    xor ecx, ecx', '.Lio_wait_fill:', '    cmp rcx, r12', '    jae .Lio_wait_poll',
             '    mov rax, QWORD PTR [r13+rcx*8]', '    mov DWORD PTR [rbx+rcx*8], eax',
             '    mov rax, QWORD PTR [r14+rcx*8]', '    mov WORD PTR [rbx+rcx*8+4], ax',
@@ -240,39 +240,39 @@ export class X86_64Backend {
         const handle = offset('ThreadOperation.handle');
         const worker = this.program.functions.find(fn => fn.displayName === 'Operations.ThreadOperation.runWorker');
         const lines = [];
-        const has = name => symbols.has(`argon_Operations_${name}`);
-        if (has('threadAvailable')) lines.push('.globl argon_Operations_threadAvailable', 'argon_Operations_threadAvailable:', '    mov eax, 1', '    ret', '');
+        const has = name => symbols.has(`valen_Operations_${name}`);
+        if (has('threadAvailable')) lines.push('.globl valen_Operations_threadAvailable', 'valen_Operations_threadAvailable:', '    mov eax, 1', '    ret', '');
         if (has('threadStart')) lines.push(
-            '.globl argon_Operations_threadStart', 'argon_Operations_threadStart:', '    push rbx', '    mov rbx, rdi',
-            `    lea rdi, [rbx+${handle}]`, '    xor esi, esi', '    lea rdx, [rip+argon_thread_worker]', '    mov rcx, rbx',
+            '.globl valen_Operations_threadStart', 'valen_Operations_threadStart:', '    push rbx', '    mov rbx, rdi',
+            `    lea rdi, [rbx+${handle}]`, '    xor esi, esi', '    lea rdx, [rip+valen_thread_worker]', '    mov rcx, rbx',
             '    call pthread_create', '    test eax, eax', '    sete al', '    movzx eax, al', '    pop rbx', '    ret', '',
-            'argon_thread_worker:', '    push rbx', '    mov rbx, rdi', '    mov rdi, rbx',
+            'valen_thread_worker:', '    push rbx', '    mov rbx, rdi', '    mov rdi, rbx',
             `    call ${this.functionSymbols.get(worker?.name)}`, '    xor eax, eax', '    pop rbx', '    ret', '');
-        if (has('threadJoin')) lines.push('.globl argon_Operations_threadJoin', 'argon_Operations_threadJoin:', '    push rax',
+        if (has('threadJoin')) lines.push('.globl valen_Operations_threadJoin', 'valen_Operations_threadJoin:', '    push rax',
             `    mov rdi, QWORD PTR [rdi+${handle}]`, '    xor esi, esi', '    call pthread_join', '    pop rcx', '    ret', '');
-        if (has('mutexLock')) lines.push('.globl argon_Operations_mutexLock', 'argon_Operations_mutexLock:', '    push r12',
-            `    lea r12, [rdi+${mutex}]`, '.Largon_mutex_retry:', '    xor eax, eax', '    mov ecx, 1',
-            '    lock cmpxchg DWORD PTR [r12], ecx', '    je .Largon_mutex_locked', '    mov eax, 202', '    mov rdi, r12',
+        if (has('mutexLock')) lines.push('.globl valen_Operations_mutexLock', 'valen_Operations_mutexLock:', '    push r12',
+            `    lea r12, [rdi+${mutex}]`, '.Lvalen_mutex_retry:', '    xor eax, eax', '    mov ecx, 1',
+            '    lock cmpxchg DWORD PTR [r12], ecx', '    je .Lvalen_mutex_locked', '    mov eax, 202', '    mov rdi, r12',
             '    xor esi, esi', '    mov edx, 1', '    xor r10d, r10d', '    xor r8d, r8d', '    xor r9d, r9d', '    syscall',
-            '    jmp .Largon_mutex_retry', '.Largon_mutex_locked:', '    pop r12', '    ret', '');
-        if (has('mutexUnlock')) lines.push('.globl argon_Operations_mutexUnlock', 'argon_Operations_mutexUnlock:',
+            '    jmp .Lvalen_mutex_retry', '.Lvalen_mutex_locked:', '    pop r12', '    ret', '');
+        if (has('mutexUnlock')) lines.push('.globl valen_Operations_mutexUnlock', 'valen_Operations_mutexUnlock:',
             `    lea rdi, [rdi+${mutex}]`, '    mov DWORD PTR [rdi], 0', '    mov eax, 202', '    mov esi, 1', '    mov edx, 1',
             '    xor r10d, r10d', '    xor r8d, r8d', '    xor r9d, r9d', '    syscall', '    ret', '');
-        if (has('conditionWait')) lines.push('.globl argon_Operations_conditionWait', 'argon_Operations_conditionWait:',
+        if (has('conditionWait')) lines.push('.globl valen_Operations_conditionWait', 'valen_Operations_conditionWait:',
             '    push r12', '    push r13', '    push r14', '    mov r12, rdi', '    mov r13, rsi', `    mov r14d, DWORD PTR [r12+${condition}]`,
-            '    mov rdi, r13', '    call argon_Operations_mutexUnlock', '    mov eax, 202', `    lea rdi, [r12+${condition}]`,
+            '    mov rdi, r13', '    call valen_Operations_mutexUnlock', '    mov eax, 202', `    lea rdi, [r12+${condition}]`,
             '    xor esi, esi', '    mov edx, r14d', '    xor r10d, r10d', '    xor r8d, r8d', '    xor r9d, r9d', '    syscall',
-            '    mov rdi, r13', '    call argon_Operations_mutexLock', '    pop r14', '    pop r13', '    pop r12', '    ret', '');
-        const notify = (name, count) => lines.push(`.globl argon_Operations_${name}`, `argon_Operations_${name}:`,
+            '    mov rdi, r13', '    call valen_Operations_mutexLock', '    pop r14', '    pop r13', '    pop r12', '    ret', '');
+        const notify = (name, count) => lines.push(`.globl valen_Operations_${name}`, `valen_Operations_${name}:`,
             `    lea rdi, [rdi+${condition}]`, '    lock add DWORD PTR [rdi], 1', '    mov eax, 202', '    mov esi, 1', `    mov edx, ${count}`,
             '    xor r10d, r10d', '    xor r8d, r8d', '    xor r9d, r9d', '    syscall', '    ret', '');
         if (has('conditionNotifyOne')) notify('conditionNotifyOne', 1);
         if (has('conditionNotifyAll')) notify('conditionNotifyAll', 2147483647);
-        if (has('atomicLoad')) lines.push('.globl argon_Operations_atomicLoad', 'argon_Operations_atomicLoad:', `    mov rax, QWORD PTR [rdi+${atomic}]`, '    ret', '');
-        if (has('atomicStore')) lines.push('.globl argon_Operations_atomicStore', 'argon_Operations_atomicStore:', `    xchg QWORD PTR [rdi+${atomic}], rsi`, '    ret', '');
-        if (has('atomicExchange')) lines.push('.globl argon_Operations_atomicExchange', 'argon_Operations_atomicExchange:', '    mov rax, rsi', `    xchg QWORD PTR [rdi+${atomic}], rax`, '    ret', '');
-        if (has('atomicCompareExchange')) lines.push('.globl argon_Operations_atomicCompareExchange', 'argon_Operations_atomicCompareExchange:', '    mov rax, rsi', `    lock cmpxchg QWORD PTR [rdi+${atomic}], rdx`, '    sete al', '    movzx eax, al', '    ret', '');
-        if (has('atomicAdd')) lines.push('.globl argon_Operations_atomicAdd', 'argon_Operations_atomicAdd:', '    mov rax, rsi', `    lock xadd QWORD PTR [rdi+${atomic}], rax`, '    add rax, rsi', '    ret', '');
+        if (has('atomicLoad')) lines.push('.globl valen_Operations_atomicLoad', 'valen_Operations_atomicLoad:', `    mov rax, QWORD PTR [rdi+${atomic}]`, '    ret', '');
+        if (has('atomicStore')) lines.push('.globl valen_Operations_atomicStore', 'valen_Operations_atomicStore:', `    xchg QWORD PTR [rdi+${atomic}], rsi`, '    ret', '');
+        if (has('atomicExchange')) lines.push('.globl valen_Operations_atomicExchange', 'valen_Operations_atomicExchange:', '    mov rax, rsi', `    xchg QWORD PTR [rdi+${atomic}], rax`, '    ret', '');
+        if (has('atomicCompareExchange')) lines.push('.globl valen_Operations_atomicCompareExchange', 'valen_Operations_atomicCompareExchange:', '    mov rax, rsi', `    lock cmpxchg QWORD PTR [rdi+${atomic}], rdx`, '    sete al', '    movzx eax, al', '    ret', '');
+        if (has('atomicAdd')) lines.push('.globl valen_Operations_atomicAdd', 'valen_Operations_atomicAdd:', '    mov rax, rsi', `    lock xadd QWORD PTR [rdi+${atomic}], rax`, '    add rax, rsi', '    ret', '');
         return lines;
     }
 
@@ -311,10 +311,10 @@ export class X86_64Backend {
             lines.push(`    mov QWORD PTR [rbp-${offset}], 0`);
         }
         const rootTraceLabel = `${symbol}__gc_roots`;
-        lines.push('    mov rax, QWORD PTR [rip+argon_gc_roots]', `    mov QWORD PTR [rbp-${rootRecordOffset}], rax`,
+        lines.push('    mov rax, QWORD PTR [rip+valen_gc_roots]', `    mov QWORD PTR [rbp-${rootRecordOffset}], rax`,
             `    lea rax, [rip+${rootTraceLabel}]`, `    mov QWORD PTR [rbp-${rootRecordOffset - 8}], rax`,
             `    mov QWORD PTR [rbp-${rootRecordOffset - 16}], rbp`);
-        lines.push(`    lea rax, [rbp-${rootRecordOffset}]`, '    mov QWORD PTR [rip+argon_gc_roots], rax');
+        lines.push(`    lea rax, [rbp-${rootRecordOffset}]`, '    mov QWORD PTR [rip+valen_gc_roots], rax');
 
         for (const location of this.argumentLocations(fn.parameters)) {
             const slot = this.slot(`name:${location.value.name}`);
@@ -330,9 +330,9 @@ export class X86_64Backend {
             }
         }
 
-        lines.push(`${endLabel}:`, `    mov rcx, QWORD PTR [rbp-${rootRecordOffset}]`, '    mov QWORD PTR [rip+argon_gc_roots], rcx', '    leave', '    ret',
+        lines.push(`${endLabel}:`, `    mov rcx, QWORD PTR [rbp-${rootRecordOffset}]`, '    mov QWORD PTR [rip+valen_gc_roots], rcx', '    leave', '    ret',
             `${rootTraceLabel}:`, '    push rbx', '    mov rbx, rdi');
-        for (const [key] of roots) lines.push(`    mov rdi, QWORD PTR [rbx-${this.slots.get(key)}]`, '    call argon_gc_mark');
+        for (const [key] of roots) lines.push(`    mov rdi, QWORD PTR [rbx-${this.slots.get(key)}]`, '    call valen_gc_mark');
         lines.push('    pop rbx', '    ret', '');
         return lines;
     }
@@ -410,7 +410,7 @@ export class X86_64Backend {
                 break;
             case 'allocate':
                 lines.push(`    mov rdi, ${this.typeSizes.get(instruction.objectType) ?? 8}`,
-                    `    lea rsi, [rip+${this.gcTraceLabel(instruction.objectType)}]`, `    lea rdx, [rip+${this.gcWeakLabel(instruction.objectType)}]`, '    xor ecx, ecx', '    call argon_gc_alloc');
+                    `    lea rsi, [rip+${this.gcTraceLabel(instruction.objectType)}]`, `    lea rdx, [rip+${this.gcWeakLabel(instruction.objectType)}]`, '    xor ecx, ecx', '    call valen_gc_alloc');
                 lines.push(`    lea rcx, [rip+${this.typeLabel(instruction.objectType)}]`, '    mov QWORD PTR [rax], rcx');
                 lines.push('    mov QWORD PTR [rax+8], 1');
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
@@ -428,7 +428,7 @@ export class X86_64Backend {
                 lines.push(`    mov rdi, ${this.sizeOf(instruction.elementType)}`);
                 lines.push(...this.load(instruction.length, 'rsi'));
                 lines.push(`    lea rdx, [rip+${this.gcArrayTraceLabel(instruction.type)}]`, `    lea rcx, [rip+${this.gcArrayWeakLabel(instruction.type)}]`,
-                    '    call argon_gc_array_new', `    mov ${this.temp(instruction.result)}, rax`);
+                    '    call valen_gc_array_new', `    mov ${this.temp(instruction.result)}, rax`);
                 break;
             case 'array_length':
                 lines.push(...this.load(instruction.array, 'rax'));
@@ -437,7 +437,7 @@ export class X86_64Backend {
             case 'array_load':
                 lines.push(...this.load(instruction.array, 'rdi'));
                 lines.push(...this.load(instruction.index, 'rsi'));
-                lines.push(`    mov rdx, ${this.sizeOf(instruction.elementType)}`, '    call argon_array_address');
+                lines.push(`    mov rdx, ${this.sizeOf(instruction.elementType)}`, '    call valen_array_address');
                 lines.push(...this.loadMemory('[rax]', instruction.elementType, 'rax'));
                 if (instruction.elementOwnership === 'weak') {
                     const live = `.Lweak_array_live_${this.runtimeLabel++}`;
@@ -449,7 +449,7 @@ export class X86_64Backend {
             case 'array_store':
                 lines.push(...this.load(instruction.array, 'rdi'));
                 lines.push(...this.load(instruction.index, 'rsi'));
-                lines.push(`    mov rdx, ${this.sizeOf(instruction.elementType)}`, '    call argon_array_address');
+                lines.push(`    mov rdx, ${this.sizeOf(instruction.elementType)}`, '    call valen_array_address');
                 const storedBaseType = instruction.elementType?.endsWith('?') ? instruction.elementType.slice(0, -1) : instruction.elementType;
                 if (instruction.elementOwnership === 'owned' && this.typeSizes.has(storedBaseType)) {
                     const empty = `.Larray_replace_empty_${this.runtimeLabel++}`;
@@ -461,7 +461,7 @@ export class X86_64Backend {
             case 'array_append':
                 lines.push(...this.load(instruction.array, 'rdi'));
                 lines.push(...this.load(instruction.value, 'rsi'));
-                lines.push(`    mov rdx, ${this.sizeOf(instruction.elementType)}`, '    call argon_array_append');
+                lines.push(`    mov rdx, ${this.sizeOf(instruction.elementType)}`, '    call valen_array_append');
                 break;
             case 'string_length':
                 lines.push(...this.load(instruction.string, 'rax'));
@@ -470,16 +470,16 @@ export class X86_64Backend {
             case 'string_load':
                 lines.push(...this.load(instruction.array, 'rdi'));
                 lines.push(...this.load(instruction.index, 'rsi'));
-                lines.push('    call argon_string_address', '    movzx eax, BYTE PTR [rax]');
+                lines.push('    call valen_string_address', '    movzx eax, BYTE PTR [rax]');
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
                 break;
             case 'string_concat':
                 lines.push(...this.load(instruction.left, 'rdi'), ...this.load(instruction.right, 'rsi'));
-                lines.push('    call argon_string_concat', `    mov ${this.temp(instruction.result)}, rax`);
+                lines.push('    call valen_string_concat', `    mov ${this.temp(instruction.result)}, rax`);
                 break;
             case 'string_equal':
                 lines.push(...this.load(instruction.left, 'rdi'), ...this.load(instruction.right, 'rsi'));
-                lines.push('    call argon_string_equal');
+                lines.push('    call valen_string_equal');
                 if (instruction.negate) lines.push('    xor eax, 1');
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
                 break;
@@ -501,15 +501,15 @@ export class X86_64Backend {
                 lines.push(...this.load(instruction.string, 'rdi'));
                 lines.push(...this.load(instruction.start, 'rsi'));
                 lines.push(...this.load(instruction.length, 'rdx'));
-                lines.push('    call argon_string_slice', `    mov ${this.temp(instruction.result)}, rax`);
+                lines.push('    call valen_string_slice', `    mov ${this.temp(instruction.result)}, rax`);
                 break;
             case 'integer_to_string':
                 lines.push(...this.load(instruction.value, 'rdi'));
                 lines.push(`    mov esi, ${this.isUnsigned(instruction.integerType) ? 0 : 1}`);
-                lines.push('    call argon_integer_to_string', `    mov ${this.temp(instruction.result)}, rax`);
+                lines.push('    call valen_integer_to_string', `    mov ${this.temp(instruction.result)}, rax`);
                 break;
             case 'builder_new':
-                lines.push('    mov edi, 1', '    xor esi, esi', '    call argon_array_new');
+                lines.push('    mov edi, 1', '    xor esi, esi', '    call valen_array_new');
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
                 break;
             case 'builder_length':
@@ -518,15 +518,15 @@ export class X86_64Backend {
                 break;
             case 'builder_append_string':
                 lines.push(...this.load(instruction.builder, 'rdi'), ...this.load(instruction.value, 'rsi'));
-                lines.push('    call argon_builder_append_string');
+                lines.push('    call valen_builder_append_string');
                 break;
             case 'builder_append_byte':
                 lines.push(...this.load(instruction.builder, 'rdi'), ...this.load(instruction.value, 'rsi'));
-                lines.push('    mov edx, 1', '    call argon_array_append');
+                lines.push('    mov edx, 1', '    call valen_array_append');
                 break;
             case 'builder_build':
                 lines.push(...this.load(instruction.builder, 'rdi'));
-                lines.push('    call argon_builder_build', `    mov ${this.temp(instruction.result)}, rax`);
+                lines.push('    call valen_builder_build', `    mov ${this.temp(instruction.result)}, rax`);
                 break;
             case 'call':
                 lines.push(...this.call(instruction));
@@ -539,11 +539,11 @@ export class X86_64Backend {
                 break;
             case 'test_expect':
                 lines.push(...this.load(instruction.condition, 'rax'), '    test rax, rax', '    jnz 1f',
-                    '    inc QWORD PTR [rip+argon_test_failures]', '    mov eax, 1', '    mov edi, 2',
-                    '    lea rsi, [rip+argon_test_failure_message]', '    mov edx, 12', '    syscall', '1:');
+                    '    inc QWORD PTR [rip+valen_test_failures]', '    mov eax, 1', '    mov edi, 2',
+                    '    lea rsi, [rip+valen_test_failure_message]', '    mov edx, 12', '    syscall', '1:');
                 break;
             case 'test_failures':
-                lines.push('    mov rax, QWORD PTR [rip+argon_test_failures]', `    mov ${this.temp(instruction.result)}, rax`);
+                lines.push('    mov rax, QWORD PTR [rip+valen_test_failures]', `    mov ${this.temp(instruction.result)}, rax`);
                 break;
             case 'type_test':
             case 'checked_cast': {
@@ -775,14 +775,14 @@ export class X86_64Backend {
             '    push rbp',
             '    mov rbp, rsp',
             ...(this.needsProcessArguments ? [
-                '    mov QWORD PTR [rip+argon_process_argc], rdi',
-                '    mov QWORD PTR [rip+argon_process_argv], rsi',
+                '    mov QWORD PTR [rip+valen_process_argc], rdi',
+                '    mov QWORD PTR [rip+valen_process_argv], rsi',
                 '    lea rax, [rsi+rdi*8+8]',
-                '    mov QWORD PTR [rip+argon_process_envp], rax'
+                '    mov QWORD PTR [rip+valen_process_envp], rax'
             ] : []),
             '    sub rsp, 16',
             `    mov rdi, ${this.typeSizes.get(entryType) ?? 8}`,
-            '    call argon_alloc',
+            '    call valen_alloc',
             `    lea rcx, [rip+${this.typeLabel(entryType)}]`,
             '    mov QWORD PTR [rax], rcx',
             '    mov QWORD PTR [rbp-8], rax',
@@ -800,36 +800,36 @@ export class X86_64Backend {
     }
 
     typeLabel(typeName) {
-        return `.Largon_type_${this.mangle(typeName)}`;
+        return `.Lvalen_type_${this.mangle(typeName)}`;
     }
 
     objectEqualityLabel(typeName) { return `${this.typeLabel(typeName)}_equal`; }
     objectHashLabel(typeName) { return `${this.typeLabel(typeName)}_hash`; }
     objectCopyLabel(typeName) { return `${this.typeLabel(typeName)}_copy`; }
-    arrayEqualityLabel(typeName) { return `.Largon_array_equal_${this.mangle(typeName)}`; }
-    arrayHashLabel(typeName) { return `.Largon_array_hash_${this.mangle(typeName)}`; }
-    arrayCopyLabel(typeName) { return `.Largon_array_copy_${this.mangle(typeName)}`; }
-    arrayDestroyLabel(typeName) { return `.Largon_array_destroy_${this.mangle(typeName)}`; }
+    arrayEqualityLabel(typeName) { return `.Lvalen_array_equal_${this.mangle(typeName)}`; }
+    arrayHashLabel(typeName) { return `.Lvalen_array_hash_${this.mangle(typeName)}`; }
+    arrayCopyLabel(typeName) { return `.Lvalen_array_copy_${this.mangle(typeName)}`; }
+    arrayDestroyLabel(typeName) { return `.Lvalen_array_destroy_${this.mangle(typeName)}`; }
 
     equalityFunction(typeName) {
         const type = typeName?.endsWith('?') ? typeName.slice(0, -1) : typeName;
-        if (type === 'string') return 'argon_string_equal_context';
+        if (type === 'string') return 'valen_string_equal_context';
         if (type?.startsWith('Array<')) return this.arrayEqualityLabel(type);
-        return 'argon_object_equal';
+        return 'valen_object_equal';
     }
 
     hashFunction(typeName) {
         const type = typeName?.endsWith('?') ? typeName.slice(0, -1) : typeName;
-        if (type === 'string') return 'argon_string_hash_context';
+        if (type === 'string') return 'valen_string_hash_context';
         if (type?.startsWith('Array<')) return this.arrayHashLabel(type);
-        return 'argon_object_hash';
+        return 'valen_object_hash';
     }
 
     copyFunction(typeName) {
         const type = typeName?.endsWith('?') ? typeName.slice(0, -1) : typeName;
-        if (type === 'string') return 'argon_string_copy_context';
+        if (type === 'string') return 'valen_string_copy_context';
         if (type?.startsWith('Array<')) return this.arrayCopyLabel(type);
-        return 'argon_object_copy';
+        return 'valen_object_copy';
     }
 
     structuralRuntime() {
@@ -864,7 +864,7 @@ export class X86_64Backend {
 
     structuralCoreRuntime() {
         return [
-            '.globl argon_object_equal', 'argon_object_equal:',
+            '.globl valen_object_equal', 'valen_object_equal:',
             '    cmp rdi, rsi', '    je .Lobject_equal_true', '    test rdi, rdi', '    jz .Lobject_equal_false',
             '    test rsi, rsi', '    jz .Lobject_equal_false', '    mov rax, QWORD PTR [rdi]',
             '    cmp rax, QWORD PTR [rsi]', '    jne .Lobject_equal_false', '    mov rcx, rdx',
@@ -875,7 +875,7 @@ export class X86_64Backend {
             '    mov QWORD PTR [rsp], rdi', '    mov QWORD PTR [rsp+8], rsi', '    mov QWORD PTR [rsp+16], rdx',
             '    mov rdx, rsp', '    call QWORD PTR [rax+16]', '    leave', '    ret',
             '.Lobject_equal_true:', '    mov eax, 1', '    ret', '.Lobject_equal_false:', '    xor eax, eax', '    ret', '',
-            '.globl argon_object_hash', 'argon_object_hash:',
+            '.globl valen_object_hash', 'valen_object_hash:',
             '    test rdi, rdi', '    jz .Lobject_hash_null', '    mov rcx, rsi',
             '.Lobject_hash_scan:', '    test rcx, rcx', '    jz .Lobject_hash_enter', '    cmp QWORD PTR [rcx], rdi',
             '    je .Lobject_hash_cycle', '    mov rcx, QWORD PTR [rcx+8]', '    jmp .Lobject_hash_scan',
@@ -884,32 +884,32 @@ export class X86_64Backend {
             '    mov rax, QWORD PTR [rdi]', '    call QWORD PTR [rax+24]', '    leave', '    ret',
             '.Lobject_hash_null:', '    xor eax, eax', '    ret', '.Lobject_hash_cycle:',
             '    mov rax, -7046029254386353131', '    ret', '',
-            '.globl argon_object_copy', 'argon_object_copy:', '    test rdi, rdi', '    jz .Lobject_copy_null', '    test rsi, rsi',
-            '    jnz .Lobject_copy_scan_start', '    push rdi', '    mov edi, 8', '    call argon_alloc', '    mov QWORD PTR [rax], 0',
+            '.globl valen_object_copy', 'valen_object_copy:', '    test rdi, rdi', '    jz .Lobject_copy_null', '    test rsi, rsi',
+            '    jnz .Lobject_copy_scan_start', '    push rdi', '    mov edi, 8', '    call valen_alloc', '    mov QWORD PTR [rax], 0',
             '    mov rsi, rax', '    pop rdi', '.Lobject_copy_scan_start:', '    mov rcx, QWORD PTR [rsi]',
             '.Lobject_copy_scan:', '    test rcx, rcx', '    jz .Lobject_copy_enter', '    cmp QWORD PTR [rcx], rdi',
             '    je .Lobject_copy_found', '    mov rcx, QWORD PTR [rcx+16]', '    jmp .Lobject_copy_scan',
             '.Lobject_copy_found:', '    mov rax, QWORD PTR [rcx+8]', '    ret', '.Lobject_copy_enter:',
             '    mov rax, QWORD PTR [rdi]', '    jmp QWORD PTR [rax+32]', '.Lobject_copy_null:', '    xor eax, eax', '    ret', '',
-            'argon_string_equal_context:', '    cmp rdi, rsi', '    je .Lstring_context_true', '    test rdi, rdi',
+            'valen_string_equal_context:', '    cmp rdi, rsi', '    je .Lstring_context_true', '    test rdi, rdi',
             '    jz .Lstring_context_false', '    test rsi, rsi', '    jz .Lstring_context_false',
-            '    jmp argon_string_equal', '.Lstring_context_true:', '    mov eax, 1', '    ret',
+            '    jmp valen_string_equal', '.Lstring_context_true:', '    mov eax, 1', '    ret',
             '.Lstring_context_false:', '    xor eax, eax', '    ret', '',
-            'argon_string_hash_context:', '    test rdi, rdi', '    jz .Lstring_hash_null',
+            'valen_string_hash_context:', '    test rdi, rdi', '    jz .Lstring_hash_null',
             '    mov rsi, QWORD PTR [rdi]', '    mov rcx, QWORD PTR [rdi+8]', '    mov rax, 1469598103934665603',
             '.Lstring_hash_next:', '    test rcx, rcx', '    jz .Lstring_hash_done', '    movzx rdx, BYTE PTR [rsi]',
             '    xor rax, rdx', '    mov r8, 1099511628211', '    imul rax, r8', '    inc rsi', '    dec rcx',
             '    jmp .Lstring_hash_next', '.Lstring_hash_done:', '    ret', '.Lstring_hash_null:', '    xor eax, eax', '    ret', '',
-            'argon_string_copy_context:', '    test rdi, rdi', '    jz .Lstring_copy_null', '    test rsi, rsi',
-            '    jnz .Lstring_copy_scan_start', '    push rdi', '    mov edi, 8', '    call argon_alloc', '    mov QWORD PTR [rax], 0',
+            'valen_string_copy_context:', '    test rdi, rdi', '    jz .Lstring_copy_null', '    test rsi, rsi',
+            '    jnz .Lstring_copy_scan_start', '    push rdi', '    mov edi, 8', '    call valen_alloc', '    mov QWORD PTR [rax], 0',
             '    mov rsi, rax', '    pop rdi', '.Lstring_copy_scan_start:', '    mov rcx, QWORD PTR [rsi]', '.Lstring_copy_scan:',
             '    test rcx, rcx', '    jz .Lstring_copy_enter', '    cmp QWORD PTR [rcx], rdi', '    je .Lstring_copy_found',
             '    mov rcx, QWORD PTR [rcx+16]', '    jmp .Lstring_copy_scan', '.Lstring_copy_found:', '    mov rax, QWORD PTR [rcx+8]',
             '    ret', '.Lstring_copy_enter:', '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    push r13',
             '    push r14', '    mov r12, rdi', '    mov r14, rsi', '    mov edi, 16',
-            '    call argon_alloc', '    mov rbx, rax', '    mov r13, QWORD PTR [r12+8]', '    mov rdi, r13', '    call argon_alloc',
+            '    call valen_alloc', '    mov rbx, rax', '    mov r13, QWORD PTR [r12+8]', '    mov rdi, r13', '    call valen_alloc',
             '    mov QWORD PTR [rbx], rax', '    mov QWORD PTR [rbx+8], r13', '    mov rdi, rax', '    mov rsi, QWORD PTR [r12]',
-            '    mov rcx, r13', '    rep movsb', '    mov edi, 24', '    call argon_alloc', '    mov QWORD PTR [rax], r12',
+            '    mov rcx, r13', '    rep movsb', '    mov edi, 24', '    call valen_alloc', '    mov QWORD PTR [rax], r12',
             '    mov QWORD PTR [rax+8], rbx', '    mov rcx, QWORD PTR [r14]', '    mov QWORD PTR [rax+16], rcx',
             '    mov QWORD PTR [r14], rax', '    mov rax, rbx', '    pop r14', '    pop r13', '    pop r12', '    pop rbx',
             '    leave', '    ret', '.Lstring_copy_null:', '    xor eax, eax', '    ret', ''
@@ -943,8 +943,8 @@ export class X86_64Backend {
     objectCopyFunction(type) {
         const lines = [this.objectCopyLabel(type.name) + ':', '    push rbp', '    mov rbp, rsp', '    push r12', '    push r13',
             '    push r14', '    push r15', '    sub rsp, 16', '    mov r12, rdi', '    mov r14, rsi',
-            `    mov edi, ${this.typeSizes.get(type.name) ?? 8}`, '    call argon_alloc', '    mov r13, rax',
-            '    mov rax, QWORD PTR [r12]', '    mov QWORD PTR [r13], rax', '    mov QWORD PTR [r13+8], 1', '    mov edi, 24', '    call argon_alloc',
+            `    mov edi, ${this.typeSizes.get(type.name) ?? 8}`, '    call valen_alloc', '    mov r13, rax',
+            '    mov rax, QWORD PTR [r12]', '    mov QWORD PTR [r13], rax', '    mov QWORD PTR [r13+8], 1', '    mov edi, 24', '    call valen_alloc',
             '    mov QWORD PTR [rax], r12', '    mov QWORD PTR [rax+8], r13', '    mov rcx, QWORD PTR [r14]',
             '    mov QWORD PTR [rax+16], rcx', '    mov QWORD PTR [r14], rax'];
         for (const field of type.fields) {
@@ -1024,13 +1024,13 @@ export class X86_64Backend {
         const element = type.slice(6, -1), label = this.arrayCopyLabel(type), loop = `${label}_loop`, done = `${label}_done`;
         const size = this.sizeOf(element);
         const lines = [label + ':', '    test rdi, rdi', `    jz ${done}_null`, '    test rsi, rsi', `    jnz ${label}_scan_start`,
-            '    push rdi', '    mov edi, 8', '    call argon_alloc', '    mov QWORD PTR [rax], 0', '    mov rsi, rax', '    pop rdi',
+            '    push rdi', '    mov edi, 8', '    call valen_alloc', '    mov QWORD PTR [rax], 0', '    mov rsi, rax', '    pop rdi',
             `${label}_scan_start:`, '    mov rcx, QWORD PTR [rsi]', `${label}_scan:`, '    test rcx, rcx', `    jz ${label}_enter`,
             '    cmp QWORD PTR [rcx], rdi', `    je ${label}_found`, '    mov rcx, QWORD PTR [rcx+16]', `    jmp ${label}_scan`,
             `${label}_found:`, '    mov rax, QWORD PTR [rcx+8]', '    ret', `${label}_enter:`, '    push rbp', '    mov rbp, rsp',
             '    push r12', '    push r13', '    push r14', '    push r15', '    sub rsp, 16', '    mov r12, rdi', '    mov r14, rsi',
-            `    mov edi, ${size}`, '    mov rsi, QWORD PTR [r12]', '    call argon_array_new', '    mov r13, rax',
-            '    mov edi, 24', '    call argon_alloc', '    mov QWORD PTR [rax], r12', '    mov QWORD PTR [rax+8], r13',
+            `    mov edi, ${size}`, '    mov rsi, QWORD PTR [r12]', '    call valen_array_new', '    mov r13, rax',
+            '    mov edi, 24', '    call valen_alloc', '    mov QWORD PTR [rax], r12', '    mov QWORD PTR [rax+8], r13',
             '    mov rcx, QWORD PTR [r14]', '    mov QWORD PTR [rax+16], rcx', '    mov QWORD PTR [r14], rax', '    xor r15d, r15d',
             `${loop}:`, '    cmp r15, QWORD PTR [r12]', `    jae ${done}`, `    imul rax, r15, ${size}`,
             '    add rax, QWORD PTR [r12+16]'];
@@ -1092,8 +1092,8 @@ export class X86_64Backend {
 
     printI64Runtime() {
         return [
-            '.globl argon_System_print',
-            'argon_System_print:',
+            '.globl valen_System_print',
+            'valen_System_print:',
             '    push rbp',
             '    mov rbp, rsp',
             '    sub rsp, 64',
@@ -1133,8 +1133,8 @@ export class X86_64Backend {
 
     argumentsRuntime() {
         return [
-            '.globl argon_System_arguments',
-            'argon_System_arguments:',
+            '.globl valen_System_arguments',
+            'valen_System_arguments:',
             '    push rbp',
             '    mov rbp, rsp',
             '    push rbx',
@@ -1143,11 +1143,11 @@ export class X86_64Backend {
             '    push r14',
             '    push r15',
             '    sub rsp, 8',
-            '    mov rbx, QWORD PTR [rip+argon_process_argc]',
-            '    mov r12, QWORD PTR [rip+argon_process_argv]',
+            '    mov rbx, QWORD PTR [rip+valen_process_argc]',
+            '    mov r12, QWORD PTR [rip+valen_process_argv]',
             '    mov edi, 8',
             '    mov rsi, rbx',
-            '    call argon_array_new',
+            '    call valen_array_new',
             '    mov r13, rax',
             '    xor r14d, r14d',
             '.Larguments_next:',
@@ -1162,7 +1162,7 @@ export class X86_64Backend {
             '    jmp .Larguments_length',
             '.Larguments_wrap:',
             '    mov edi, 16',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov rdx, QWORD PTR [r12+r14*8]',
             '    mov QWORD PTR [rax], rdx',
             '    mov QWORD PTR [rax+8], r15',
@@ -1186,11 +1186,11 @@ export class X86_64Backend {
 
     environmentVariableRuntime() {
         return [
-            '.globl argon_System_environmentVariable',
-            'argon_System_environmentVariable:',
+            '.globl valen_System_environmentVariable',
+            'valen_System_environmentVariable:',
             '    push rbp', '    mov rbp, rsp', '    push r12', '    push r13',
             '    mov r8, QWORD PTR [rdi]', '    mov r9, QWORD PTR [rdi+8]',
-            '    mov r10, QWORD PTR [rip+argon_process_envp]',
+            '    mov r10, QWORD PTR [rip+valen_process_envp]',
             '.Lenvironment_next:',
             '    mov rdx, QWORD PTR [r10]', '    test rdx, rdx', '    je .Lenvironment_missing',
             '    xor ecx, ecx',
@@ -1204,7 +1204,7 @@ export class X86_64Backend {
             '.Lenvironment_value_length:',
             '    cmp BYTE PTR [r12+r13], 0', '    je .Lenvironment_wrap', '    inc r13', '    jmp .Lenvironment_value_length',
             '.Lenvironment_wrap:',
-            '    mov edi, 16', '    call argon_alloc', '    mov QWORD PTR [rax], r12', '    mov QWORD PTR [rax+8], r13',
+            '    mov edi, 16', '    call valen_alloc', '    mov QWORD PTR [rax], r12', '    mov QWORD PTR [rax+8], r13',
             '    pop r13', '    pop r12', '    leave', '    ret',
             '.Lenvironment_advance:',
             '    add r10, 8', '    jmp .Lenvironment_next',
@@ -1215,8 +1215,8 @@ export class X86_64Backend {
 
     exitRuntime() {
         return [
-            '.globl argon_System_exit',
-            'argon_System_exit:',
+            '.globl valen_System_exit',
+            'valen_System_exit:',
             '    mov eax, 60',
             '    syscall',
             '    ud2',
@@ -1264,7 +1264,7 @@ export class X86_64Backend {
             '    mov r12, QWORD PTR [rdi]',
             '    mov r13, QWORD PTR [rdi+8]',
             '    lea rdi, [r13+1]',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov rbx, rax',
             '    mov rdi, rax',
             '    mov rsi, r12',
@@ -1279,15 +1279,15 @@ export class X86_64Backend {
             '    syscall',
             '    test rax, rax',
             `    js ${label}error`,
-            '    mov QWORD PTR [rip+argon_filesystem_error], 0',
+            '    mov QWORD PTR [rip+valen_filesystem_error], 0',
             '    mov r12, rax',
             '    mov edi, 8',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov QWORD PTR [rax], r12',
             `    jmp ${label}done`,
             `${label}error:`,
             '    neg rax',
-            '    mov QWORD PTR [rip+argon_filesystem_error], rax',
+            '    mov QWORD PTR [rip+valen_filesystem_error], rax',
             '    xor eax, eax',
             `${label}done:`,
             '    add rsp, 8',
@@ -1302,8 +1302,8 @@ export class X86_64Backend {
 
     fileReadRuntime() {
         return [
-            '.globl argon_System_read',
-            'argon_System_read:',
+            '.globl valen_System_read',
+            'valen_System_read:',
             '    test rsi, rsi',
             '    js .Lfile_read_error',
             '    push rbp',
@@ -1315,7 +1315,7 @@ export class X86_64Backend {
             '    mov r12, QWORD PTR [rdi]',
             '    mov r13, rsi',
             '    mov rdi, r13',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov rbx, rax',
             '    xor eax, eax',
             '    mov rdi, r12',
@@ -1324,16 +1324,16 @@ export class X86_64Backend {
             '    syscall',
             '    test rax, rax',
             '    js .Lfile_read_error_frame',
-            '    mov QWORD PTR [rip+argon_filesystem_error], 0',
+            '    mov QWORD PTR [rip+valen_filesystem_error], 0',
             '    mov r14, rax',
             '    mov edi, 16',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov QWORD PTR [rax], rbx',
             '    mov QWORD PTR [rax+8], r14',
             '    jmp .Lfile_read_done',
             '.Lfile_read_error_frame:',
             '    neg rax',
-            '    mov QWORD PTR [rip+argon_filesystem_error], rax',
+            '    mov QWORD PTR [rip+valen_filesystem_error], rax',
             '    xor eax, eax',
             '.Lfile_read_done:',
             '    pop r14',
@@ -1343,7 +1343,7 @@ export class X86_64Backend {
             '    leave',
             '    ret',
             '.Lfile_read_error:',
-            '    mov QWORD PTR [rip+argon_filesystem_error], 22',
+            '    mov QWORD PTR [rip+valen_filesystem_error], 22',
             '    xor eax, eax',
             '    ret',
             ''
@@ -1352,8 +1352,8 @@ export class X86_64Backend {
 
     fileWriteRuntime() {
         return [
-            '.globl argon_System_writeFile',
-            'argon_System_writeFile:',
+            '.globl valen_System_writeFile',
+            'valen_System_writeFile:',
             '    mov r8, QWORD PTR [rdi]',
             '    mov rdx, QWORD PTR [rsi+8]',
             '    mov rsi, QWORD PTR [rsi]',
@@ -1373,13 +1373,13 @@ export class X86_64Backend {
             '    sub rdx, rax',
             '    jmp .Lfile_write_next',
             '.Lfile_write_done:',
-            '    mov QWORD PTR [rip+argon_filesystem_error], 0',
+            '    mov QWORD PTR [rip+valen_filesystem_error], 0',
             '    mov rax, r9',
             '    ret',
             '.Lfile_write_error:',
             '    mov r10, rax',
             '    neg r10',
-            '    mov QWORD PTR [rip+argon_filesystem_error], r10',
+            '    mov QWORD PTR [rip+valen_filesystem_error], r10',
             '    test r9, r9',
             '    cmovnz rax, r9',
             '    ret',
@@ -1389,8 +1389,8 @@ export class X86_64Backend {
 
     fileWriteBytesRuntime() {
         return [
-            '.globl argon_System_writeBytes',
-            'argon_System_writeBytes:',
+            '.globl valen_System_writeBytes',
+            'valen_System_writeBytes:',
             '    mov r8, QWORD PTR [rdi]',
             '    mov rdx, QWORD PTR [rsi]',
             '    mov rsi, QWORD PTR [rsi+16]',
@@ -1408,7 +1408,7 @@ export class X86_64Backend {
             '    sub rdx, rax',
             '    jmp .Lfile_write_bytes_next',
             '.Lfile_write_bytes_done:',
-            '    mov QWORD PTR [rip+argon_filesystem_error], 0',
+            '    mov QWORD PTR [rip+valen_filesystem_error], 0',
             '    mov rax, r9',
             '    ret',
             ''
@@ -1417,19 +1417,19 @@ export class X86_64Backend {
 
     fileCloseRuntime() {
         return [
-            '.globl argon_System_close',
-            'argon_System_close:',
+            '.globl valen_System_close',
+            'valen_System_close:',
             '    mov rdi, QWORD PTR [rdi]',
             '    mov eax, 3',
             '    syscall',
             '    test rax, rax',
             '    js .Lfile_close_error',
-            '    mov QWORD PTR [rip+argon_filesystem_error], 0',
+            '    mov QWORD PTR [rip+valen_filesystem_error], 0',
             '    ret',
             '.Lfile_close_error:',
             '    mov r10, rax',
             '    neg r10',
-            '    mov QWORD PTR [rip+argon_filesystem_error], r10',
+            '    mov QWORD PTR [rip+valen_filesystem_error], r10',
             '    ret',
             ''
         ];
@@ -1437,9 +1437,9 @@ export class X86_64Backend {
 
     lastErrorRuntime() {
         return [
-            '.globl argon_System_lastError',
-            'argon_System_lastError:',
-            '    mov rax, QWORD PTR [rip+argon_filesystem_error]',
+            '.globl valen_System_lastError',
+            'valen_System_lastError:',
+            '    mov rax, QWORD PTR [rip+valen_filesystem_error]',
             '    ret',
             ''
         ];
@@ -1447,14 +1447,14 @@ export class X86_64Backend {
 
     currentDirectoryRuntime() {
         return [
-            '.globl argon_System_currentDirectory',
-            'argon_System_currentDirectory:',
+            '.globl valen_System_currentDirectory',
+            'valen_System_currentDirectory:',
             '    push rbp',
             '    mov rbp, rsp',
             '    push rbx',
             '    push r12',
             '    mov edi, 4096',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov rbx, rax',
             '    mov rdi, rax',
             '    mov esi, 4096',
@@ -1469,15 +1469,15 @@ export class X86_64Backend {
             '    inc r12',
             '    jmp .Lcurrent_directory_length',
             '.Lcurrent_directory_wrap:',
-            '    mov QWORD PTR [rip+argon_filesystem_error], 0',
+            '    mov QWORD PTR [rip+valen_filesystem_error], 0',
             '    mov edi, 16',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov QWORD PTR [rax], rbx',
             '    mov QWORD PTR [rax+8], r12',
             '    jmp .Lcurrent_directory_done',
             '.Lcurrent_directory_error:',
             '    neg rax',
-            '    mov QWORD PTR [rip+argon_filesystem_error], rax',
+            '    mov QWORD PTR [rip+valen_filesystem_error], rax',
             '    xor eax, eax',
             '.Lcurrent_directory_done:',
             '    pop r12',
@@ -1490,8 +1490,8 @@ export class X86_64Backend {
 
     memoryCopyRuntime() {
         return [
-            '.globl argon_System_memoryCopy',
-            'argon_System_memoryCopy:',
+            '.globl valen_System_memoryCopy',
+            'valen_System_memoryCopy:',
             '    test rsi, rsi',
             '    js .Larray_bounds_error',
             '    test rcx, rcx',
@@ -1522,8 +1522,8 @@ export class X86_64Backend {
 
     memoryCompareRuntime() {
         return [
-            '.globl argon_System_memoryCompare',
-            'argon_System_memoryCompare:',
+            '.globl valen_System_memoryCompare',
+            'valen_System_memoryCompare:',
             '    test rsi, rsi',
             '    js .Larray_bounds_error',
             '    test rcx, rcx',
@@ -1560,8 +1560,8 @@ export class X86_64Backend {
 
     linkRuntime() {
         return [
-            '.globl argon_System_link',
-            'argon_System_link:',
+            '.globl valen_System_link',
+            'valen_System_link:',
             '    push rbp',
             '    mov rbp, rsp',
             '    push r12',
@@ -1640,7 +1640,7 @@ export class X86_64Backend {
             '    mov QWORD PTR [r15+r8*8+48], 0',
             '    lea rdi, [rip+.Llink_cc]',
             '    mov rsi, r15',
-            '    mov rdx, QWORD PTR [rip+argon_process_envp]',
+            '    mov rdx, QWORD PTR [rip+valen_process_envp]',
             '    mov eax, 59',
             '    syscall',
             '    mov edi, 127',
@@ -1671,11 +1671,11 @@ export class X86_64Backend {
         return [
             '.section .bss',
             '.align 8',
-            'argon_process_argc:',
+            'valen_process_argc:',
             '    .zero 8',
-            'argon_process_argv:',
+            'valen_process_argv:',
             '    .zero 8',
-            'argon_process_envp:',
+            'valen_process_envp:',
             '    .zero 8',
             ''
         ];
@@ -1685,7 +1685,7 @@ export class X86_64Backend {
         return [
             '.section .bss',
             '.align 8',
-            'argon_filesystem_error:',
+            'valen_filesystem_error:',
             '    .zero 8',
             ''
         ];
@@ -1714,13 +1714,13 @@ export class X86_64Backend {
         // Raw strings and buffers live for the process. Suballocate them from large
         // anonymous mappings so a tiny value does not consume an entire page.
         return [
-            '.globl argon_alloc',
-            'argon_alloc:',
+            '.globl valen_alloc',
+            'valen_alloc:',
             '    test rdi, rdi',
             '    jnz .Lalloc_size',
             '    mov edi, 1',
             '.Lalloc_size:',
-            '    cmp DWORD PTR [rip+argon_arena_enabled], 0',
+            '    cmp DWORD PTR [rip+valen_arena_enabled], 0',
             '    je .Lalloc_direct',
             '    push r12',
             // Keep a zeroed sentinel after raw data. Native path/environment calls
@@ -1730,17 +1730,17 @@ export class X86_64Backend {
             '.Lalloc_lock:',
             '    xor eax, eax',
             '    mov edx, 1',
-            '    lock cmpxchg DWORD PTR [rip+argon_arena_lock], edx',
+            '    lock cmpxchg DWORD PTR [rip+valen_arena_lock], edx',
             '    je .Lalloc_locked',
             '    pause',
             '    jmp .Lalloc_lock',
             '.Lalloc_locked:',
-            '    cmp QWORD PTR [rip+argon_arena_remaining], r12',
+            '    cmp QWORD PTR [rip+valen_arena_remaining], r12',
             '    jb .Lalloc_refill',
-            '    mov rax, QWORD PTR [rip+argon_arena_cursor]',
-            '    add QWORD PTR [rip+argon_arena_cursor], r12',
-            '    sub QWORD PTR [rip+argon_arena_remaining], r12',
-            '    mov DWORD PTR [rip+argon_arena_lock], 0',
+            '    mov rax, QWORD PTR [rip+valen_arena_cursor]',
+            '    add QWORD PTR [rip+valen_arena_cursor], r12',
+            '    sub QWORD PTR [rip+valen_arena_remaining], r12',
+            '    mov DWORD PTR [rip+valen_arena_lock], 0',
             '    pop r12',
             '    ret',
             '.Lalloc_refill:',
@@ -1757,10 +1757,10 @@ export class X86_64Backend {
             '    cmp rax, -4095',
             '    jae .Lallocation_error',
             '    lea rcx, [rax+r12]',
-            '    mov QWORD PTR [rip+argon_arena_cursor], rcx',
+            '    mov QWORD PTR [rip+valen_arena_cursor], rcx',
             '    sub rsi, r12',
-            '    mov QWORD PTR [rip+argon_arena_remaining], rsi',
-            '    mov DWORD PTR [rip+argon_arena_lock], 0',
+            '    mov QWORD PTR [rip+valen_arena_remaining], rsi',
+            '    mov DWORD PTR [rip+valen_arena_lock], 0',
             '    pop r12',
             '    ret',
             '.Lalloc_direct:',
@@ -1787,41 +1787,41 @@ export class X86_64Backend {
 
     garbageCollectorRuntime() {
         return [
-            '.globl argon_gc_alloc', 'argon_gc_alloc:',
+            '.globl valen_gc_alloc', 'valen_gc_alloc:',
             '    push r12', '    push r13', '    push r14', '    push r15', '    mov r12, rdi', '    mov r13, rsi', '    mov r14, rdx', '    mov r15, rcx',
             '    add rdi, 48', '    mov rsi, rdi', '    xor edi, edi', '    mov edx, 3', '    mov r10d, 34', '    mov r8, -1', '    xor r9d, r9d', '    mov eax, 9', '    syscall',
-            '    cmp rax, -4095', '    jae .Lallocation_error', '    mov rcx, QWORD PTR [rip+argon_gc_heap]', '    mov QWORD PTR [rax], rcx',
+            '    cmp rax, -4095', '    jae .Lallocation_error', '    mov rcx, QWORD PTR [rip+valen_gc_heap]', '    mov QWORD PTR [rax], rcx',
             '    lea rcx, [r12+48]', '    mov QWORD PTR [rax+8], rcx', '    mov QWORD PTR [rax+16], r13', '    mov QWORD PTR [rax+24], r14',
-            '    mov QWORD PTR [rax+32], 0', '    mov QWORD PTR [rax+40], r15', '    mov QWORD PTR [rip+argon_gc_heap], rax',
-            '    add QWORD PTR [rip+argon_gc_bytes], rcx', '    add rax, 48', '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    ret', '',
-            '.globl argon_gc_maybe_collect', 'argon_gc_maybe_collect:', '    ret', '',
-            '.globl argon_gc_mark', 'argon_gc_mark:', '    test rdi, rdi', '    je .Lgc_mark_done', '    cmp QWORD PTR [rdi+8], 0', '    je .Lgc_mark_done', '    push rbx', '    mov rbx, rdi', '    sub rbx, 48',
+            '    mov QWORD PTR [rax+32], 0', '    mov QWORD PTR [rax+40], r15', '    mov QWORD PTR [rip+valen_gc_heap], rax',
+            '    add QWORD PTR [rip+valen_gc_bytes], rcx', '    add rax, 48', '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    ret', '',
+            '.globl valen_gc_maybe_collect', 'valen_gc_maybe_collect:', '    ret', '',
+            '.globl valen_gc_mark', 'valen_gc_mark:', '    test rdi, rdi', '    je .Lgc_mark_done', '    cmp QWORD PTR [rdi+8], 0', '    je .Lgc_mark_done', '    push rbx', '    mov rbx, rdi', '    sub rbx, 48',
             '    cmp QWORD PTR [rbx+32], 0', '    jne .Lgc_mark_pop',
             '    mov QWORD PTR [rbx+32], 1', '    mov rax, QWORD PTR [rbx+16]', '    test rax, rax', '    je .Lgc_mark_pop', '    call rax',
             '.Lgc_mark_pop:', '    pop rbx', '.Lgc_mark_done:', '    ret', '',
-            '.globl argon_gc_collect', 'argon_gc_collect:', '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    push r13', '    push r14',
-            '    mov r12, QWORD PTR [rip+argon_gc_roots]', '.Lgc_root_frame:', '    test r12, r12', '    je .Lgc_weak_start', '    mov rax, QWORD PTR [r12+8]', '    mov rdi, QWORD PTR [r12+16]', '    call rax',
+            '.globl valen_gc_collect', 'valen_gc_collect:', '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    push r13', '    push r14',
+            '    mov r12, QWORD PTR [rip+valen_gc_roots]', '.Lgc_root_frame:', '    test r12, r12', '    je .Lgc_weak_start', '    mov rax, QWORD PTR [r12+8]', '    mov rdi, QWORD PTR [r12+16]', '    call rax',
             '    mov r12, QWORD PTR [r12]', '    jmp .Lgc_root_frame',
-            '.Lgc_weak_start:', '    mov r12, QWORD PTR [rip+argon_gc_heap]', '.Lgc_weak_next:', '    test r12, r12', '    je .Lgc_sweep_start',
+            '.Lgc_weak_start:', '    mov r12, QWORD PTR [rip+valen_gc_heap]', '.Lgc_weak_next:', '    test r12, r12', '    je .Lgc_sweep_start',
             '    cmp QWORD PTR [r12+32], 0', '    je .Lgc_weak_advance', '    mov rax, QWORD PTR [r12+24]', '    test rax, rax', '    je .Lgc_weak_advance', '    lea rdi, [r12+48]', '    call rax',
             '.Lgc_weak_advance:', '    mov r12, QWORD PTR [r12]', '    jmp .Lgc_weak_next',
-            '.Lgc_sweep_start:', '    lea r12, [rip+argon_gc_heap]', '    mov QWORD PTR [rip+argon_gc_bytes], 0', '.Lgc_sweep_next:', '    mov rbx, QWORD PTR [r12]', '    test rbx, rbx', '    je .Lgc_done',
-            '    cmp QWORD PTR [rbx+32], 0', '    je .Lgc_reclaim', '    mov QWORD PTR [rbx+32], 0', '    mov rax, QWORD PTR [rbx+8]', '    add QWORD PTR [rip+argon_gc_bytes], rax', '    mov r12, rbx', '    jmp .Lgc_sweep_next',
+            '.Lgc_sweep_start:', '    lea r12, [rip+valen_gc_heap]', '    mov QWORD PTR [rip+valen_gc_bytes], 0', '.Lgc_sweep_next:', '    mov rbx, QWORD PTR [r12]', '    test rbx, rbx', '    je .Lgc_done',
+            '    cmp QWORD PTR [rbx+32], 0', '    je .Lgc_reclaim', '    mov QWORD PTR [rbx+32], 0', '    mov rax, QWORD PTR [rbx+8]', '    add QWORD PTR [rip+valen_gc_bytes], rax', '    mov r12, rbx', '    jmp .Lgc_sweep_next',
             '.Lgc_reclaim:', '    mov r14, QWORD PTR [rbx]', '    mov QWORD PTR [r12], r14', '    mov rax, QWORD PTR [rbx+40]', '    test rax, rax', '    je .Lgc_unmap', '    lea rdi, [rbx+48]', '    call rax',
             '.Lgc_unmap:', '    mov rsi, QWORD PTR [rbx+8]', '    mov rdi, rbx', '    mov eax, 11', '    syscall', '    jmp .Lgc_sweep_next',
-            '.Lgc_done:', '    mov rax, QWORD PTR [rip+argon_gc_bytes]', '    shl rax, 1', '    cmp rax, 1048576', '    jae .Lgc_threshold_store', '    mov eax, 1048576', '.Lgc_threshold_store:', '    mov QWORD PTR [rip+argon_gc_threshold], rax', '    pop r14', '    pop r13', '    pop r12', '    pop rbx', '    leave', '    ret', ''
+            '.Lgc_done:', '    mov rax, QWORD PTR [rip+valen_gc_bytes]', '    shl rax, 1', '    cmp rax, 1048576', '    jae .Lgc_threshold_store', '    mov eax, 1048576', '.Lgc_threshold_store:', '    mov QWORD PTR [rip+valen_gc_threshold], rax', '    pop r14', '    pop r13', '    pop r12', '    pop rbx', '    leave', '    ret', ''
         ];
     }
 
     gcArrayRuntime() {
         return [
-            '.globl argon_gc_array_new', 'argon_gc_array_new:', '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    push r13', '    push r14', '    push r15', '    sub rsp, 8',
+            '.globl valen_gc_array_new', 'valen_gc_array_new:', '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    push r13', '    push r14', '    push r15', '    sub rsp, 8',
             '    mov r12, rdi', '    mov r13, rsi', '    mov r14, rdx', '    mov r15, rcx', '    test r13, r13', '    js .Larray_bounds_error',
-            '    mov edi, 40', '    mov rsi, r14', '    mov rdx, r15', '    lea rcx, [rip+argon_gc_array_finalize]', '    call argon_gc_alloc', '    mov rbx, rax',
+            '    mov edi, 40', '    mov rsi, r14', '    mov rdx, r15', '    lea rcx, [rip+valen_gc_array_finalize]', '    call valen_gc_alloc', '    mov rbx, rax',
             '    mov rax, r13', '    cmp rax, 4', '    jae .Lgc_array_capacity', '    mov eax, 4', '.Lgc_array_capacity:',
-            '    mov QWORD PTR [rbx], r13', '    mov QWORD PTR [rbx+8], rax', '    mov QWORD PTR [rbx+24], r12', '    mov QWORD PTR [rbx+32], 1', '    imul rax, r12', '    mov rdi, rax', '    call argon_alloc', '    mov QWORD PTR [rbx+16], rax', '    mov rax, rbx',
+            '    mov QWORD PTR [rbx], r13', '    mov QWORD PTR [rbx+8], rax', '    mov QWORD PTR [rbx+24], r12', '    mov QWORD PTR [rbx+32], 1', '    imul rax, r12', '    mov rdi, rax', '    call valen_alloc', '    mov QWORD PTR [rbx+16], rax', '    mov rax, rbx',
             '    add rsp, 8', '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    pop rbx', '    leave', '    ret', '',
-            'argon_gc_array_finalize:', '    cmp DWORD PTR [rip+argon_arena_enabled], 0', '    jne .Lgc_array_finalize_done',
+            'valen_gc_array_finalize:', '    cmp DWORD PTR [rip+valen_arena_enabled], 0', '    jne .Lgc_array_finalize_done',
             '    mov rsi, QWORD PTR [rdi+8]', '    imul rsi, QWORD PTR [rdi+24]', '    test rsi, rsi', '    jne .Lgc_array_finalize_size', '    mov esi, 1',
             '.Lgc_array_finalize_size:', '    mov rdi, QWORD PTR [rdi+16]', '    mov eax, 11', '    syscall', '.Lgc_array_finalize_done:', '    ret', ''
         ];
@@ -1834,7 +1834,7 @@ export class X86_64Backend {
             for (const field of type.fields) {
                 if (field.ownership === 'member-weak' || !this.isManagedReferenceType(field.type)) continue;
                 const layout = this.fieldOffsets.get(field.symbol);
-                lines.push(`    mov rdi, QWORD PTR [rbx+${layout.offset}]`, '    call argon_gc_mark');
+                lines.push(`    mov rdi, QWORD PTR [rbx+${layout.offset}]`, '    call valen_gc_mark');
             }
             lines.push('    pop rbx', '    ret', `${this.gcWeakLabel(type.name)}:`, '    push rbx', '    mov rbx, rdi');
             for (const field of type.fields) {
@@ -1861,7 +1861,7 @@ export class X86_64Backend {
             lines.push(`${this.gcArrayTraceLabel(type)}:`, '    push rbx', '    push r12', '    xor ebx, ebx', '    mov r12, rdi');
             if (managed && ownership !== 'weak') {
                 lines.push(`${traceLoop}:`, '    cmp rbx, QWORD PTR [r12]', `    jae ${traceDone}`, `    imul rax, rbx, ${size}`,
-                    '    add rax, QWORD PTR [r12+16]', '    mov rdi, QWORD PTR [rax]', '    call argon_gc_mark', '    inc rbx', `    jmp ${traceLoop}`);
+                    '    add rax, QWORD PTR [r12+16]', '    mov rdi, QWORD PTR [rax]', '    call valen_gc_mark', '    inc rbx', `    jmp ${traceLoop}`);
             }
             lines.push(`${traceDone}:`, '    pop r12', '    pop rbx', '    ret', `${this.gcArrayWeakLabel(type)}:`, '    push rbx', '    push r12', '    xor ebx, ebx', '    mov r12, rdi');
             if (managed && ownership === 'weak') {
@@ -1877,20 +1877,20 @@ export class X86_64Backend {
     }
 
     gcData() {
-        return ['.section .bss', '.align 8', 'argon_gc_roots:', '    .zero 8', 'argon_gc_heap:', '    .zero 8', 'argon_gc_bytes:', '    .zero 8',
-            'argon_arena_cursor:', '    .zero 8', 'argon_arena_remaining:', '    .zero 8', 'argon_arena_lock:', '    .zero 4', 'argon_arena_enabled:', '    .zero 4',
-            '.section .data', '.align 8', 'argon_gc_threshold:', '    .quad 1048576', '.text'];
+        return ['.section .bss', '.align 8', 'valen_gc_roots:', '    .zero 8', 'valen_gc_heap:', '    .zero 8', 'valen_gc_bytes:', '    .zero 8',
+            'valen_arena_cursor:', '    .zero 8', 'valen_arena_remaining:', '    .zero 8', 'valen_arena_lock:', '    .zero 4', 'valen_arena_enabled:', '    .zero 4',
+            '.section .data', '.align 8', 'valen_gc_threshold:', '    .quad 1048576', '.text'];
     }
 
     gcTraceLabel(typeName) { return `${this.typeLabel(typeName)}_gc_trace`; }
     gcWeakLabel(typeName) { return `${this.typeLabel(typeName)}_gc_weak`; }
-    gcArrayTraceLabel(typeName) { return `.Largon_gc_array_trace_${this.mangle(typeName)}`; }
-    gcArrayWeakLabel(typeName) { return `.Largon_gc_array_weak_${this.mangle(typeName)}`; }
+    gcArrayTraceLabel(typeName) { return `.Lvalen_gc_array_trace_${this.mangle(typeName)}`; }
+    gcArrayWeakLabel(typeName) { return `.Lvalen_gc_array_weak_${this.mangle(typeName)}`; }
 
     arrayRuntime() {
         return [
-            '.globl argon_array_new',
-            'argon_array_new:',
+            '.globl valen_array_new',
+            'valen_array_new:',
             '    push rbp',
             '    mov rbp, rsp',
             '    push rbx',
@@ -1901,7 +1901,7 @@ export class X86_64Backend {
             '    mov rbx, rsi',
             '    test rbx, rbx',
             '    js .Larray_bounds_error',
-            '    mov edi, 40', '    xor esi, esi', '    xor edx, edx', '    lea rcx, [rip+argon_gc_array_finalize]', '    call argon_gc_alloc',
+            '    mov edi, 40', '    xor esi, esi', '    xor edx, edx', '    lea rcx, [rip+valen_gc_array_finalize]', '    call valen_gc_alloc',
             '    mov r13, rax',
             '    mov rax, rbx',
             '    cmp rax, 4',
@@ -1914,7 +1914,7 @@ export class X86_64Backend {
             '    mov QWORD PTR [r13+32], 1',
             '    imul rax, r12',
             '    mov rdi, rax',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov QWORD PTR [r13+16], rax',
             '    mov rax, r13',
             '    add rsp, 8',
@@ -1924,8 +1924,8 @@ export class X86_64Backend {
             '    leave',
             '    ret',
             '',
-            '.globl argon_array_address',
-            'argon_array_address:',
+            '.globl valen_array_address',
+            'valen_array_address:',
             '    test rsi, rsi',
             '    js .Larray_bounds_error',
             '    cmp rsi, QWORD PTR [rdi]',
@@ -1938,8 +1938,8 @@ export class X86_64Backend {
             '    mov edi, 70',
             '    jmp .Lruntime_error',
             '',
-            '.globl argon_array_append',
-            'argon_array_append:',
+            '.globl valen_array_append',
+            'valen_array_append:',
             '    push rbp',
             '    mov rbp, rsp',
             '    push rbx',
@@ -1957,7 +1957,7 @@ export class X86_64Backend {
             '    mov QWORD PTR [rbx+8], rax',
             '    imul rax, r13',
             '    mov rdi, rax',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov rdi, rax',
             '    mov rsi, QWORD PTR [rbx+16]',
             '    mov rcx, r14',
@@ -1999,8 +1999,8 @@ export class X86_64Backend {
 
     stringRuntime() {
         return [
-            '.globl argon_string_address',
-            'argon_string_address:',
+            '.globl valen_string_address',
+            'valen_string_address:',
             '    test rsi, rsi',
             '    js .Lstring_bounds_error',
             '    cmp rsi, QWORD PTR [rdi+8]',
@@ -2012,8 +2012,8 @@ export class X86_64Backend {
             '    mov edi, 70',
             '    jmp .Lruntime_error',
             '',
-            '.globl argon_string_equal',
-            'argon_string_equal:',
+            '.globl valen_string_equal',
+            'valen_string_equal:',
             '    mov rcx, QWORD PTR [rdi+8]',
             '    cmp rcx, QWORD PTR [rsi+8]',
             '    jne .Lstring_not_equal',
@@ -2027,8 +2027,8 @@ export class X86_64Backend {
             '    xor eax, eax',
             '    ret',
             '',
-            '.globl argon_string_concat',
-            'argon_string_concat:',
+            '.globl valen_string_concat',
+            'valen_string_concat:',
             '    push rbp',
             '    mov rbp, rsp',
             '    push rbx',
@@ -2040,11 +2040,11 @@ export class X86_64Backend {
             '    mov r13, QWORD PTR [r14+8]',
             '    add r13, QWORD PTR [r12+8]',
             '    mov edi, 16',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov QWORD PTR [rax+8], r13',
             '    mov rbx, rax',
             '    mov rdi, r13',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov QWORD PTR [rbx], rax',
             '    mov rdi, rax',
             '    mov rsi, QWORD PTR [r14]',
@@ -2061,8 +2061,8 @@ export class X86_64Backend {
             '    leave',
             '    ret',
             '',
-            '.globl argon_string_slice',
-            'argon_string_slice:',
+            '.globl valen_string_slice',
+            'valen_string_slice:',
             '    test rsi, rsi',
             '    js .Lstring_bounds_error',
             '    test rdx, rdx',
@@ -2082,11 +2082,11 @@ export class X86_64Backend {
             '    mov r12, rsi',
             '    mov r13, rdx',
             '    mov edi, 16',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov QWORD PTR [rax+8], r13',
             '    mov rbx, rax',
             '    mov rdi, r13',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov QWORD PTR [rbx], rax',
             '    mov rdi, rax',
             '    mov rsi, QWORD PTR [r14]',
@@ -2106,8 +2106,8 @@ export class X86_64Backend {
 
     builderRuntime() {
         return [
-            '.globl argon_integer_to_string',
-            'argon_integer_to_string:',
+            '.globl valen_integer_to_string',
+            'valen_integer_to_string:',
             '    push rbp',
             '    mov rbp, rsp',
             '    push rbx',
@@ -2117,10 +2117,10 @@ export class X86_64Backend {
             '    mov r12, rdi',
             '    mov r14, rsi',
             '    mov edi, 16',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov rbx, rax',
             '    mov edi, 21',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov r13, rax',
             '    lea rsi, [r13+21]',
             '    mov rdi, rsi',
@@ -2158,8 +2158,8 @@ export class X86_64Backend {
             '    leave',
             '    ret',
             '',
-            '.globl argon_builder_append_string',
-            'argon_builder_append_string:',
+            '.globl valen_builder_append_string',
+            'valen_builder_append_string:',
             '    push rbp',
             '    mov rbp, rsp',
             '    push rbx',
@@ -2176,7 +2176,7 @@ export class X86_64Backend {
             '    movzx esi, BYTE PTR [rax+r13]',
             '    mov rdi, rbx',
             '    mov edx, 1',
-            '    call argon_array_append',
+            '    call valen_array_append',
             '    inc r13',
             '    jmp .Lbuilder_append_loop',
             '.Lbuilder_append_done:',
@@ -2187,8 +2187,8 @@ export class X86_64Backend {
             '    leave',
             '    ret',
             '',
-            '.globl argon_builder_build',
-            'argon_builder_build:',
+            '.globl valen_builder_build',
+            'valen_builder_build:',
             '    push rbp',
             '    mov rbp, rsp',
             '    push rbx',
@@ -2197,12 +2197,12 @@ export class X86_64Backend {
             '    sub rsp, 8',
             '    mov r12, rdi',
             '    mov edi, 16',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov rbx, rax',
             '    mov r13, QWORD PTR [r12]',
             '    mov QWORD PTR [rbx+8], r13',
             '    mov rdi, r13',
-            '    call argon_alloc',
+            '    call valen_alloc',
             '    mov QWORD PTR [rbx], rax',
             '    mov rdi, rax',
             '    mov rsi, QWORD PTR [r12+16]',
@@ -2223,8 +2223,8 @@ export class X86_64Backend {
         if (this.stringLiterals.has(value)) return this.stringLiterals.get(value);
         const index = this.stringLiterals.size;
         const literal = {
-            descriptor: `.Largon_string_${index}`,
-            data: `.Largon_string_${index}_data`,
+            descriptor: `.Lvalen_string_${index}`,
+            data: `.Lvalen_string_${index}_data`,
             bytes: [...new TextEncoder().encode(value)]
         };
         this.stringLiterals.set(value, literal);
@@ -2234,7 +2234,7 @@ export class X86_64Backend {
     internFloat(value, type) {
         const key = `${type}:${value}`;
         if (this.floatLiterals.has(key)) return this.floatLiterals.get(key);
-        const literal = {label: `.Largon_float_${this.floatLiterals.size}`, value, type};
+        const literal = {label: `.Lvalen_float_${this.floatLiterals.size}`, value, type};
         this.floatLiterals.set(key, literal);
         return literal;
     }
@@ -2355,7 +2355,7 @@ export class X86_64Backend {
     }
 
     mangle(name) {
-        let result = '__argon_';
+        let result = '__valen_';
         for (const character of name) {
             result += /[A-Za-z0-9]/.test(character)
                 ? character

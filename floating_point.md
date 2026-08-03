@@ -1,13 +1,13 @@
 # Floating-point rules
 
-Argon provides IEEE 754 binary32 (`f32`) and binary64 (`f64`) value types.
+Valen provides IEEE 754 binary32 (`f32`) and binary64 (`f64`) value types.
 Decimal literals, including exponent notation, default to `f64`; `as f32`
 performs an explicit narrowing conversion. Floating values may be stored in
 locals, members, arrays, and passed through direct, virtual, contract, native,
 and foreign calls.
 
 `+`, `-`, `*`, `/`, unary `-`, and the ordinary comparison operators operate at
-the operands' declared width. Argon does not implicitly mix `f32`, `f64`, or
+the operands' declared width. Valen does not implicitly mix `f32`, `f64`, or
 integer operands. Numeric conversions must be explicit. Integer-to-float
 conversion rounds according to the active IEEE round-to-nearest mode.
 Float-to-integer conversion truncates toward zero; NaN and values outside the

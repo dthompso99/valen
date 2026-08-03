@@ -1,6 +1,6 @@
-# Argon Bootstrap and Self-Hosting Checklist
+# Valen Bootstrap and Self-Hosting Checklist
 
-The bootstrap is complete when the JavaScript compiler can build an Argon compiler, and that generated compiler can compile its own source again without using JavaScript at runtime.
+The bootstrap is complete when the JavaScript compiler can build an Valen compiler, and that generated compiler can compile its own source again without using JavaScript at runtime.
 
 ## Current foundation
 
@@ -110,7 +110,7 @@ The bootstrap is complete when the JavaScript compiler can build an Argon compil
 - [x] Assembly-symbol collision tests
 - [x] Register allocation and optimization explicitly deferred
 
-## Phase 4: Rewrite the compiler in Argon
+## Phase 4: Rewrite the compiler in Valen
 
 - [x] `SourceFile`, `SourceSpan`, and token types
 - [x] Tokenizer
@@ -123,11 +123,11 @@ The bootstrap is complete when the JavaScript compiler can build an Argon compil
 - [x] x86-64 backend
 - [x] Compiler command-line driver
 
-The first checkpoint is an Argon tokenizer that reads a source file and prints its token stream.
+The first checkpoint is an Valen tokenizer that reads a source file and prints its token stream.
 
 ## Deliberately deferred from the bootstrap subset
 
-These features are not required to self-host, but should be reconsidered for the Argon compiler and standard library rather than accidentally omitted:
+These features are not required to self-host, but should be reconsidered for the Valen compiler and standard library rather than accidentally omitted:
 
 The active post-bootstrap roadmap is maintained in [`language_checklist.md`](language_checklist.md). In particular, the `inherits` and `implements` language constructs are explicit first-phase work there.
 
@@ -167,7 +167,7 @@ The active post-bootstrap roadmap is maintained in [`language_checklist.md`](lan
 
 - [x] JavaScript bootstrap builds compiler generation 0
 - [x] Generation 0 compiles the example programs
-- [x] Generation 0 compiles the Argon compiler source
+- [x] Generation 0 compiles the Valen compiler source
 - [x] Generation 1 passes the compiler test suite
 - [ ] Generation 1 builds generation 2
 - [ ] Generations 1 and 2 produce semantically equivalent IR

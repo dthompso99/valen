@@ -5,7 +5,7 @@
   "stage1_compile_workload": {
     "maxRssKiB": 2097152
   },
-  "argon_run_integer_loop": {
+  "valen_run_integer_loop": {
     "maxRssKiB": 262144
   },
   "stage1_compile_stage2": {

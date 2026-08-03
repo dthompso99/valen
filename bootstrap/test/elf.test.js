@@ -9,7 +9,7 @@ import {X86Assembler} from '../x86-assembler.js';
 import {Compiler} from '../compiler.js';
 
 test('ELF writer produces a directly linkable x86-64 relocatable object', t => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'argon-elf-'));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-elf-'));
     try {
         const objectPath = path.join(directory, 'exit.o');
         const executablePath = path.join(directory, 'exit');
@@ -53,8 +53,8 @@ test('ELF writer emits symbol relocations with the correct section links', () =>
     assert.ok(bytes.includes(Buffer.from('external\0')));
 });
 
-test('Argon x86 assembler encodes backend syntax and RIP-relative data relocations', t => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'argon-assembler-'));
+test('Valen x86 assembler encodes backend syntax and RIP-relative data relocations', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-assembler-'));
     try {
         const objectPath = path.join(directory, 'program.o');
         const executablePath = path.join(directory, 'program');
@@ -68,7 +68,7 @@ _start:
     syscall
 .section .rodata
 message:
-    .asciz "argon"
+    .asciz "valen"
 `;
         fs.writeFileSync(objectPath, new X86Assembler().assemble(source));
         const link = spawnSync('ld', ['-o', executablePath, objectPath], {encoding: 'utf8'});
@@ -84,7 +84,7 @@ message:
 });
 
 test('compiler can stop at a relocatable object without selecting a linker', () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'argon-emit-object-'));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-emit-object-'));
     try {
         const sourcePath = path.join(directory, 'main.ar');
         const objectPath = path.join(directory, 'main.o');

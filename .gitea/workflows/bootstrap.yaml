@@ -1,4 +1,4 @@
-name: Argon compiler
+name: Valen compiler
 
 on:
   push:
@@ -52,18 +52,18 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v3
         with:
-          name: argon-benchmark-results
+          name: valen-benchmark-results
           path: |
             benchmark-results.json
             benchmark-results.md
 
       - name: Build and test bootstrap generations
-        run: docker build --pull --target stage3 -t argon:test -f ./docker/Dockerfile.bootstrap .
+        run: docker build --pull --target stage3 -t valen:test -f ./docker/Dockerfile.bootstrap .
 
       - name: Build and run scratch deployment proof
         run: |
-          docker build --target scratch-runtime -t argon:scratch -f ./docker/Dockerfile.bootstrap .
-          docker run --rm argon:scratch
+          docker build --target scratch-runtime -t valen:scratch -f ./docker/Dockerfile.bootstrap .
+          docker run --rm valen:scratch
 
       - name: Login to registry
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -75,15 +75,15 @@ jobs:
           set -euo pipefail
           echo "$REGISTRY_PASSWORD" | docker login $REGISTRY_HOST -u "$REGISTRY_USERNAME" --password-stdin
 
-      - name: Publish tested Argon image
+      - name: Publish tested Valen image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           REGISTRY_HOST: gitea.hallrd.click
           NAMESPACE: dthompson
-          IMAGE_AGENT: argon
+          IMAGE_AGENT: valen
         run: |
           set -euo pipefail
-          docker tag argon:test $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:latest
-          docker tag argon:test $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:${{ github.sha }}
+          docker tag valen:test $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:latest
+          docker tag valen:test $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:${{ github.sha }}
           docker push $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:latest
           docker push $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:${{ github.sha }}

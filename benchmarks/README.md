@@ -1,4 +1,4 @@
-# Argon benchmarks
+# Valen benchmarks
 
 Run the standard benchmark from the repository root:
 
@@ -18,12 +18,12 @@ node scripts/benchmark.mjs \
 The standard run measures:
 
 - generation-0/JavaScript compilation of the native generation-1 compiler
-- generation-1 compilation of a fixed Argon workload
+- generation-1 compilation of a fixed Valen workload
 - relocatable object and executable sizes
-- median runtime and peak RSS of the Argon workload
+- median runtime and peak RSS of the Valen workload
 - the same workload compiled as C with `-O0` and `-O2`
 
-The C programs are comparison anchors, not claims that Argon should match C at its current maturity. `-O0` helps expose backend/code-generation overhead; `-O2` shows the scale of mature optimization work still available.
+The C programs are comparison anchors, not claims that Valen should match C at its current maturity. `-O0` helps expose backend/code-generation overhead; `-O2` shows the scale of mature optimization work still available.
 
 Timing values are reported but do not fail CI because shared-runner speed varies. `budgets.json` contains deliberately generous peak-memory ceilings that catch runaway compiler behavior and OOM regressions without treating small machine differences as failures.
 

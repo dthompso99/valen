@@ -9,7 +9,7 @@ entry {{
         System.print(values.length)
         System.print(values[2])
 
-        local greeting = "native " + "argon\n"
+        local greeting = "native " + "valen\n"
         System.write(greeting)
         System.write(greeting.slice(0, 6) + "!\n")
 

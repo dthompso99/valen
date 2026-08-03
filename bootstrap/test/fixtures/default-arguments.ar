@@ -2,7 +2,7 @@ Defaults {{
     member value:i64
     member label:string
 
-    __(value:i64, label:string="argon") -> void {
+    __(value:i64, label:string="valen") -> void {
         self.value = value
         self.label = label
     }
@@ -22,7 +22,7 @@ Child inherits Parent {{
 entry {{
     __() -> i32 {
         local defaults = new Defaults(9)
-        if defaults.label != "argon" { return 1 }
+        if defaults.label != "valen" { return 1 }
         if defaults.add(5) != 5 { return 2 }
         local child = new Child(3)
         if child.total != 5 { return 3 }

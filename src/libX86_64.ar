@@ -89,7 +89,7 @@ library X86_64 {{
                 if self.program.externals[index].foreignLibrary != null { self.writer.line(".extern " + self.program.externals[index].runtimeName) }
                 index = index + 1
             }
-            if self.hasRuntime("argon_Operations_threadStart") { self.writer.line(".extern pthread_create"); self.writer.line(".extern pthread_join") }
+            if self.hasRuntime("valen_Operations_threadStart") { self.writer.line(".extern pthread_create"); self.writer.line(".extern pthread_join") }
             index = 0
             while index < self.program.functions.length {
                 self.generateFunction(self.program.functions[index])
@@ -98,15 +98,15 @@ library X86_64 {{
             self.generateMain()
             self.structuralRuntime()
             if self.usesPrint { self.printRuntime() }
-            if self.usesWrite { self.writeRuntime("argon_System_write", 1) }
-            if self.usesWriteError { self.writeRuntime("argon_System_writeError", 2) }
+            if self.usesWrite { self.writeRuntime("valen_System_write", 1) }
+            if self.usesWriteError { self.writeRuntime("valen_System_writeError", 2) }
             self.processRuntime()
             self.linkRuntime()
             self.filesystemRuntime()
             self.networkRuntime()
             self.memoryRuntime()
-            if self.hasRuntime("argon_EventLoop_available") { self.ioRuntime() }
-            if self.hasRuntime("argon_Operations_threadAvailable") { self.operationsRuntime() }
+            if self.hasRuntime("valen_EventLoop_available") { self.ioRuntime() }
+            if self.hasRuntime("valen_Operations_threadAvailable") { self.operationsRuntime() }
             self.runtimeCore()
             self.garbageCollectorRuntime()
             self.arrayRuntime()
@@ -119,9 +119,9 @@ library X86_64 {{
             self.runtimeData()
             self.typeData()
             self.writer.line(".section .rodata")
-            self.writer.line("argon_test_failure_message:")
+            self.writer.line("valen_test_failure_message:")
             self.writer.line("    .byte 116,101,115,116,32,102,97,105,108,101,100,10")
-            self.writer.line(".comm argon_test_failures,8,8")
+            self.writer.line(".comm valen_test_failures,8,8")
             self.writer.line(".section .note.GNU-stack,\"\",@progbits")
             return self.writer.build()
         }
@@ -151,20 +151,20 @@ library X86_64 {{
         }
 
         supportsRuntime(name:string) -> bool {
-            if name == "argon_System_print" || name == "argon_System_arguments" || name == "argon_System_exit" || name == "argon_System_write" || name == "argon_System_writeError" { return true }
-            if name == "argon_System_openRead" || name == "argon_System_openWrite" || name == "argon_System_read" || name == "argon_System_writeFile" || name == "argon_System_writeBytes" || name == "argon_System_close" { return true }
-            if name == "argon_System_lastError" || name == "argon_System_currentDirectory" || name == "argon_System_environmentVariable" || name == "argon_System_collectGarbage" { return true }
-            if name == "argon_System_enableProcessArena" || name == "argon_System_link" || name == "argon_System_memoryCopy" || name == "argon_System_memoryCompare" { return true }
-            if name == "argon_System_fileDescriptor" || name == "argon_System_makeFileNonblocking" { return true }
-            if name == "argon_Operations_threadAvailable" || name == "argon_Operations_threadStart" || name == "argon_Operations_threadJoin" { return true }
-            if name == "argon_Operations_mutexLock" || name == "argon_Operations_mutexUnlock" || name == "argon_Operations_conditionWait" { return true }
-            if name == "argon_Operations_conditionNotifyOne" || name == "argon_Operations_conditionNotifyAll" || name == "argon_Operations_atomicLoad" { return true }
-            if name == "argon_Network_listen" || name == "argon_Network_accept" || name == "argon_Network_receive" || name == "argon_Network_send" { return true }
-            if name == "argon_Network_closeListener" || name == "argon_Network_closeConnection" || name == "argon_Network_lastError" { return true }
-            if name == "argon_Network_listenerDescriptor" || name == "argon_Network_connectionDescriptor" { return true }
-            if name == "argon_Network_makeListenerNonblocking" || name == "argon_Network_makeConnectionNonblocking" { return true }
-            if name == "argon_EventLoop_available" || name == "argon_EventLoop_wait" { return true }
-            return name == "argon_Operations_atomicStore" || name == "argon_Operations_atomicExchange" || name == "argon_Operations_atomicCompareExchange" || name == "argon_Operations_atomicAdd"
+            if name == "valen_System_print" || name == "valen_System_arguments" || name == "valen_System_exit" || name == "valen_System_write" || name == "valen_System_writeError" { return true }
+            if name == "valen_System_openRead" || name == "valen_System_openWrite" || name == "valen_System_read" || name == "valen_System_writeFile" || name == "valen_System_writeBytes" || name == "valen_System_close" { return true }
+            if name == "valen_System_lastError" || name == "valen_System_currentDirectory" || name == "valen_System_environmentVariable" || name == "valen_System_collectGarbage" { return true }
+            if name == "valen_System_enableProcessArena" || name == "valen_System_link" || name == "valen_System_memoryCopy" || name == "valen_System_memoryCompare" { return true }
+            if name == "valen_System_fileDescriptor" || name == "valen_System_makeFileNonblocking" { return true }
+            if name == "valen_Operations_threadAvailable" || name == "valen_Operations_threadStart" || name == "valen_Operations_threadJoin" { return true }
+            if name == "valen_Operations_mutexLock" || name == "valen_Operations_mutexUnlock" || name == "valen_Operations_conditionWait" { return true }
+            if name == "valen_Operations_conditionNotifyOne" || name == "valen_Operations_conditionNotifyAll" || name == "valen_Operations_atomicLoad" { return true }
+            if name == "valen_Network_listen" || name == "valen_Network_accept" || name == "valen_Network_receive" || name == "valen_Network_send" { return true }
+            if name == "valen_Network_closeListener" || name == "valen_Network_closeConnection" || name == "valen_Network_lastError" { return true }
+            if name == "valen_Network_listenerDescriptor" || name == "valen_Network_connectionDescriptor" { return true }
+            if name == "valen_Network_makeListenerNonblocking" || name == "valen_Network_makeConnectionNonblocking" { return true }
+            if name == "valen_EventLoop_available" || name == "valen_EventLoop_wait" { return true }
+            return name == "valen_Operations_atomicStore" || name == "valen_Operations_atomicExchange" || name == "valen_Operations_atomicCompareExchange" || name == "valen_Operations_atomicAdd"
         }
 
         operationsRuntime() -> void {
@@ -192,32 +192,32 @@ library X86_64 {{
             }
             if mutex.length == 0 || condition.length == 0 || atomic.length == 0 || handle.length == 0 || worker.length == 0 { return }
 
-            self.writer.line(".globl argon_Operations_threadAvailable"); self.writer.line("argon_Operations_threadAvailable:"); self.writer.line("    mov eax, 1"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line(".globl argon_Operations_threadStart"); self.writer.line("argon_Operations_threadStart:"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi"); self.writer.line("    lea rdi, [rbx+" + handle + "]"); self.writer.line("    xor esi, esi"); self.writer.line("    lea rdx, [rip+argon_thread_worker]"); self.writer.line("    mov rcx, rbx"); self.writer.line("    call pthread_create"); self.writer.line("    test eax, eax"); self.writer.line("    sete al"); self.writer.line("    movzx eax, al"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line("argon_thread_worker:"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi"); self.writer.line("    mov rdi, rbx"); self.writer.line("    call " + worker); self.writer.line("    xor eax, eax"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line(".globl argon_Operations_threadJoin"); self.writer.line("argon_Operations_threadJoin:"); self.writer.line("    push rax"); self.writer.line("    mov rdi, QWORD PTR [rdi+" + handle + "]"); self.writer.line("    xor esi, esi"); self.writer.line("    call pthread_join"); self.writer.line("    pop rcx"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_Operations_threadAvailable"); self.writer.line("valen_Operations_threadAvailable:"); self.writer.line("    mov eax, 1"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_Operations_threadStart"); self.writer.line("valen_Operations_threadStart:"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi"); self.writer.line("    lea rdi, [rbx+" + handle + "]"); self.writer.line("    xor esi, esi"); self.writer.line("    lea rdx, [rip+valen_thread_worker]"); self.writer.line("    mov rcx, rbx"); self.writer.line("    call pthread_create"); self.writer.line("    test eax, eax"); self.writer.line("    sete al"); self.writer.line("    movzx eax, al"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line("valen_thread_worker:"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi"); self.writer.line("    mov rdi, rbx"); self.writer.line("    call " + worker); self.writer.line("    xor eax, eax"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_Operations_threadJoin"); self.writer.line("valen_Operations_threadJoin:"); self.writer.line("    push rax"); self.writer.line("    mov rdi, QWORD PTR [rdi+" + handle + "]"); self.writer.line("    xor esi, esi"); self.writer.line("    call pthread_join"); self.writer.line("    pop rcx"); self.writer.line("    ret"); self.writer.line("")
 
-            self.writer.line(".globl argon_Operations_mutexLock"); self.writer.line("argon_Operations_mutexLock:"); self.writer.line("    push r12"); self.writer.line("    lea r12, [rdi+" + mutex + "]"); self.writer.line(".Largon_mutex_retry:"); self.writer.line("    xor eax, eax"); self.writer.line("    mov ecx, 1"); self.writer.line("    lock cmpxchg DWORD PTR [r12], ecx"); self.writer.line("    je .Largon_mutex_locked"); self.writer.line("    mov eax, 202"); self.writer.line("    mov rdi, r12"); self.writer.line("    xor esi, esi"); self.writer.line("    mov edx, 1"); self.writer.line("    xor r10d, r10d"); self.writer.line("    xor r8d, r8d"); self.writer.line("    xor r9d, r9d"); self.writer.line("    syscall"); self.writer.line("    jmp .Largon_mutex_retry"); self.writer.line(".Largon_mutex_locked:"); self.writer.line("    pop r12"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line(".globl argon_Operations_mutexUnlock"); self.writer.line("argon_Operations_mutexUnlock:"); self.writer.line("    lea rdi, [rdi+" + mutex + "]"); self.writer.line("    mov DWORD PTR [rdi], 0"); self.writer.line("    mov eax, 202"); self.writer.line("    mov esi, 1"); self.writer.line("    mov edx, 1"); self.writer.line("    xor r10d, r10d"); self.writer.line("    xor r8d, r8d"); self.writer.line("    xor r9d, r9d"); self.writer.line("    syscall"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_Operations_mutexLock"); self.writer.line("valen_Operations_mutexLock:"); self.writer.line("    push r12"); self.writer.line("    lea r12, [rdi+" + mutex + "]"); self.writer.line(".Lvalen_mutex_retry:"); self.writer.line("    xor eax, eax"); self.writer.line("    mov ecx, 1"); self.writer.line("    lock cmpxchg DWORD PTR [r12], ecx"); self.writer.line("    je .Lvalen_mutex_locked"); self.writer.line("    mov eax, 202"); self.writer.line("    mov rdi, r12"); self.writer.line("    xor esi, esi"); self.writer.line("    mov edx, 1"); self.writer.line("    xor r10d, r10d"); self.writer.line("    xor r8d, r8d"); self.writer.line("    xor r9d, r9d"); self.writer.line("    syscall"); self.writer.line("    jmp .Lvalen_mutex_retry"); self.writer.line(".Lvalen_mutex_locked:"); self.writer.line("    pop r12"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_Operations_mutexUnlock"); self.writer.line("valen_Operations_mutexUnlock:"); self.writer.line("    lea rdi, [rdi+" + mutex + "]"); self.writer.line("    mov DWORD PTR [rdi], 0"); self.writer.line("    mov eax, 202"); self.writer.line("    mov esi, 1"); self.writer.line("    mov edx, 1"); self.writer.line("    xor r10d, r10d"); self.writer.line("    xor r8d, r8d"); self.writer.line("    xor r9d, r9d"); self.writer.line("    syscall"); self.writer.line("    ret"); self.writer.line("")
 
-            self.writer.line(".globl argon_Operations_conditionWait"); self.writer.line("argon_Operations_conditionWait:"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    mov r12, rdi"); self.writer.line("    mov r13, rsi"); self.writer.line("    mov r14d, DWORD PTR [r12+" + condition + "]"); self.writer.line("    mov rdi, r13"); self.writer.line("    call argon_Operations_mutexUnlock"); self.writer.line("    mov eax, 202"); self.writer.line("    lea rdi, [r12+" + condition + "]"); self.writer.line("    xor esi, esi"); self.writer.line("    mov edx, r14d"); self.writer.line("    xor r10d, r10d"); self.writer.line("    xor r8d, r8d"); self.writer.line("    xor r9d, r9d"); self.writer.line("    syscall"); self.writer.line("    mov rdi, r13"); self.writer.line("    call argon_Operations_mutexLock"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line(".globl argon_Operations_conditionNotifyOne"); self.writer.line("argon_Operations_conditionNotifyOne:"); self.conditionNotifyRuntime(condition, "1")
-            self.writer.line(".globl argon_Operations_conditionNotifyAll"); self.writer.line("argon_Operations_conditionNotifyAll:"); self.conditionNotifyRuntime(condition, "2147483647")
+            self.writer.line(".globl valen_Operations_conditionWait"); self.writer.line("valen_Operations_conditionWait:"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    mov r12, rdi"); self.writer.line("    mov r13, rsi"); self.writer.line("    mov r14d, DWORD PTR [r12+" + condition + "]"); self.writer.line("    mov rdi, r13"); self.writer.line("    call valen_Operations_mutexUnlock"); self.writer.line("    mov eax, 202"); self.writer.line("    lea rdi, [r12+" + condition + "]"); self.writer.line("    xor esi, esi"); self.writer.line("    mov edx, r14d"); self.writer.line("    xor r10d, r10d"); self.writer.line("    xor r8d, r8d"); self.writer.line("    xor r9d, r9d"); self.writer.line("    syscall"); self.writer.line("    mov rdi, r13"); self.writer.line("    call valen_Operations_mutexLock"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_Operations_conditionNotifyOne"); self.writer.line("valen_Operations_conditionNotifyOne:"); self.conditionNotifyRuntime(condition, "1")
+            self.writer.line(".globl valen_Operations_conditionNotifyAll"); self.writer.line("valen_Operations_conditionNotifyAll:"); self.conditionNotifyRuntime(condition, "2147483647")
 
-            self.writer.line(".globl argon_Operations_atomicLoad"); self.writer.line("argon_Operations_atomicLoad:"); self.writer.line("    mov rax, QWORD PTR [rdi+" + atomic + "]"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line(".globl argon_Operations_atomicStore"); self.writer.line("argon_Operations_atomicStore:"); self.writer.line("    xchg QWORD PTR [rdi+" + atomic + "], rsi"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line(".globl argon_Operations_atomicExchange"); self.writer.line("argon_Operations_atomicExchange:"); self.writer.line("    mov rax, rsi"); self.writer.line("    xchg QWORD PTR [rdi+" + atomic + "], rax"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line(".globl argon_Operations_atomicCompareExchange"); self.writer.line("argon_Operations_atomicCompareExchange:"); self.writer.line("    mov rax, rsi"); self.writer.line("    lock cmpxchg QWORD PTR [rdi+" + atomic + "], rdx"); self.writer.line("    sete al"); self.writer.line("    movzx eax, al"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line(".globl argon_Operations_atomicAdd"); self.writer.line("argon_Operations_atomicAdd:"); self.writer.line("    mov rax, rsi"); self.writer.line("    lock xadd QWORD PTR [rdi+" + atomic + "], rax"); self.writer.line("    add rax, rsi"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_Operations_atomicLoad"); self.writer.line("valen_Operations_atomicLoad:"); self.writer.line("    mov rax, QWORD PTR [rdi+" + atomic + "]"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_Operations_atomicStore"); self.writer.line("valen_Operations_atomicStore:"); self.writer.line("    xchg QWORD PTR [rdi+" + atomic + "], rsi"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_Operations_atomicExchange"); self.writer.line("valen_Operations_atomicExchange:"); self.writer.line("    mov rax, rsi"); self.writer.line("    xchg QWORD PTR [rdi+" + atomic + "], rax"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_Operations_atomicCompareExchange"); self.writer.line("valen_Operations_atomicCompareExchange:"); self.writer.line("    mov rax, rsi"); self.writer.line("    lock cmpxchg QWORD PTR [rdi+" + atomic + "], rdx"); self.writer.line("    sete al"); self.writer.line("    movzx eax, al"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_Operations_atomicAdd"); self.writer.line("valen_Operations_atomicAdd:"); self.writer.line("    mov rax, rsi"); self.writer.line("    lock xadd QWORD PTR [rdi+" + atomic + "], rax"); self.writer.line("    add rax, rsi"); self.writer.line("    ret"); self.writer.line("")
         }
 
         ioRuntime() -> void {
-            self.writer.line(".globl argon_EventLoop_available"); self.writer.line("argon_EventLoop_available:"); self.writer.line("    mov eax, 1"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line(".globl argon_EventLoop_wait"); self.writer.line("argon_EventLoop_wait:")
+            self.writer.line(".globl valen_EventLoop_available"); self.writer.line("valen_EventLoop_available:"); self.writer.line("    mov eax, 1"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_EventLoop_wait"); self.writer.line("valen_EventLoop_wait:")
             self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15")
             self.writer.line("    mov r12, QWORD PTR [rdi]"); self.writer.line("    cmp r12, QWORD PTR [rsi]"); self.writer.line("    jne .Lio_wait_early")
             self.writer.line("    test r12, r12"); self.writer.line("    je .Lio_wait_early"); self.writer.line("    mov r13, QWORD PTR [rdi+16]")
-            self.writer.line("    mov r14, QWORD PTR [rsi+16]"); self.writer.line("    mov r15, rdx"); self.writer.line("    lea rdi, [r12*8]"); self.writer.line("    call argon_alloc")
+            self.writer.line("    mov r14, QWORD PTR [rsi+16]"); self.writer.line("    mov r15, rdx"); self.writer.line("    lea rdi, [r12*8]"); self.writer.line("    call valen_alloc")
             self.writer.line("    mov rbx, rax"); self.writer.line("    xor ecx, ecx"); self.writer.line(".Lio_wait_fill:"); self.writer.line("    cmp rcx, r12"); self.writer.line("    jae .Lio_wait_poll")
             self.writer.line("    mov rax, QWORD PTR [r13+rcx*8]"); self.writer.line("    mov DWORD PTR [rbx+rcx*8], eax")
             self.writer.line("    mov rax, QWORD PTR [r14+rcx*8]"); self.writer.line("    mov WORD PTR [rbx+rcx*8+4], ax"); self.writer.line("    mov WORD PTR [rbx+rcx*8+6], 0")
@@ -345,13 +345,13 @@ library X86_64 {{
                 self.writer.line("    mov QWORD PTR [rbp-" + clearOffset.toString() + "], 0")
                 clearOffset = clearOffset + 8
             }
-            self.writer.line("    mov rax, QWORD PTR [rip+argon_gc_roots]")
+            self.writer.line("    mov rax, QWORD PTR [rip+valen_gc_roots]")
             self.writer.line("    mov QWORD PTR [rbp-" + rootRecordOffset.toString() + "], rax")
             self.writer.line("    lea rax, [rip+" + rootTraceLabel + "]")
             self.writer.line("    mov QWORD PTR [rbp-" + (rootRecordOffset - 8).toString() + "], rax")
             self.writer.line("    mov QWORD PTR [rbp-" + (rootRecordOffset - 16).toString() + "], rbp")
             self.writer.line("    lea rax, [rbp-" + rootRecordOffset.toString() + "]")
-            self.writer.line("    mov QWORD PTR [rip+argon_gc_roots], rax")
+            self.writer.line("    mov QWORD PTR [rip+valen_gc_roots], rax")
             parameterIndex = 0
             local gpIndex:i64 = 0
             local xmmIndex:i64 = 0
@@ -388,7 +388,7 @@ library X86_64 {{
             }
             self.writer.line(endLabel + ":")
             self.writer.line("    mov rcx, QWORD PTR [rbp-" + rootRecordOffset.toString() + "]")
-            self.writer.line("    mov QWORD PTR [rip+argon_gc_roots], rcx")
+            self.writer.line("    mov QWORD PTR [rip+valen_gc_roots], rcx")
             self.writer.line("    leave")
             self.writer.line("    ret")
             self.writer.line(rootTraceLabel + ":")
@@ -397,7 +397,7 @@ library X86_64 {{
             slotIndex = 0
             while slotIndex < roots.length {
                 self.writer.line("    mov rdi, QWORD PTR [rbx-" + roots[slotIndex].offset.toString() + "]")
-                self.writer.line("    call argon_gc_mark")
+                self.writer.line("    call valen_gc_mark")
                 slotIndex = slotIndex + 1
             }
             self.writer.line("    pop rbx")
@@ -481,7 +481,7 @@ library X86_64 {{
                 self.writer.line("    lea rsi, [rip+" + self.gcTraceLabel(instruction.ownerType!) + "]")
                 self.writer.line("    lea rdx, [rip+" + self.gcWeakLabel(instruction.ownerType!) + "]")
                 self.writer.line("    xor ecx, ecx")
-                self.writer.line("    call argon_gc_alloc")
+                self.writer.line("    call valen_gc_alloc")
                 self.writer.line("    lea rcx, [rip+" + self.typeLabel(instruction.ownerType!) + "]")
                 self.writer.line("    mov QWORD PTR [rax], rcx")
                 self.writer.line("    mov QWORD PTR [rax+8], 1")
@@ -505,7 +505,7 @@ library X86_64 {{
                 self.load(instruction.first!, "rsi")
                 self.writer.line("    lea rdx, [rip+" + self.gcArrayTraceLabel(instruction.result!.typeName) + "]")
                 self.writer.line("    lea rcx, [rip+" + self.gcArrayWeakLabel(instruction.result!.typeName) + "]")
-                self.writer.line("    call argon_gc_array_new")
+                self.writer.line("    call valen_gc_array_new")
                 self.storeResult(instruction, "rax")
                 return
             }
@@ -519,11 +519,11 @@ library X86_64 {{
                 self.load(instruction.first!, "rdi")
                 self.load(instruction.second!, "rsi")
                 if op == "string_load" {
-                    self.writer.line("    call argon_string_address")
+                    self.writer.line("    call valen_string_address")
                     self.writer.line("    movzx eax, BYTE PTR [rax]")
                 } else {
                     self.writer.line("    mov rdx, " + self.sizeOf(instruction.elementType!).toString())
-                    self.writer.line("    call argon_array_address")
+                    self.writer.line("    call valen_array_address")
                     self.loadMemory("[rax]", instruction.elementType!, "rax")
                     if instruction.elementOwnership != null { if instruction.elementOwnership! == "weak" {
                         local live = ".Lweak_array_live_" + self.nextLabel.toString(); self.nextLabel = self.nextLabel + 1
@@ -541,7 +541,7 @@ library X86_64 {{
                 self.load(instruction.first!, "rdi")
                 self.load(instruction.second!, "rsi")
                 self.writer.line("    mov rdx, " + self.sizeOf(instruction.elementType!).toString())
-                self.writer.line("    call argon_array_address")
+                self.writer.line("    call valen_array_address")
                 if instruction.elementOwnership != null { if instruction.elementOwnership! == "owned" {
                     local elementBase = self.baseType(instruction.elementType!)
                     if self.findProgramType(elementBase) != null {
@@ -558,7 +558,7 @@ library X86_64 {{
                 self.load(instruction.first!, "rdi")
                 self.load(instruction.second!, "rsi")
                 self.writer.line("    mov rdx, " + self.sizeOf(instruction.elementType!).toString())
-                self.writer.line("    call argon_array_append")
+                self.writer.line("    call valen_array_append")
                 return
             }
             if op == "string_length" || op == "builder_length" {
@@ -570,8 +570,8 @@ library X86_64 {{
             if (op == "string_concat" || op == "string_equal") {
                 self.load(instruction.first!, "rdi")
                 self.load(instruction.second!, "rsi")
-                if op == "string_concat" { self.writer.line("    call argon_string_concat") } else {
-                    self.writer.line("    call argon_string_equal")
+                if op == "string_concat" { self.writer.line("    call valen_string_concat") } else {
+                    self.writer.line("    call valen_string_equal")
                     if instruction.operator! == "!=" { self.writer.line("    xor eax, 1") }
                 }
                 self.storeResult(instruction, "rax")
@@ -604,40 +604,40 @@ library X86_64 {{
                 self.load(instruction.first!, "rdi")
                 self.load(instruction.arguments[0], "rsi")
                 self.load(instruction.arguments[1], "rdx")
-                self.writer.line("    call argon_string_slice")
+                self.writer.line("    call valen_string_slice")
                 self.storeResult(instruction, "rax")
                 return
             }
             if op == "integer_to_string" {
                 self.load(instruction.first!, "rdi")
                 if self.isUnsigned(instruction.first!.typeName) { self.writer.line("    xor esi, esi") } else { self.writer.line("    mov esi, 1") }
-                self.writer.line("    call argon_integer_to_string")
+                self.writer.line("    call valen_integer_to_string")
                 self.storeResult(instruction, "rax")
                 return
             }
             if op == "builder_new" {
                 self.writer.line("    mov edi, 1")
                 self.writer.line("    xor esi, esi")
-                self.writer.line("    call argon_array_new")
+                self.writer.line("    call valen_array_new")
                 self.storeResult(instruction, "rax")
                 return
             }
             if op == "builder_append_string" {
                 self.load(instruction.first!, "rdi")
                 self.load(instruction.second!, "rsi")
-                self.writer.line("    call argon_builder_append_string")
+                self.writer.line("    call valen_builder_append_string")
                 return
             }
             if op == "builder_append_byte" {
                 self.load(instruction.first!, "rdi")
                 self.load(instruction.second!, "rsi")
                 self.writer.line("    mov edx, 1")
-                self.writer.line("    call argon_array_append")
+                self.writer.line("    call valen_array_append")
                 return
             }
             if op == "builder_build" {
                 self.load(instruction.first!, "rdi")
-                self.writer.line("    call argon_builder_build")
+                self.writer.line("    call valen_builder_build")
                 self.storeResult(instruction, "rax")
                 return
             }
@@ -650,17 +650,17 @@ library X86_64 {{
                 self.nextLabel = self.nextLabel + 1
                 self.writer.line("    test rax, rax")
                 self.writer.line("    jnz .Ltest_pass_" + label.toString())
-                self.writer.line("    inc QWORD PTR [rip+argon_test_failures]")
+                self.writer.line("    inc QWORD PTR [rip+valen_test_failures]")
                 self.writer.line("    mov eax, 1")
                 self.writer.line("    mov edi, 2")
-                self.writer.line("    lea rsi, [rip+argon_test_failure_message]")
+                self.writer.line("    lea rsi, [rip+valen_test_failure_message]")
                 self.writer.line("    mov edx, 12")
                 self.writer.line("    syscall")
                 self.writer.line(".Ltest_pass_" + label.toString() + ":")
                 return
             }
             if op == "test_failures" {
-                self.writer.line("    mov rax, QWORD PTR [rip+argon_test_failures]")
+                self.writer.line("    mov rax, QWORD PTR [rip+valen_test_failures]")
                 self.storeResult(instruction, "rax")
                 return
             }
@@ -982,16 +982,16 @@ library X86_64 {{
             self.writer.line("main:")
             self.writer.line("    push rbp")
             self.writer.line("    mov rbp, rsp")
-            self.writer.line("    mov QWORD PTR [rip+argon_process_argc], rdi")
-            self.writer.line("    mov QWORD PTR [rip+argon_process_argv], rsi")
+            self.writer.line("    mov QWORD PTR [rip+valen_process_argc], rdi")
+            self.writer.line("    mov QWORD PTR [rip+valen_process_argv], rsi")
             self.writer.line("    lea rax, [rsi+rdi*8+8]")
-            self.writer.line("    mov QWORD PTR [rip+argon_process_envp], rax")
+            self.writer.line("    mov QWORD PTR [rip+valen_process_envp], rax")
             self.writer.line("    sub rsp, 16")
             self.writer.line("    mov rdi, " + entrySize.toString())
             self.writer.line("    lea rsi, [rip+" + self.gcTraceLabel(entry!.ownerType) + "]")
             self.writer.line("    lea rdx, [rip+" + self.gcWeakLabel(entry!.ownerType) + "]")
             self.writer.line("    xor ecx, ecx")
-            self.writer.line("    call argon_gc_alloc")
+            self.writer.line("    call valen_gc_alloc")
             self.writer.line("    lea rcx, [rip+" + self.typeLabel(entry!.ownerType) + "]")
             self.writer.line("    mov QWORD PTR [rax], rcx")
             self.writer.line("    mov QWORD PTR [rbp-8], rax")
@@ -1027,18 +1027,18 @@ library X86_64 {{
             self.writer.line("    syscall")
             self.writer.line("    ud2")
             self.writer.line("")
-            self.writer.line(".globl argon_System_enableProcessArena")
-            self.writer.line("argon_System_enableProcessArena:")
-            self.writer.line("    mov DWORD PTR [rip+argon_arena_enabled], 1")
+            self.writer.line(".globl valen_System_enableProcessArena")
+            self.writer.line("valen_System_enableProcessArena:")
+            self.writer.line("    mov DWORD PTR [rip+valen_arena_enabled], 1")
             self.writer.line("    ret")
             self.writer.line("")
-            self.writer.line(".globl argon_alloc")
-            self.writer.line("argon_alloc:")
+            self.writer.line(".globl valen_alloc")
+            self.writer.line("valen_alloc:")
             self.writer.line("    test rdi, rdi")
             self.writer.line("    jnz .Lalloc_size")
             self.writer.line("    mov edi, 1")
             self.writer.line(".Lalloc_size:")
-            self.writer.line("    cmp DWORD PTR [rip+argon_arena_enabled], 0")
+            self.writer.line("    cmp DWORD PTR [rip+valen_arena_enabled], 0")
             self.writer.line("    je .Lalloc_direct")
             self.writer.line("    push r12")
             self.writer.line("    lea r12, [rdi+15]")
@@ -1046,17 +1046,17 @@ library X86_64 {{
             self.writer.line(".Lalloc_lock:")
             self.writer.line("    xor eax, eax")
             self.writer.line("    mov edx, 1")
-            self.writer.line("    lock cmpxchg DWORD PTR [rip+argon_arena_lock], edx")
+            self.writer.line("    lock cmpxchg DWORD PTR [rip+valen_arena_lock], edx")
             self.writer.line("    je .Lalloc_locked")
             self.writer.line("    pause")
             self.writer.line("    jmp .Lalloc_lock")
             self.writer.line(".Lalloc_locked:")
-            self.writer.line("    cmp QWORD PTR [rip+argon_arena_remaining], r12")
+            self.writer.line("    cmp QWORD PTR [rip+valen_arena_remaining], r12")
             self.writer.line("    jb .Lalloc_refill")
-            self.writer.line("    mov rax, QWORD PTR [rip+argon_arena_cursor]")
-            self.writer.line("    add QWORD PTR [rip+argon_arena_cursor], r12")
-            self.writer.line("    sub QWORD PTR [rip+argon_arena_remaining], r12")
-            self.writer.line("    mov DWORD PTR [rip+argon_arena_lock], 0")
+            self.writer.line("    mov rax, QWORD PTR [rip+valen_arena_cursor]")
+            self.writer.line("    add QWORD PTR [rip+valen_arena_cursor], r12")
+            self.writer.line("    sub QWORD PTR [rip+valen_arena_remaining], r12")
+            self.writer.line("    mov DWORD PTR [rip+valen_arena_lock], 0")
             self.writer.line("    pop r12")
             self.writer.line("    ret")
             self.writer.line(".Lalloc_refill:")
@@ -1073,10 +1073,10 @@ library X86_64 {{
             self.writer.line("    cmp rax, -4095")
             self.writer.line("    jae .Lallocation_error")
             self.writer.line("    lea rcx, [rax+r12]")
-            self.writer.line("    mov QWORD PTR [rip+argon_arena_cursor], rcx")
+            self.writer.line("    mov QWORD PTR [rip+valen_arena_cursor], rcx")
             self.writer.line("    sub rsi, r12")
-            self.writer.line("    mov QWORD PTR [rip+argon_arena_remaining], rsi")
-            self.writer.line("    mov DWORD PTR [rip+argon_arena_lock], 0")
+            self.writer.line("    mov QWORD PTR [rip+valen_arena_remaining], rsi")
+            self.writer.line("    mov DWORD PTR [rip+valen_arena_lock], 0")
             self.writer.line("    pop r12")
             self.writer.line("    ret")
             self.writer.line(".Lalloc_direct:")
@@ -1098,23 +1098,23 @@ library X86_64 {{
         }
 
         garbageCollectorRuntime() -> void {
-            self.writer.line(".globl argon_gc_alloc"); self.writer.line("argon_gc_alloc:")
+            self.writer.line(".globl valen_gc_alloc"); self.writer.line("valen_gc_alloc:")
             self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15")
             self.writer.line("    mov r12, rdi"); self.writer.line("    mov r13, rsi"); self.writer.line("    mov r14, rdx"); self.writer.line("    mov r15, rcx")
             self.writer.line("    add rdi, 48"); self.writer.line("    mov rsi, rdi"); self.writer.line("    xor edi, edi"); self.writer.line("    mov edx, 3"); self.writer.line("    mov r10d, 34"); self.writer.line("    mov r8, -1"); self.writer.line("    xor r9d, r9d"); self.writer.line("    mov eax, 9"); self.writer.line("    syscall")
-            self.writer.line("    cmp rax, -4095"); self.writer.line("    jae .Lallocation_error"); self.writer.line("    mov rcx, QWORD PTR [rip+argon_gc_heap]"); self.writer.line("    mov QWORD PTR [rax], rcx")
-            self.writer.line("    lea rcx, [r12+48]"); self.writer.line("    mov QWORD PTR [rax+8], rcx"); self.writer.line("    mov QWORD PTR [rax+16], r13"); self.writer.line("    mov QWORD PTR [rax+24], r14"); self.writer.line("    mov QWORD PTR [rax+32], 0"); self.writer.line("    mov QWORD PTR [rax+40], r15"); self.writer.line("    mov QWORD PTR [rip+argon_gc_heap], rax"); self.writer.line("    add QWORD PTR [rip+argon_gc_bytes], rcx"); self.writer.line("    add rax, 48")
+            self.writer.line("    cmp rax, -4095"); self.writer.line("    jae .Lallocation_error"); self.writer.line("    mov rcx, QWORD PTR [rip+valen_gc_heap]"); self.writer.line("    mov QWORD PTR [rax], rcx")
+            self.writer.line("    lea rcx, [r12+48]"); self.writer.line("    mov QWORD PTR [rax+8], rcx"); self.writer.line("    mov QWORD PTR [rax+16], r13"); self.writer.line("    mov QWORD PTR [rax+24], r14"); self.writer.line("    mov QWORD PTR [rax+32], 0"); self.writer.line("    mov QWORD PTR [rax+40], r15"); self.writer.line("    mov QWORD PTR [rip+valen_gc_heap], rax"); self.writer.line("    add QWORD PTR [rip+valen_gc_bytes], rcx"); self.writer.line("    add rax, 48")
             self.writer.line("    pop r15"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line(".globl argon_gc_maybe_collect"); self.writer.line("argon_gc_maybe_collect:"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line(".globl argon_gc_mark"); self.writer.line("argon_gc_mark:"); self.writer.line("    test rdi, rdi"); self.writer.line("    je .Lgc_mark_done"); self.writer.line("    cmp QWORD PTR [rdi+8], 0"); self.writer.line("    je .Lgc_mark_done"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi"); self.writer.line("    sub rbx, 48"); self.writer.line("    cmp QWORD PTR [rbx+32], 0"); self.writer.line("    jne .Lgc_mark_pop"); self.writer.line("    mov QWORD PTR [rbx+32], 1"); self.writer.line("    mov rax, QWORD PTR [rbx+16]"); self.writer.line("    test rax, rax"); self.writer.line("    je .Lgc_mark_pop"); self.writer.line("    call rax"); self.writer.line(".Lgc_mark_pop:"); self.writer.line("    pop rbx"); self.writer.line(".Lgc_mark_done:"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line(".globl argon_gc_collect"); self.writer.line("argon_gc_collect:"); self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14")
-            self.writer.line("    mov r12, QWORD PTR [rip+argon_gc_roots]"); self.writer.line(".Lgc_root_frame:"); self.writer.line("    test r12, r12"); self.writer.line("    je .Lgc_weak_start"); self.writer.line("    mov rax, QWORD PTR [r12+8]"); self.writer.line("    mov rdi, QWORD PTR [r12+16]"); self.writer.line("    call rax"); self.writer.line("    mov r12, QWORD PTR [r12]"); self.writer.line("    jmp .Lgc_root_frame")
-            self.writer.line(".Lgc_weak_start:"); self.writer.line("    mov r12, QWORD PTR [rip+argon_gc_heap]"); self.writer.line(".Lgc_weak_next:"); self.writer.line("    test r12, r12"); self.writer.line("    je .Lgc_sweep_start"); self.writer.line("    cmp QWORD PTR [r12+32], 0"); self.writer.line("    je .Lgc_weak_advance"); self.writer.line("    mov rax, QWORD PTR [r12+24]"); self.writer.line("    test rax, rax"); self.writer.line("    je .Lgc_weak_advance"); self.writer.line("    lea rdi, [r12+48]"); self.writer.line("    call rax"); self.writer.line(".Lgc_weak_advance:"); self.writer.line("    mov r12, QWORD PTR [r12]"); self.writer.line("    jmp .Lgc_weak_next")
-            self.writer.line(".Lgc_sweep_start:"); self.writer.line("    lea r12, [rip+argon_gc_heap]"); self.writer.line("    mov QWORD PTR [rip+argon_gc_bytes], 0"); self.writer.line(".Lgc_sweep_next:"); self.writer.line("    mov rbx, QWORD PTR [r12]"); self.writer.line("    test rbx, rbx"); self.writer.line("    je .Lgc_done"); self.writer.line("    cmp QWORD PTR [rbx+32], 0"); self.writer.line("    je .Lgc_reclaim"); self.writer.line("    mov QWORD PTR [rbx+32], 0"); self.writer.line("    mov rax, QWORD PTR [rbx+8]"); self.writer.line("    add QWORD PTR [rip+argon_gc_bytes], rax"); self.writer.line("    mov r12, rbx"); self.writer.line("    jmp .Lgc_sweep_next")
+            self.writer.line(".globl valen_gc_maybe_collect"); self.writer.line("valen_gc_maybe_collect:"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_gc_mark"); self.writer.line("valen_gc_mark:"); self.writer.line("    test rdi, rdi"); self.writer.line("    je .Lgc_mark_done"); self.writer.line("    cmp QWORD PTR [rdi+8], 0"); self.writer.line("    je .Lgc_mark_done"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi"); self.writer.line("    sub rbx, 48"); self.writer.line("    cmp QWORD PTR [rbx+32], 0"); self.writer.line("    jne .Lgc_mark_pop"); self.writer.line("    mov QWORD PTR [rbx+32], 1"); self.writer.line("    mov rax, QWORD PTR [rbx+16]"); self.writer.line("    test rax, rax"); self.writer.line("    je .Lgc_mark_pop"); self.writer.line("    call rax"); self.writer.line(".Lgc_mark_pop:"); self.writer.line("    pop rbx"); self.writer.line(".Lgc_mark_done:"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_gc_collect"); self.writer.line("valen_gc_collect:"); self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14")
+            self.writer.line("    mov r12, QWORD PTR [rip+valen_gc_roots]"); self.writer.line(".Lgc_root_frame:"); self.writer.line("    test r12, r12"); self.writer.line("    je .Lgc_weak_start"); self.writer.line("    mov rax, QWORD PTR [r12+8]"); self.writer.line("    mov rdi, QWORD PTR [r12+16]"); self.writer.line("    call rax"); self.writer.line("    mov r12, QWORD PTR [r12]"); self.writer.line("    jmp .Lgc_root_frame")
+            self.writer.line(".Lgc_weak_start:"); self.writer.line("    mov r12, QWORD PTR [rip+valen_gc_heap]"); self.writer.line(".Lgc_weak_next:"); self.writer.line("    test r12, r12"); self.writer.line("    je .Lgc_sweep_start"); self.writer.line("    cmp QWORD PTR [r12+32], 0"); self.writer.line("    je .Lgc_weak_advance"); self.writer.line("    mov rax, QWORD PTR [r12+24]"); self.writer.line("    test rax, rax"); self.writer.line("    je .Lgc_weak_advance"); self.writer.line("    lea rdi, [r12+48]"); self.writer.line("    call rax"); self.writer.line(".Lgc_weak_advance:"); self.writer.line("    mov r12, QWORD PTR [r12]"); self.writer.line("    jmp .Lgc_weak_next")
+            self.writer.line(".Lgc_sweep_start:"); self.writer.line("    lea r12, [rip+valen_gc_heap]"); self.writer.line("    mov QWORD PTR [rip+valen_gc_bytes], 0"); self.writer.line(".Lgc_sweep_next:"); self.writer.line("    mov rbx, QWORD PTR [r12]"); self.writer.line("    test rbx, rbx"); self.writer.line("    je .Lgc_done"); self.writer.line("    cmp QWORD PTR [rbx+32], 0"); self.writer.line("    je .Lgc_reclaim"); self.writer.line("    mov QWORD PTR [rbx+32], 0"); self.writer.line("    mov rax, QWORD PTR [rbx+8]"); self.writer.line("    add QWORD PTR [rip+valen_gc_bytes], rax"); self.writer.line("    mov r12, rbx"); self.writer.line("    jmp .Lgc_sweep_next")
             self.writer.line(".Lgc_reclaim:"); self.writer.line("    mov r14, QWORD PTR [rbx]"); self.writer.line("    mov QWORD PTR [r12], r14"); self.writer.line("    mov rax, QWORD PTR [rbx+40]"); self.writer.line("    test rax, rax"); self.writer.line("    je .Lgc_unmap"); self.writer.line("    lea rdi, [rbx+48]"); self.writer.line("    call rax"); self.writer.line(".Lgc_unmap:"); self.writer.line("    mov rsi, QWORD PTR [rbx+8]"); self.writer.line("    mov rdi, rbx"); self.writer.line("    mov eax, 11"); self.writer.line("    syscall"); self.writer.line("    jmp .Lgc_sweep_next")
-            self.writer.line(".Lgc_done:"); self.writer.line("    mov rax, QWORD PTR [rip+argon_gc_bytes]"); self.writer.line("    shl rax, 1"); self.writer.line("    cmp rax, 1048576"); self.writer.line("    jae .Lgc_threshold_store"); self.writer.line("    mov eax, 1048576"); self.writer.line(".Lgc_threshold_store:"); self.writer.line("    mov QWORD PTR [rip+argon_gc_threshold], rax"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    leave"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line(".globl argon_gc_array_new"); self.writer.line("argon_gc_array_new:"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    mov r12, rdi"); self.writer.line("    mov r13, rsi"); self.writer.line("    mov r14, rdx"); self.writer.line("    push rcx"); self.writer.line("    mov edi, 40"); self.writer.line("    mov rsi, r14"); self.writer.line("    mov rdx, QWORD PTR [rsp]"); self.writer.line("    lea rcx, [rip+argon_gc_array_finalize]"); self.writer.line("    call argon_gc_alloc"); self.writer.line("    add rsp, 8"); self.writer.line("    mov rbx, rax"); self.writer.line("    mov rax, r13"); self.writer.line("    cmp rax, 4"); self.writer.line("    jae .Lgc_array_capacity"); self.writer.line("    mov eax, 4"); self.writer.line(".Lgc_array_capacity:"); self.writer.line("    mov QWORD PTR [rbx], r13"); self.writer.line("    mov QWORD PTR [rbx+8], rax"); self.writer.line("    mov QWORD PTR [rbx+24], r12"); self.writer.line("    mov QWORD PTR [rbx+32], 1"); self.writer.line("    imul rax, r12"); self.writer.line("    mov rdi, rax"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rbx+16], rax"); self.writer.line("    mov rax, rbx"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("argon_gc_array_finalize:"); self.writer.line("    cmp DWORD PTR [rip+argon_arena_enabled], 0"); self.writer.line("    jne .Lgc_array_finalize_done"); self.writer.line("    mov rsi, QWORD PTR [rdi+8]"); self.writer.line("    imul rsi, QWORD PTR [rdi+24]"); self.writer.line("    test rsi, rsi"); self.writer.line("    jne .Lgc_array_finalize_size"); self.writer.line("    mov esi, 1"); self.writer.line(".Lgc_array_finalize_size:"); self.writer.line("    mov rdi, QWORD PTR [rdi+16]"); self.writer.line("    mov eax, 11"); self.writer.line("    syscall"); self.writer.line(".Lgc_array_finalize_done:"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line(".globl argon_System_collectGarbage"); self.writer.line("argon_System_collectGarbage:"); self.writer.line("    jmp argon_gc_collect"); self.writer.line("")
+            self.writer.line(".Lgc_done:"); self.writer.line("    mov rax, QWORD PTR [rip+valen_gc_bytes]"); self.writer.line("    shl rax, 1"); self.writer.line("    cmp rax, 1048576"); self.writer.line("    jae .Lgc_threshold_store"); self.writer.line("    mov eax, 1048576"); self.writer.line(".Lgc_threshold_store:"); self.writer.line("    mov QWORD PTR [rip+valen_gc_threshold], rax"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    leave"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_gc_array_new"); self.writer.line("valen_gc_array_new:"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    mov r12, rdi"); self.writer.line("    mov r13, rsi"); self.writer.line("    mov r14, rdx"); self.writer.line("    push rcx"); self.writer.line("    mov edi, 40"); self.writer.line("    mov rsi, r14"); self.writer.line("    mov rdx, QWORD PTR [rsp]"); self.writer.line("    lea rcx, [rip+valen_gc_array_finalize]"); self.writer.line("    call valen_gc_alloc"); self.writer.line("    add rsp, 8"); self.writer.line("    mov rbx, rax"); self.writer.line("    mov rax, r13"); self.writer.line("    cmp rax, 4"); self.writer.line("    jae .Lgc_array_capacity"); self.writer.line("    mov eax, 4"); self.writer.line(".Lgc_array_capacity:"); self.writer.line("    mov QWORD PTR [rbx], r13"); self.writer.line("    mov QWORD PTR [rbx+8], rax"); self.writer.line("    mov QWORD PTR [rbx+24], r12"); self.writer.line("    mov QWORD PTR [rbx+32], 1"); self.writer.line("    imul rax, r12"); self.writer.line("    mov rdi, rax"); self.writer.line("    call valen_alloc"); self.writer.line("    mov QWORD PTR [rbx+16], rax"); self.writer.line("    mov rax, rbx"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("valen_gc_array_finalize:"); self.writer.line("    cmp DWORD PTR [rip+valen_arena_enabled], 0"); self.writer.line("    jne .Lgc_array_finalize_done"); self.writer.line("    mov rsi, QWORD PTR [rdi+8]"); self.writer.line("    imul rsi, QWORD PTR [rdi+24]"); self.writer.line("    test rsi, rsi"); self.writer.line("    jne .Lgc_array_finalize_size"); self.writer.line("    mov esi, 1"); self.writer.line(".Lgc_array_finalize_size:"); self.writer.line("    mov rdi, QWORD PTR [rdi+16]"); self.writer.line("    mov eax, 11"); self.writer.line("    syscall"); self.writer.line(".Lgc_array_finalize_done:"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line(".globl valen_System_collectGarbage"); self.writer.line("valen_System_collectGarbage:"); self.writer.line("    jmp valen_gc_collect"); self.writer.line("")
         }
 
         gcTraceFunctions() -> void {
@@ -1127,7 +1127,7 @@ library X86_64 {{
                     local field = typeNode.fields[fieldIndex]
                     if field.ownership != "member-weak" && self.isManagedReferenceType(field.typeName) {
                         local layout = self.findField(field.qualifiedName)
-                        self.writer.line("    mov rdi, QWORD PTR [rbx+" + layout!.offset.toString() + "]"); self.writer.line("    call argon_gc_mark")
+                        self.writer.line("    mov rdi, QWORD PTR [rbx+" + layout!.offset.toString() + "]"); self.writer.line("    call valen_gc_mark")
                     }
                     fieldIndex = fieldIndex + 1
                 }
@@ -1159,7 +1159,7 @@ library X86_64 {{
                 local traceDone = trace + "_done"
                 self.writer.line(trace + ":"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    xor ebx, ebx"); self.writer.line("    mov r12, rdi")
                 if ownership != "weak" && self.isManagedReferenceType(element) {
-                    self.writer.line(traceLoop + ":"); self.writer.line("    cmp rbx, QWORD PTR [r12]"); self.writer.line("    jae " + traceDone); self.writer.line("    imul rax, rbx, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]"); self.writer.line("    mov rdi, QWORD PTR [rax]"); self.writer.line("    call argon_gc_mark"); self.writer.line("    inc rbx"); self.writer.line("    jmp " + traceLoop)
+                    self.writer.line(traceLoop + ":"); self.writer.line("    cmp rbx, QWORD PTR [r12]"); self.writer.line("    jae " + traceDone); self.writer.line("    imul rax, rbx, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]"); self.writer.line("    mov rdi, QWORD PTR [rax]"); self.writer.line("    call valen_gc_mark"); self.writer.line("    inc rbx"); self.writer.line("    jmp " + traceLoop)
                 }
                 self.writer.line(traceDone + ":"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    ret")
                 local weakLabel = self.gcArrayWeakLabel(arrayType)
@@ -1176,8 +1176,8 @@ library X86_64 {{
         }
 
         arrayRuntime() -> void {
-            self.writer.line(".globl argon_array_new")
-            self.writer.line("argon_array_new:")
+            self.writer.line(".globl valen_array_new")
+            self.writer.line("valen_array_new:")
             self.writer.line("    push rbp")
             self.writer.line("    mov rbp, rsp")
             self.writer.line("    push rbx")
@@ -1191,8 +1191,8 @@ library X86_64 {{
             self.writer.line("    mov edi, 40")
             self.writer.line("    xor esi, esi")
             self.writer.line("    xor edx, edx")
-            self.writer.line("    lea rcx, [rip+argon_gc_array_finalize]")
-            self.writer.line("    call argon_gc_alloc")
+            self.writer.line("    lea rcx, [rip+valen_gc_array_finalize]")
+            self.writer.line("    call valen_gc_alloc")
             self.writer.line("    mov r13, rax")
             self.writer.line("    mov rax, rbx")
             self.writer.line("    cmp rax, 4")
@@ -1205,7 +1205,7 @@ library X86_64 {{
             self.writer.line("    mov QWORD PTR [r13+32], 1")
             self.writer.line("    imul rax, r12")
             self.writer.line("    mov rdi, rax")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov QWORD PTR [r13+16], rax")
             self.writer.line("    mov rax, r13")
             self.writer.line("    add rsp, 8")
@@ -1215,8 +1215,8 @@ library X86_64 {{
             self.writer.line("    leave")
             self.writer.line("    ret")
             self.writer.line("")
-            self.writer.line(".globl argon_array_address")
-            self.writer.line("argon_array_address:")
+            self.writer.line(".globl valen_array_address")
+            self.writer.line("valen_array_address:")
             self.writer.line("    test rsi, rsi")
             self.writer.line("    js .Larray_bounds_error")
             self.writer.line("    cmp rsi, QWORD PTR [rdi]")
@@ -1229,8 +1229,8 @@ library X86_64 {{
             self.writer.line("    mov edi, 70")
             self.writer.line("    jmp .Lruntime_error")
             self.writer.line("")
-            self.writer.line(".globl argon_array_append")
-            self.writer.line("argon_array_append:")
+            self.writer.line(".globl valen_array_append")
+            self.writer.line("valen_array_append:")
             self.writer.line("    push rbp")
             self.writer.line("    mov rbp, rsp")
             self.writer.line("    push rbx")
@@ -1248,7 +1248,7 @@ library X86_64 {{
             self.writer.line("    mov QWORD PTR [rbx+8], rax")
             self.writer.line("    imul rax, r13")
             self.writer.line("    mov rdi, rax")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov rdi, rax")
             self.writer.line("    mov rsi, QWORD PTR [rbx+16]")
             self.writer.line("    mov rcx, r14")
@@ -1283,8 +1283,8 @@ library X86_64 {{
         }
 
         stringRuntime() -> void {
-            self.writer.line(".globl argon_string_address")
-            self.writer.line("argon_string_address:")
+            self.writer.line(".globl valen_string_address")
+            self.writer.line("valen_string_address:")
             self.writer.line("    test rsi, rsi")
             self.writer.line("    js .Larray_bounds_error")
             self.writer.line("    cmp rsi, QWORD PTR [rdi+8]")
@@ -1293,8 +1293,8 @@ library X86_64 {{
             self.writer.line("    add rax, rsi")
             self.writer.line("    ret")
             self.writer.line("")
-            self.writer.line(".globl argon_string_equal")
-            self.writer.line("argon_string_equal:")
+            self.writer.line(".globl valen_string_equal")
+            self.writer.line("valen_string_equal:")
             self.writer.line("    mov rcx, QWORD PTR [rdi+8]")
             self.writer.line("    cmp rcx, QWORD PTR [rsi+8]")
             self.writer.line("    jne .Lstring_not_equal")
@@ -1308,8 +1308,8 @@ library X86_64 {{
             self.writer.line("    xor eax, eax")
             self.writer.line("    ret")
             self.writer.line("")
-            self.writer.line(".globl argon_string_concat")
-            self.writer.line("argon_string_concat:")
+            self.writer.line(".globl valen_string_concat")
+            self.writer.line("valen_string_concat:")
             self.writer.line("    push rbp")
             self.writer.line("    mov rbp, rsp")
             self.writer.line("    push rbx")
@@ -1321,7 +1321,7 @@ library X86_64 {{
             self.writer.line("    mov r13, QWORD PTR [r14+8]")
             self.writer.line("    add r13, QWORD PTR [r12+8]")
             self.writer.line("    lea rdi, [r13+16]")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov rbx, rax")
             self.writer.line("    lea rdi, [rbx+16]")
             self.writer.line("    mov QWORD PTR [rbx], rdi")
@@ -1340,8 +1340,8 @@ library X86_64 {{
             self.writer.line("    leave")
             self.writer.line("    ret")
             self.writer.line("")
-            self.writer.line(".globl argon_string_slice")
-            self.writer.line("argon_string_slice:")
+            self.writer.line(".globl valen_string_slice")
+            self.writer.line("valen_string_slice:")
             self.writer.line("    test rsi, rsi")
             self.writer.line("    js .Larray_bounds_error")
             self.writer.line("    test rdx, rdx")
@@ -1360,7 +1360,7 @@ library X86_64 {{
             self.writer.line("    mov r12, rsi")
             self.writer.line("    mov r13, rdx")
             self.writer.line("    lea rdi, [r13+16]")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov rbx, rax")
             self.writer.line("    lea rdi, [rbx+16]")
             self.writer.line("    mov QWORD PTR [rbx], rdi")
@@ -1380,8 +1380,8 @@ library X86_64 {{
         }
 
         builderRuntime() -> void {
-            self.writer.line(".globl argon_integer_to_string")
-            self.writer.line("argon_integer_to_string:")
+            self.writer.line(".globl valen_integer_to_string")
+            self.writer.line("valen_integer_to_string:")
             self.writer.line("    push rbp")
             self.writer.line("    mov rbp, rsp")
             self.writer.line("    push rbx")
@@ -1391,10 +1391,10 @@ library X86_64 {{
             self.writer.line("    mov r12, rdi")
             self.writer.line("    mov r14, rsi")
             self.writer.line("    mov edi, 16")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov rbx, rax")
             self.writer.line("    mov edi, 21")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov r13, rax")
             self.writer.line("    lea rsi, [r13+21]")
             self.writer.line("    mov rdi, rsi")
@@ -1432,8 +1432,8 @@ library X86_64 {{
             self.writer.line("    leave")
             self.writer.line("    ret")
             self.writer.line("")
-            self.writer.line(".globl argon_builder_append_string")
-            self.writer.line("argon_builder_append_string:")
+            self.writer.line(".globl valen_builder_append_string")
+            self.writer.line("valen_builder_append_string:")
             self.writer.line("    push rbp")
             self.writer.line("    mov rbp, rsp")
             self.writer.line("    push rbx")
@@ -1451,7 +1451,7 @@ library X86_64 {{
             self.writer.line("    movzx esi, BYTE PTR [rsi+r13]")
             self.writer.line("    mov rdi, rbx")
             self.writer.line("    mov edx, 1")
-            self.writer.line("    call argon_array_append")
+            self.writer.line("    call valen_array_append")
             self.writer.line("    inc r13")
             self.writer.line("    jmp .Lbuilder_append_next")
             self.writer.line(".Lbuilder_append_done:")
@@ -1462,8 +1462,8 @@ library X86_64 {{
             self.writer.line("    leave")
             self.writer.line("    ret")
             self.writer.line("")
-            self.writer.line(".globl argon_builder_build")
-            self.writer.line("argon_builder_build:")
+            self.writer.line(".globl valen_builder_build")
+            self.writer.line("valen_builder_build:")
             self.writer.line("    push rbp")
             self.writer.line("    mov rbp, rsp")
             self.writer.line("    push rbx")
@@ -1472,12 +1472,12 @@ library X86_64 {{
             self.writer.line("    sub rsp, 8")
             self.writer.line("    mov r12, rdi")
             self.writer.line("    mov edi, 16")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov rbx, rax")
             self.writer.line("    mov r13, QWORD PTR [r12]")
             self.writer.line("    mov QWORD PTR [rbx+8], r13")
             self.writer.line("    mov rdi, r13")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov QWORD PTR [rbx], rax")
             self.writer.line("    mov rdi, rax")
             self.writer.line("    mov rsi, QWORD PTR [r12+16]")
@@ -1494,8 +1494,8 @@ library X86_64 {{
         }
 
         printRuntime() -> void {
-            self.writer.line(".globl argon_System_print")
-            self.writer.line("argon_System_print:")
+            self.writer.line(".globl valen_System_print")
+            self.writer.line("valen_System_print:")
             self.writer.line("    sub rsp, 40")
             self.writer.line("    mov rax, rdi")
             self.writer.line("    lea rsi, [rsp+39]")
@@ -1555,8 +1555,8 @@ library X86_64 {{
         }
 
         processRuntime() -> void {
-            self.writer.line(".globl argon_System_arguments")
-            self.writer.line("argon_System_arguments:")
+            self.writer.line(".globl valen_System_arguments")
+            self.writer.line("valen_System_arguments:")
             self.writer.line("    push rbp")
             self.writer.line("    mov rbp, rsp")
             self.writer.line("    push rbx")
@@ -1565,11 +1565,11 @@ library X86_64 {{
             self.writer.line("    push r14")
             self.writer.line("    push r15")
             self.writer.line("    sub rsp, 8")
-            self.writer.line("    mov rbx, QWORD PTR [rip+argon_process_argc]")
-            self.writer.line("    mov r12, QWORD PTR [rip+argon_process_argv]")
+            self.writer.line("    mov rbx, QWORD PTR [rip+valen_process_argc]")
+            self.writer.line("    mov r12, QWORD PTR [rip+valen_process_argv]")
             self.writer.line("    mov edi, 8")
             self.writer.line("    mov rsi, rbx")
-            self.writer.line("    call argon_array_new")
+            self.writer.line("    call valen_array_new")
             self.writer.line("    mov r13, rax")
             self.writer.line("    xor r14d, r14d")
             self.writer.line(".Larguments_next:")
@@ -1584,7 +1584,7 @@ library X86_64 {{
             self.writer.line("    jmp .Larguments_length")
             self.writer.line(".Larguments_wrap:")
             self.writer.line("    mov edi, 16")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov rdx, QWORD PTR [r12+r14*8]")
             self.writer.line("    mov QWORD PTR [rax], rdx")
             self.writer.line("    mov QWORD PTR [rax+8], r15")
@@ -1603,28 +1603,28 @@ library X86_64 {{
             self.writer.line("    leave")
             self.writer.line("    ret")
             self.writer.line("")
-            self.writer.line(".globl argon_System_exit")
-            self.writer.line("argon_System_exit:")
+            self.writer.line(".globl valen_System_exit")
+            self.writer.line("valen_System_exit:")
             self.writer.line("    mov eax, 60")
             self.writer.line("    syscall")
             self.writer.line("    ud2")
             self.writer.line("")
-            self.writer.line(".globl argon_System_environmentVariable")
-            self.writer.line("argon_System_environmentVariable:")
+            self.writer.line(".globl valen_System_environmentVariable")
+            self.writer.line("valen_System_environmentVariable:")
             self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push r12"); self.writer.line("    push r13")
-            self.writer.line("    mov r8, QWORD PTR [rdi]"); self.writer.line("    mov r9, QWORD PTR [rdi+8]"); self.writer.line("    mov r10, QWORD PTR [rip+argon_process_envp]")
+            self.writer.line("    mov r8, QWORD PTR [rdi]"); self.writer.line("    mov r9, QWORD PTR [rdi+8]"); self.writer.line("    mov r10, QWORD PTR [rip+valen_process_envp]")
             self.writer.line(".Lenvironment_next:"); self.writer.line("    mov rdx, QWORD PTR [r10]"); self.writer.line("    test rdx, rdx"); self.writer.line("    je .Lenvironment_missing"); self.writer.line("    xor ecx, ecx")
             self.writer.line(".Lenvironment_compare:"); self.writer.line("    cmp rcx, r9"); self.writer.line("    je .Lenvironment_name_end"); self.writer.line("    mov al, BYTE PTR [rdx+rcx]"); self.writer.line("    cmp al, BYTE PTR [r8+rcx]"); self.writer.line("    jne .Lenvironment_advance"); self.writer.line("    inc rcx"); self.writer.line("    jmp .Lenvironment_compare")
             self.writer.line(".Lenvironment_name_end:"); self.writer.line("    cmp BYTE PTR [rdx+rcx], 61"); self.writer.line("    jne .Lenvironment_advance"); self.writer.line("    lea r12, [rdx+rcx+1]"); self.writer.line("    xor r13d, r13d")
             self.writer.line(".Lenvironment_value_length:"); self.writer.line("    cmp BYTE PTR [r12+r13], 0"); self.writer.line("    je .Lenvironment_wrap"); self.writer.line("    inc r13"); self.writer.line("    jmp .Lenvironment_value_length")
-            self.writer.line(".Lenvironment_wrap:"); self.writer.line("    mov edi, 16"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rax], r12"); self.writer.line("    mov QWORD PTR [rax+8], r13"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    leave"); self.writer.line("    ret")
+            self.writer.line(".Lenvironment_wrap:"); self.writer.line("    mov edi, 16"); self.writer.line("    call valen_alloc"); self.writer.line("    mov QWORD PTR [rax], r12"); self.writer.line("    mov QWORD PTR [rax+8], r13"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    leave"); self.writer.line("    ret")
             self.writer.line(".Lenvironment_advance:"); self.writer.line("    add r10, 8"); self.writer.line("    jmp .Lenvironment_next")
             self.writer.line(".Lenvironment_missing:"); self.writer.line("    xor eax, eax"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    leave"); self.writer.line("    ret"); self.writer.line("")
         }
 
         linkRuntime() -> void {
-            self.writer.line(".globl argon_System_link")
-            self.writer.line("argon_System_link:")
+            self.writer.line(".globl valen_System_link")
+            self.writer.line("valen_System_link:")
             self.writer.line("    push rbp")
             self.writer.line("    mov rbp, rsp")
             self.writer.line("    push r12")
@@ -1703,7 +1703,7 @@ library X86_64 {{
             self.writer.line("    mov QWORD PTR [r15+r8*8+48], 0")
             self.writer.line("    lea rdi, [rip+.Llink_cc]")
             self.writer.line("    mov rsi, r15")
-            self.writer.line("    mov rdx, QWORD PTR [rip+argon_process_envp]")
+            self.writer.line("    mov rdx, QWORD PTR [rip+valen_process_envp]")
             self.writer.line("    mov eax, 59")
             self.writer.line("    syscall")
             self.writer.line("    mov edi, 127")
@@ -1730,8 +1730,8 @@ library X86_64 {{
         }
 
         networkRuntime() -> void {
-            self.writer.line(".globl argon_Network_listen")
-            self.writer.line("argon_Network_listen:")
+            self.writer.line(".globl valen_Network_listen")
+            self.writer.line("valen_Network_listen:")
             self.writer.line("    push rbx")
             self.writer.line("    push r12")
             self.writer.line("    push r13")
@@ -1768,9 +1768,9 @@ library X86_64 {{
             self.writer.line("    js .Lnetwork_close_error_pop2")
             self.writer.line("    mov r12, r10")
             self.writer.line("    mov edi, 8")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov QWORD PTR [rax], r12")
-            self.writer.line("    mov QWORD PTR [rip+argon_network_error], 0")
+            self.writer.line("    mov QWORD PTR [rip+valen_network_error], 0")
             self.writer.line("    pop r13")
             self.writer.line("    pop r12")
             self.writer.line("    pop rbx")
@@ -1783,14 +1783,14 @@ library X86_64 {{
             self.writer.line("    mov rax, r12")
             self.writer.line(".Lnetwork_error_pop2:")
             self.writer.line("    neg rax")
-            self.writer.line("    mov QWORD PTR [rip+argon_network_error], rax")
+            self.writer.line("    mov QWORD PTR [rip+valen_network_error], rax")
             self.writer.line("    xor eax, eax")
             self.writer.line("    pop r13")
             self.writer.line("    pop r12")
             self.writer.line("    pop rbx")
             self.writer.line("    ret")
-            self.writer.line(".globl argon_Network_accept")
-            self.writer.line("argon_Network_accept:")
+            self.writer.line(".globl valen_Network_accept")
+            self.writer.line("valen_Network_accept:")
             self.writer.line("    mov rdi, QWORD PTR [rdi]")
             self.writer.line("    mov eax, 43")
             self.writer.line("    xor esi, esi")
@@ -1801,13 +1801,13 @@ library X86_64 {{
             self.writer.line("    push rbx")
             self.writer.line("    mov rbx, rax")
             self.writer.line("    mov edi, 8")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov QWORD PTR [rax], rbx")
             self.writer.line("    pop rbx")
-            self.writer.line("    mov QWORD PTR [rip+argon_network_error], 0")
+            self.writer.line("    mov QWORD PTR [rip+valen_network_error], 0")
             self.writer.line("    ret")
-            self.writer.line(".globl argon_Network_receive")
-            self.writer.line("argon_Network_receive:")
+            self.writer.line(".globl valen_Network_receive")
+            self.writer.line("valen_Network_receive:")
             self.writer.line("    test rsi, rsi")
             self.writer.line("    js .Lnetwork_invalid")
             self.writer.line("    push rbx")
@@ -1816,7 +1816,7 @@ library X86_64 {{
             self.writer.line("    mov r12, QWORD PTR [rdi]")
             self.writer.line("    mov r13, rsi")
             self.writer.line("    mov rdi, r13")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov rbx, rax")
             self.writer.line("    xor eax, eax")
             self.writer.line("    mov rdi, r12")
@@ -1827,28 +1827,28 @@ library X86_64 {{
             self.writer.line("    js .Lnetwork_error_pop3")
             self.writer.line("    mov r12, rax")
             self.writer.line("    mov edi, 16")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov QWORD PTR [rax], rbx")
             self.writer.line("    mov QWORD PTR [rax+8], r12")
-            self.writer.line("    mov QWORD PTR [rip+argon_network_error], 0")
+            self.writer.line("    mov QWORD PTR [rip+valen_network_error], 0")
             self.writer.line("    pop r13")
             self.writer.line("    pop r12")
             self.writer.line("    pop rbx")
             self.writer.line("    ret")
             self.writer.line(".Lnetwork_error_pop3:")
             self.writer.line("    neg rax")
-            self.writer.line("    mov QWORD PTR [rip+argon_network_error], rax")
+            self.writer.line("    mov QWORD PTR [rip+valen_network_error], rax")
             self.writer.line("    xor eax, eax")
             self.writer.line("    pop r13")
             self.writer.line("    pop r12")
             self.writer.line("    pop rbx")
             self.writer.line("    ret")
             self.writer.line(".Lnetwork_invalid:")
-            self.writer.line("    mov QWORD PTR [rip+argon_network_error], 22")
+            self.writer.line("    mov QWORD PTR [rip+valen_network_error], 22")
             self.writer.line("    xor eax, eax")
             self.writer.line("    ret")
-            self.writer.line(".globl argon_Network_send")
-            self.writer.line("argon_Network_send:")
+            self.writer.line(".globl valen_Network_send")
+            self.writer.line("valen_Network_send:")
             self.writer.line("    mov r8, QWORD PTR [rdi]")
             self.writer.line("    mov rdx, QWORD PTR [rsi+8]")
             self.writer.line("    mov rsi, QWORD PTR [rsi]")
@@ -1868,55 +1868,55 @@ library X86_64 {{
             self.writer.line("    sub rdx, rax")
             self.writer.line("    jmp .Lnetwork_send_next")
             self.writer.line(".Lnetwork_send_done:")
-            self.writer.line("    mov QWORD PTR [rip+argon_network_error], 0")
+            self.writer.line("    mov QWORD PTR [rip+valen_network_error], 0")
             self.writer.line("    mov rax, r9")
             self.writer.line("    ret")
             self.writer.line(".Lnetwork_send_error:")
             self.writer.line("    mov r10, rax")
             self.writer.line("    neg r10")
-            self.writer.line("    mov QWORD PTR [rip+argon_network_error], r10")
+            self.writer.line("    mov QWORD PTR [rip+valen_network_error], r10")
             self.writer.line("    test r9, r9")
             self.writer.line("    cmovnz rax, r9")
             self.writer.line("    ret")
-            self.writer.line(".globl argon_Network_closeListener")
-            self.writer.line("argon_Network_closeListener:")
+            self.writer.line(".globl valen_Network_closeListener")
+            self.writer.line("valen_Network_closeListener:")
             self.writer.line("    mov rdi, QWORD PTR [rdi]")
             self.writer.line("    mov eax, 3")
             self.writer.line("    syscall")
             self.writer.line("    ret")
-            self.writer.line(".globl argon_Network_closeConnection")
-            self.writer.line("argon_Network_closeConnection:")
+            self.writer.line(".globl valen_Network_closeConnection")
+            self.writer.line("valen_Network_closeConnection:")
             self.writer.line("    mov rdi, QWORD PTR [rdi]")
             self.writer.line("    mov eax, 3")
             self.writer.line("    syscall")
             self.writer.line("    ret")
-            self.writer.line(".globl argon_Network_lastError")
-            self.writer.line("argon_Network_lastError:")
-            self.writer.line("    mov rax, QWORD PTR [rip+argon_network_error]")
+            self.writer.line(".globl valen_Network_lastError")
+            self.writer.line("valen_Network_lastError:")
+            self.writer.line("    mov rax, QWORD PTR [rip+valen_network_error]")
             self.writer.line("    ret")
-            self.descriptorRuntime("argon_Network_listenerDescriptor")
-            self.descriptorRuntime("argon_Network_connectionDescriptor")
-            self.nonblockingRuntime("argon_Network_makeListenerNonblocking")
-            self.nonblockingRuntime("argon_Network_makeConnectionNonblocking")
+            self.descriptorRuntime("valen_Network_listenerDescriptor")
+            self.descriptorRuntime("valen_Network_connectionDescriptor")
+            self.nonblockingRuntime("valen_Network_makeListenerNonblocking")
+            self.nonblockingRuntime("valen_Network_makeConnectionNonblocking")
             self.writer.line(".Lnetwork_error:")
             self.writer.line("    neg rax")
-            self.writer.line("    mov QWORD PTR [rip+argon_network_error], rax")
+            self.writer.line("    mov QWORD PTR [rip+valen_network_error], rax")
             self.writer.line("    xor eax, eax")
             self.writer.line("    ret")
             self.writer.line(".bss")
             self.writer.line(".align 8")
-            self.writer.line("argon_network_error:")
+            self.writer.line("valen_network_error:")
             self.writer.line("    .zero 8")
             self.writer.line(".text")
         }
 
         filesystemRuntime() -> void {
-            self.descriptorRuntime("argon_System_fileDescriptor")
-            self.nonblockingRuntime("argon_System_makeFileNonblocking")
-            self.openRuntime("argon_System_openRead", 0)
-            self.openRuntime("argon_System_openWrite", 577)
-            self.writer.line(".globl argon_System_read")
-            self.writer.line("argon_System_read:")
+            self.descriptorRuntime("valen_System_fileDescriptor")
+            self.nonblockingRuntime("valen_System_makeFileNonblocking")
+            self.openRuntime("valen_System_openRead", 0)
+            self.openRuntime("valen_System_openWrite", 577)
+            self.writer.line(".globl valen_System_read")
+            self.writer.line("valen_System_read:")
             self.writer.line("    test rsi, rsi")
             self.writer.line("    js .Lfile_read_error")
             self.writer.line("    push rbp")
@@ -1928,7 +1928,7 @@ library X86_64 {{
             self.writer.line("    mov r12, QWORD PTR [rdi]")
             self.writer.line("    mov r13, rsi")
             self.writer.line("    mov rdi, r13")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov rbx, rax")
             self.writer.line("    xor eax, eax")
             self.writer.line("    mov rdi, r12")
@@ -1937,16 +1937,16 @@ library X86_64 {{
             self.writer.line("    syscall")
             self.writer.line("    test rax, rax")
             self.writer.line("    js .Lfile_read_error_frame")
-            self.writer.line("    mov QWORD PTR [rip+argon_filesystem_error], 0")
+            self.writer.line("    mov QWORD PTR [rip+valen_filesystem_error], 0")
             self.writer.line("    mov r14, rax")
             self.writer.line("    mov edi, 16")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov QWORD PTR [rax], rbx")
             self.writer.line("    mov QWORD PTR [rax+8], r14")
             self.writer.line("    jmp .Lfile_read_done")
             self.writer.line(".Lfile_read_error_frame:")
             self.writer.line("    neg rax")
-            self.writer.line("    mov QWORD PTR [rip+argon_filesystem_error], rax")
+            self.writer.line("    mov QWORD PTR [rip+valen_filesystem_error], rax")
             self.writer.line("    xor eax, eax")
             self.writer.line(".Lfile_read_done:")
             self.writer.line("    pop r14")
@@ -1956,12 +1956,12 @@ library X86_64 {{
             self.writer.line("    leave")
             self.writer.line("    ret")
             self.writer.line(".Lfile_read_error:")
-            self.writer.line("    mov QWORD PTR [rip+argon_filesystem_error], 22")
+            self.writer.line("    mov QWORD PTR [rip+valen_filesystem_error], 22")
             self.writer.line("    xor eax, eax")
             self.writer.line("    ret")
             self.writer.line("")
-            self.writer.line(".globl argon_System_writeFile")
-            self.writer.line("argon_System_writeFile:")
+            self.writer.line(".globl valen_System_writeFile")
+            self.writer.line("valen_System_writeFile:")
             self.writer.line("    mov r8, QWORD PTR [rdi]")
             self.writer.line("    mov rdx, QWORD PTR [rsi+8]")
             self.writer.line("    mov rsi, QWORD PTR [rsi]")
@@ -1979,17 +1979,17 @@ library X86_64 {{
             self.writer.line("    sub rdx, rax")
             self.writer.line("    jmp .Lfile_write_next")
             self.writer.line(".Lfile_write_done:")
-            self.writer.line("    mov QWORD PTR [rip+argon_filesystem_error], 0")
+            self.writer.line("    mov QWORD PTR [rip+valen_filesystem_error], 0")
             self.writer.line("    mov rax, r9")
             self.writer.line("    ret")
             self.writer.line(".Lfile_write_error:")
             self.writer.line("    mov r10, rax")
             self.writer.line("    neg r10")
-            self.writer.line("    mov QWORD PTR [rip+argon_filesystem_error], r10")
+            self.writer.line("    mov QWORD PTR [rip+valen_filesystem_error], r10")
             self.writer.line("    ret")
             self.writer.line("")
-            self.writer.line(".globl argon_System_writeBytes")
-            self.writer.line("argon_System_writeBytes:")
+            self.writer.line(".globl valen_System_writeBytes")
+            self.writer.line("valen_System_writeBytes:")
             self.writer.line("    mov r8, QWORD PTR [rdi]")
             self.writer.line("    mov rdx, QWORD PTR [rsi]")
             self.writer.line("    mov rsi, QWORD PTR [rsi+16]")
@@ -2007,38 +2007,38 @@ library X86_64 {{
             self.writer.line("    sub rdx, rax")
             self.writer.line("    jmp .Lfile_write_bytes_next")
             self.writer.line(".Lfile_write_bytes_done:")
-            self.writer.line("    mov QWORD PTR [rip+argon_filesystem_error], 0")
+            self.writer.line("    mov QWORD PTR [rip+valen_filesystem_error], 0")
             self.writer.line("    mov rax, r9")
             self.writer.line("    ret")
             self.writer.line("")
-            self.writer.line(".globl argon_System_close")
-            self.writer.line("argon_System_close:")
+            self.writer.line(".globl valen_System_close")
+            self.writer.line("valen_System_close:")
             self.writer.line("    mov rdi, QWORD PTR [rdi]")
             self.writer.line("    mov eax, 3")
             self.writer.line("    syscall")
             self.writer.line("    test rax, rax")
             self.writer.line("    js .Lfile_close_error")
-            self.writer.line("    mov QWORD PTR [rip+argon_filesystem_error], 0")
+            self.writer.line("    mov QWORD PTR [rip+valen_filesystem_error], 0")
             self.writer.line("    ret")
             self.writer.line(".Lfile_close_error:")
             self.writer.line("    mov r10, rax")
             self.writer.line("    neg r10")
-            self.writer.line("    mov QWORD PTR [rip+argon_filesystem_error], r10")
+            self.writer.line("    mov QWORD PTR [rip+valen_filesystem_error], r10")
             self.writer.line("    ret")
             self.writer.line("")
-            self.writer.line(".globl argon_System_lastError")
-            self.writer.line("argon_System_lastError:")
-            self.writer.line("    mov rax, QWORD PTR [rip+argon_filesystem_error]")
+            self.writer.line(".globl valen_System_lastError")
+            self.writer.line("valen_System_lastError:")
+            self.writer.line("    mov rax, QWORD PTR [rip+valen_filesystem_error]")
             self.writer.line("    ret")
             self.writer.line("")
-            self.writer.line(".globl argon_System_currentDirectory")
-            self.writer.line("argon_System_currentDirectory:")
+            self.writer.line(".globl valen_System_currentDirectory")
+            self.writer.line("valen_System_currentDirectory:")
             self.writer.line("    push rbp")
             self.writer.line("    mov rbp, rsp")
             self.writer.line("    push rbx")
             self.writer.line("    push r12")
             self.writer.line("    mov edi, 4096")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov rbx, rax")
             self.writer.line("    mov rdi, rax")
             self.writer.line("    mov esi, 4096")
@@ -2053,15 +2053,15 @@ library X86_64 {{
             self.writer.line("    inc r12")
             self.writer.line("    jmp .Lcurrent_directory_length")
             self.writer.line(".Lcurrent_directory_wrap:")
-            self.writer.line("    mov QWORD PTR [rip+argon_filesystem_error], 0")
+            self.writer.line("    mov QWORD PTR [rip+valen_filesystem_error], 0")
             self.writer.line("    mov edi, 16")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov QWORD PTR [rax], rbx")
             self.writer.line("    mov QWORD PTR [rax+8], r12")
             self.writer.line("    jmp .Lcurrent_directory_done")
             self.writer.line(".Lcurrent_directory_error:")
             self.writer.line("    neg rax")
-            self.writer.line("    mov QWORD PTR [rip+argon_filesystem_error], rax")
+            self.writer.line("    mov QWORD PTR [rip+valen_filesystem_error], rax")
             self.writer.line("    xor eax, eax")
             self.writer.line(".Lcurrent_directory_done:")
             self.writer.line("    pop r12")
@@ -2085,8 +2085,8 @@ library X86_64 {{
         }
 
         memoryRuntime() -> void {
-            self.writer.line(".globl argon_System_memoryCopy")
-            self.writer.line("argon_System_memoryCopy:")
+            self.writer.line(".globl valen_System_memoryCopy")
+            self.writer.line("valen_System_memoryCopy:")
             self.writer.line("    test rsi, rsi")
             self.writer.line("    js .Larray_bounds_error")
             self.writer.line("    test rcx, rcx")
@@ -2112,8 +2112,8 @@ library X86_64 {{
             self.writer.line("    mov eax, 1")
             self.writer.line("    ret")
             self.writer.line("")
-            self.writer.line(".globl argon_System_memoryCompare")
-            self.writer.line("argon_System_memoryCompare:")
+            self.writer.line(".globl valen_System_memoryCompare")
+            self.writer.line("valen_System_memoryCompare:")
             self.writer.line("    test rsi, rsi")
             self.writer.line("    js .Larray_bounds_error")
             self.writer.line("    test rcx, rcx")
@@ -2160,7 +2160,7 @@ library X86_64 {{
             self.writer.line("    mov r12, QWORD PTR [rdi]")
             self.writer.line("    mov r13, QWORD PTR [rdi+8]")
             self.writer.line("    lea rdi, [r13+1]")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov rbx, rax")
             self.writer.line("    mov rdi, rax")
             self.writer.line("    mov rsi, r12")
@@ -2175,15 +2175,15 @@ library X86_64 {{
             self.writer.line("    syscall")
             self.writer.line("    test rax, rax")
             self.writer.line("    js " + label + "error")
-            self.writer.line("    mov QWORD PTR [rip+argon_filesystem_error], 0")
+            self.writer.line("    mov QWORD PTR [rip+valen_filesystem_error], 0")
             self.writer.line("    mov r12, rax")
             self.writer.line("    mov edi, 8")
-            self.writer.line("    call argon_alloc")
+            self.writer.line("    call valen_alloc")
             self.writer.line("    mov QWORD PTR [rax], r12")
             self.writer.line("    jmp " + label + "done")
             self.writer.line(label + "error:")
             self.writer.line("    neg rax")
-            self.writer.line("    mov QWORD PTR [rip+argon_filesystem_error], rax")
+            self.writer.line("    mov QWORD PTR [rip+valen_filesystem_error], rax")
             self.writer.line("    xor eax, eax")
             self.writer.line(label + "done:")
             self.writer.line("    add rsp, 8")
@@ -2261,47 +2261,47 @@ library X86_64 {{
         runtimeData() -> void {
             self.writer.line(".section .bss")
             self.writer.line(".align 8")
-            self.writer.line("argon_process_argc:")
+            self.writer.line("valen_process_argc:")
             self.writer.line("    .zero 8")
-            self.writer.line("argon_process_argv:")
+            self.writer.line("valen_process_argv:")
             self.writer.line("    .zero 8")
-            self.writer.line("argon_process_envp:")
+            self.writer.line("valen_process_envp:")
             self.writer.line("    .zero 8")
-            self.writer.line("argon_filesystem_error:")
+            self.writer.line("valen_filesystem_error:")
             self.writer.line("    .zero 8")
-            self.writer.line("argon_gc_roots:")
+            self.writer.line("valen_gc_roots:")
             self.writer.line("    .zero 8")
-            self.writer.line("argon_gc_heap:")
+            self.writer.line("valen_gc_heap:")
             self.writer.line("    .zero 8")
-            self.writer.line("argon_gc_bytes:")
+            self.writer.line("valen_gc_bytes:")
             self.writer.line("    .zero 8")
-            self.writer.line("argon_arena_cursor:")
+            self.writer.line("valen_arena_cursor:")
             self.writer.line("    .zero 8")
-            self.writer.line("argon_arena_remaining:")
+            self.writer.line("valen_arena_remaining:")
             self.writer.line("    .zero 8")
-            self.writer.line("argon_arena_lock:")
+            self.writer.line("valen_arena_lock:")
             self.writer.line("    .zero 4")
-            self.writer.line("argon_arena_enabled:")
+            self.writer.line("valen_arena_enabled:")
             self.writer.line("    .zero 4")
             self.writer.line(".section .data")
             self.writer.line(".align 8")
-            self.writer.line("argon_gc_threshold:")
+            self.writer.line("valen_gc_threshold:")
             self.writer.line("    .quad 1048576")
             self.writer.line("")
         }
 
-        typeLabel(typeName:string) -> string { return ".Largon_type_" + self.mangle(typeName) }
+        typeLabel(typeName:string) -> string { return ".Lvalen_type_" + self.mangle(typeName) }
         objectEqualityLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_equal" }
         objectHashLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_hash" }
         objectCopyLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_copy" }
-        arrayEqualityLabel(typeName:string) -> string { return ".Largon_array_equal_" + self.mangle(typeName) }
-        arrayHashLabel(typeName:string) -> string { return ".Largon_array_hash_" + self.mangle(typeName) }
-        arrayCopyLabel(typeName:string) -> string { return ".Largon_array_copy_" + self.mangle(typeName) }
-        arrayDestroyLabel(typeName:string) -> string { return ".Largon_array_destroy_" + self.mangle(typeName) }
+        arrayEqualityLabel(typeName:string) -> string { return ".Lvalen_array_equal_" + self.mangle(typeName) }
+        arrayHashLabel(typeName:string) -> string { return ".Lvalen_array_hash_" + self.mangle(typeName) }
+        arrayCopyLabel(typeName:string) -> string { return ".Lvalen_array_copy_" + self.mangle(typeName) }
+        arrayDestroyLabel(typeName:string) -> string { return ".Lvalen_array_destroy_" + self.mangle(typeName) }
         gcTraceLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_gc_trace" }
         gcWeakLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_gc_weak" }
-        gcArrayTraceLabel(typeName:string) -> string { return ".Largon_gc_array_trace_" + self.mangle(typeName) }
-        gcArrayWeakLabel(typeName:string) -> string { return ".Largon_gc_array_weak_" + self.mangle(typeName) }
+        gcArrayTraceLabel(typeName:string) -> string { return ".Lvalen_gc_array_trace_" + self.mangle(typeName) }
+        gcArrayWeakLabel(typeName:string) -> string { return ".Lvalen_gc_array_weak_" + self.mangle(typeName) }
 
         isManagedReferenceType(typeName:string) -> bool {
             local base = self.baseType(typeName)
@@ -2315,23 +2315,23 @@ library X86_64 {{
 
         equalityFunction(typeName:string) -> string {
             local base = self.baseType(typeName)
-            if base == "string" { return "argon_string_equal_context" }
+            if base == "string" { return "valen_string_equal_context" }
             if self.isArray(base) { return self.arrayEqualityLabel(base) }
-            return "argon_object_equal"
+            return "valen_object_equal"
         }
 
         hashFunction(typeName:string) -> string {
             local base = self.baseType(typeName)
-            if base == "string" { return "argon_string_hash_context" }
+            if base == "string" { return "valen_string_hash_context" }
             if self.isArray(base) { return self.arrayHashLabel(base) }
-            return "argon_object_hash"
+            return "valen_object_hash"
         }
 
         copyFunction(typeName:string) -> string {
             local base = self.baseType(typeName)
-            if base == "string" { return "argon_string_copy_context" }
+            if base == "string" { return "valen_string_copy_context" }
             if self.isArray(base) { return self.arrayCopyLabel(base) }
-            return "argon_object_copy"
+            return "valen_object_copy"
         }
 
         structuralRuntime() -> void {
@@ -2354,8 +2354,8 @@ library X86_64 {{
         }
 
         structuralCoreRuntime() -> void {
-            self.writer.line(".globl argon_object_equal")
-            self.writer.line("argon_object_equal:")
+            self.writer.line(".globl valen_object_equal")
+            self.writer.line("valen_object_equal:")
             self.writer.line("    cmp rdi, rsi"); self.writer.line("    je .Lobject_equal_true")
             self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lobject_equal_false")
             self.writer.line("    test rsi, rsi"); self.writer.line("    jz .Lobject_equal_false")
@@ -2370,7 +2370,7 @@ library X86_64 {{
             self.writer.line("    mov rdx, rsp"); self.writer.line("    call QWORD PTR [rax+16]"); self.writer.line("    leave"); self.writer.line("    ret")
             self.writer.line(".Lobject_equal_true:"); self.writer.line("    mov eax, 1"); self.writer.line("    ret")
             self.writer.line(".Lobject_equal_false:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
-            self.writer.line(".globl argon_object_hash"); self.writer.line("argon_object_hash:")
+            self.writer.line(".globl valen_object_hash"); self.writer.line("valen_object_hash:")
             self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lobject_hash_null"); self.writer.line("    mov rcx, rsi")
             self.writer.line(".Lobject_hash_scan:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz .Lobject_hash_enter")
             self.writer.line("    cmp QWORD PTR [rcx], rdi"); self.writer.line("    je .Lobject_hash_cycle")
@@ -2380,26 +2380,26 @@ library X86_64 {{
             self.writer.line("    mov rax, QWORD PTR [rdi]"); self.writer.line("    call QWORD PTR [rax+24]"); self.writer.line("    leave"); self.writer.line("    ret")
             self.writer.line(".Lobject_hash_null:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
             self.writer.line(".Lobject_hash_cycle:"); self.writer.line("    mov rax, -7046029254386353131"); self.writer.line("    ret")
-            self.writer.line(".globl argon_object_copy"); self.writer.line("argon_object_copy:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lobject_copy_null")
-            self.writer.line("    test rsi, rsi"); self.writer.line("    jnz .Lobject_copy_scan_start"); self.writer.line("    push rdi"); self.writer.line("    mov edi, 8"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rax], 0"); self.writer.line("    mov rsi, rax"); self.writer.line("    pop rdi")
+            self.writer.line(".globl valen_object_copy"); self.writer.line("valen_object_copy:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lobject_copy_null")
+            self.writer.line("    test rsi, rsi"); self.writer.line("    jnz .Lobject_copy_scan_start"); self.writer.line("    push rdi"); self.writer.line("    mov edi, 8"); self.writer.line("    call valen_alloc"); self.writer.line("    mov QWORD PTR [rax], 0"); self.writer.line("    mov rsi, rax"); self.writer.line("    pop rdi")
             self.writer.line(".Lobject_copy_scan_start:"); self.writer.line("    mov rcx, QWORD PTR [rsi]"); self.writer.line(".Lobject_copy_scan:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz .Lobject_copy_enter")
             self.writer.line("    cmp QWORD PTR [rcx], rdi"); self.writer.line("    je .Lobject_copy_found"); self.writer.line("    mov rcx, QWORD PTR [rcx+16]"); self.writer.line("    jmp .Lobject_copy_scan")
             self.writer.line(".Lobject_copy_found:"); self.writer.line("    mov rax, QWORD PTR [rcx+8]"); self.writer.line("    ret"); self.writer.line(".Lobject_copy_enter:"); self.writer.line("    mov rax, QWORD PTR [rdi]"); self.writer.line("    jmp QWORD PTR [rax+32]"); self.writer.line(".Lobject_copy_null:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
-            self.writer.line("argon_string_equal_context:"); self.writer.line("    cmp rdi, rsi"); self.writer.line("    je .Lstring_context_true")
+            self.writer.line("valen_string_equal_context:"); self.writer.line("    cmp rdi, rsi"); self.writer.line("    je .Lstring_context_true")
             self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lstring_context_false"); self.writer.line("    test rsi, rsi"); self.writer.line("    jz .Lstring_context_false")
-            self.writer.line("    jmp argon_string_equal"); self.writer.line(".Lstring_context_true:"); self.writer.line("    mov eax, 1"); self.writer.line("    ret")
+            self.writer.line("    jmp valen_string_equal"); self.writer.line(".Lstring_context_true:"); self.writer.line("    mov eax, 1"); self.writer.line("    ret")
             self.writer.line(".Lstring_context_false:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
-            self.writer.line("argon_string_hash_context:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lstring_hash_null")
+            self.writer.line("valen_string_hash_context:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lstring_hash_null")
             self.writer.line("    mov rsi, QWORD PTR [rdi]"); self.writer.line("    mov rcx, QWORD PTR [rdi+8]"); self.writer.line("    mov rax, 1469598103934665603")
             self.writer.line(".Lstring_hash_next:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz .Lstring_hash_done")
             self.writer.line("    movzx rdx, BYTE PTR [rsi]"); self.writer.line("    xor rax, rdx"); self.writer.line("    mov r8, 1099511628211"); self.writer.line("    imul rax, r8")
             self.writer.line("    inc rsi"); self.writer.line("    dec rcx"); self.writer.line("    jmp .Lstring_hash_next")
             self.writer.line(".Lstring_hash_done:"); self.writer.line("    ret"); self.writer.line(".Lstring_hash_null:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
-            self.writer.line("argon_string_copy_context:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lstring_copy_null"); self.writer.line("    test rsi, rsi"); self.writer.line("    jnz .Lstring_copy_scan_start")
-            self.writer.line("    push rdi"); self.writer.line("    mov edi, 8"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rax], 0"); self.writer.line("    mov rsi, rax"); self.writer.line("    pop rdi")
+            self.writer.line("valen_string_copy_context:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lstring_copy_null"); self.writer.line("    test rsi, rsi"); self.writer.line("    jnz .Lstring_copy_scan_start")
+            self.writer.line("    push rdi"); self.writer.line("    mov edi, 8"); self.writer.line("    call valen_alloc"); self.writer.line("    mov QWORD PTR [rax], 0"); self.writer.line("    mov rsi, rax"); self.writer.line("    pop rdi")
             self.writer.line(".Lstring_copy_scan_start:"); self.writer.line("    mov rcx, QWORD PTR [rsi]"); self.writer.line(".Lstring_copy_scan:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz .Lstring_copy_enter"); self.writer.line("    cmp QWORD PTR [rcx], rdi"); self.writer.line("    je .Lstring_copy_found"); self.writer.line("    mov rcx, QWORD PTR [rcx+16]"); self.writer.line("    jmp .Lstring_copy_scan"); self.writer.line(".Lstring_copy_found:"); self.writer.line("    mov rax, QWORD PTR [rcx+8]"); self.writer.line("    ret")
-            self.writer.line(".Lstring_copy_enter:"); self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    mov r12, rdi"); self.writer.line("    mov r14, rsi"); self.writer.line("    mov edi, 16"); self.writer.line("    call argon_alloc"); self.writer.line("    mov rbx, rax"); self.writer.line("    mov r13, QWORD PTR [r12+8]"); self.writer.line("    mov rdi, r13"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rbx], rax"); self.writer.line("    mov QWORD PTR [rbx+8], r13"); self.writer.line("    mov rdi, rax"); self.writer.line("    mov rsi, QWORD PTR [r12]"); self.writer.line("    mov rcx, r13"); self.writer.line("    rep movsb")
-            self.writer.line("    mov edi, 24"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rax], r12"); self.writer.line("    mov QWORD PTR [rax+8], rbx"); self.writer.line("    mov rcx, QWORD PTR [r14]"); self.writer.line("    mov QWORD PTR [rax+16], rcx"); self.writer.line("    mov QWORD PTR [r14], rax"); self.writer.line("    mov rax, rbx"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    leave"); self.writer.line("    ret"); self.writer.line(".Lstring_copy_null:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
+            self.writer.line(".Lstring_copy_enter:"); self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    mov r12, rdi"); self.writer.line("    mov r14, rsi"); self.writer.line("    mov edi, 16"); self.writer.line("    call valen_alloc"); self.writer.line("    mov rbx, rax"); self.writer.line("    mov r13, QWORD PTR [r12+8]"); self.writer.line("    mov rdi, r13"); self.writer.line("    call valen_alloc"); self.writer.line("    mov QWORD PTR [rbx], rax"); self.writer.line("    mov QWORD PTR [rbx+8], r13"); self.writer.line("    mov rdi, rax"); self.writer.line("    mov rsi, QWORD PTR [r12]"); self.writer.line("    mov rcx, r13"); self.writer.line("    rep movsb")
+            self.writer.line("    mov edi, 24"); self.writer.line("    call valen_alloc"); self.writer.line("    mov QWORD PTR [rax], r12"); self.writer.line("    mov QWORD PTR [rax+8], rbx"); self.writer.line("    mov rcx, QWORD PTR [r14]"); self.writer.line("    mov QWORD PTR [rax+16], rcx"); self.writer.line("    mov QWORD PTR [r14], rax"); self.writer.line("    mov rax, rbx"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    leave"); self.writer.line("    ret"); self.writer.line(".Lstring_copy_null:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
         }
 
         objectEqualityFunction(typeNode:Ir.Type) -> void {
@@ -2435,8 +2435,8 @@ library X86_64 {{
         objectCopyFunction(typeNode:Ir.Type) -> void {
             self.writer.line(self.objectCopyLabel(typeNode.name) + ":")
             self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15"); self.writer.line("    sub rsp, 16")
-            self.writer.line("    mov r12, rdi"); self.writer.line("    mov r14, rsi"); self.writer.line("    mov edi, " + self.typeSize(typeNode.name).toString()); self.writer.line("    call argon_alloc"); self.writer.line("    mov r13, rax"); self.writer.line("    mov rax, QWORD PTR [r12]"); self.writer.line("    mov QWORD PTR [r13], rax"); self.writer.line("    mov QWORD PTR [r13+8], 1")
-            self.writer.line("    mov edi, 24"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rax], r12"); self.writer.line("    mov QWORD PTR [rax+8], r13"); self.writer.line("    mov rcx, QWORD PTR [r14]"); self.writer.line("    mov QWORD PTR [rax+16], rcx"); self.writer.line("    mov QWORD PTR [r14], rax")
+            self.writer.line("    mov r12, rdi"); self.writer.line("    mov r14, rsi"); self.writer.line("    mov edi, " + self.typeSize(typeNode.name).toString()); self.writer.line("    call valen_alloc"); self.writer.line("    mov r13, rax"); self.writer.line("    mov rax, QWORD PTR [r12]"); self.writer.line("    mov QWORD PTR [r13], rax"); self.writer.line("    mov QWORD PTR [r13+8], 1")
+            self.writer.line("    mov edi, 24"); self.writer.line("    call valen_alloc"); self.writer.line("    mov QWORD PTR [rax], r12"); self.writer.line("    mov QWORD PTR [rax+8], r13"); self.writer.line("    mov rcx, QWORD PTR [r14]"); self.writer.line("    mov QWORD PTR [rax+16], rcx"); self.writer.line("    mov QWORD PTR [r14], rax")
             local index:i64 = 0
             while index < typeNode.fields.length {
                 local field = self.findField(typeNode.fields[index].qualifiedName)!
@@ -2567,10 +2567,10 @@ library X86_64 {{
             local loop = label + "_loop"
             local done = label + "_done"
             self.writer.line(label + ":"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz " + done + "_null"); self.writer.line("    test rsi, rsi"); self.writer.line("    jnz " + label + "_scan_start")
-            self.writer.line("    push rdi"); self.writer.line("    mov edi, 8"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rax], 0"); self.writer.line("    mov rsi, rax"); self.writer.line("    pop rdi")
+            self.writer.line("    push rdi"); self.writer.line("    mov edi, 8"); self.writer.line("    call valen_alloc"); self.writer.line("    mov QWORD PTR [rax], 0"); self.writer.line("    mov rsi, rax"); self.writer.line("    pop rdi")
             self.writer.line(label + "_scan_start:"); self.writer.line("    mov rcx, QWORD PTR [rsi]"); self.writer.line(label + "_scan:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz " + label + "_enter"); self.writer.line("    cmp QWORD PTR [rcx], rdi"); self.writer.line("    je " + label + "_found"); self.writer.line("    mov rcx, QWORD PTR [rcx+16]"); self.writer.line("    jmp " + label + "_scan"); self.writer.line(label + "_found:"); self.writer.line("    mov rax, QWORD PTR [rcx+8]"); self.writer.line("    ret")
             self.writer.line(label + "_enter:"); self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15"); self.writer.line("    sub rsp, 16"); self.writer.line("    mov r12, rdi"); self.writer.line("    mov r14, rsi")
-            self.writer.line("    mov edi, " + self.sizeOf(element).toString()); self.writer.line("    mov rsi, QWORD PTR [r12]"); self.writer.line("    call argon_array_new"); self.writer.line("    mov r13, rax"); self.writer.line("    mov edi, 24"); self.writer.line("    call argon_alloc"); self.writer.line("    mov QWORD PTR [rax], r12"); self.writer.line("    mov QWORD PTR [rax+8], r13"); self.writer.line("    mov rcx, QWORD PTR [r14]"); self.writer.line("    mov QWORD PTR [rax+16], rcx"); self.writer.line("    mov QWORD PTR [r14], rax"); self.writer.line("    xor r15d, r15d")
+            self.writer.line("    mov edi, " + self.sizeOf(element).toString()); self.writer.line("    mov rsi, QWORD PTR [r12]"); self.writer.line("    call valen_array_new"); self.writer.line("    mov r13, rax"); self.writer.line("    mov edi, 24"); self.writer.line("    call valen_alloc"); self.writer.line("    mov QWORD PTR [rax], r12"); self.writer.line("    mov QWORD PTR [rax+8], r13"); self.writer.line("    mov rcx, QWORD PTR [r14]"); self.writer.line("    mov QWORD PTR [rax+16], rcx"); self.writer.line("    mov QWORD PTR [r14], rax"); self.writer.line("    xor r15d, r15d")
             self.writer.line(loop + ":"); self.writer.line("    cmp r15, QWORD PTR [r12]"); self.writer.line("    jae " + done); self.writer.line("    imul rax, r15, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]"); self.copyAddress("rax", element); self.writer.line("    mov rdx, rax"); self.writer.line("    imul rax, r15, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r13+16]"); self.writer.line("    mov " + self.memorySize(element) + " PTR [rax], " + self.registerForSize("rdx", element)); self.writer.line("    inc r15"); self.writer.line("    jmp " + loop)
             self.writer.line(done + ":"); self.writer.line("    mov rax, r13"); self.writer.line("    add rsp, 16"); self.writer.line("    pop r15"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    leave"); self.writer.line("    ret"); self.writer.line(done + "_null:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
         }
@@ -2699,12 +2699,12 @@ library X86_64 {{
         internString(value:string) -> void {
             if self.findLiteral(value) != null { return }
             local suffix = self.literals.length.toString()
-            self.literals.append(new Literal(value, ".Largon_string_data_" + suffix, ".Largon_string_" + suffix))
+            self.literals.append(new Literal(value, ".Lvalen_string_data_" + suffix, ".Lvalen_string_" + suffix))
         }
 
         internFloat(value:string, typeName:string) -> void {
             if self.findFloatLiteral(value, typeName) != null { return }
-            self.floatLiterals.append(new Literal(value, ".Largon_float_" + self.floatLiterals.length.toString(), typeName))
+            self.floatLiterals.append(new Literal(value, ".Lvalen_float_" + self.floatLiterals.length.toString(), typeName))
         }
 
         findFloatLiteral(value:string, typeName:string) -> ref Literal? {
@@ -2833,7 +2833,7 @@ library X86_64 {{
 
         mangle(name:string) -> string {
             local builder = new StringBuilder()
-            builder.append("argon_fn")
+            builder.append("valen_fn")
             local index:i64 = 0
             while index < name.length {
                 builder.append("_")

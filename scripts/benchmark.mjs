@@ -16,8 +16,8 @@ const markdownPath = valueAfter('--markdown');
 const checkBudgets = args.has('--check-budgets');
 const includeGeneration2 = args.has('--generation2');
 const keep = args.has('--keep');
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'argon-benchmark-'));
-const environment = {...process.env, ARGON_LIBRARY_PATH: path.join(root, 'lib')};
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-benchmark-'));
+const environment = {...process.env, VALEN_LIBRARY_PATH: path.join(root, 'lib')};
 const metrics = [];
 
 async function measured(name, command, commandArgs, options = {}) {
@@ -99,7 +99,7 @@ function formatBytes(bytes) {
 
 function markdown(report) {
     const lines = [
-        '# Argon benchmark results', '',
+        '# Valen benchmark results', '',
         `Commit: \`${report.metadata.commit}\`  `,
         `Platform: ${report.metadata.platform} ${report.metadata.arch}  `,
         `CPU: ${report.metadata.cpu}  `,
@@ -120,27 +120,27 @@ function markdown(report) {
 }
 
 try {
-    const stage1 = path.join(directory, 'argon-stage1');
-    const argonProgram = path.join(directory, 'integer-loop-argon');
+    const stage1 = path.join(directory, 'valen-stage1');
+    const valenProgram = path.join(directory, 'integer-loop-valen');
     const cO0Program = path.join(directory, 'integer-loop-c-o0');
     const cO2Program = path.join(directory, 'integer-loop-c-o2');
-    const stage2 = path.join(directory, 'argon-stage2');
+    const stage2 = path.join(directory, 'valen-stage2');
     const stage2Program = path.join(directory, 'integer-loop-stage2');
     const workloadAr = path.join(root, 'benchmarks/workloads/integer-loop.ar');
     const workloadC = path.join(root, 'benchmarks/workloads/integer-loop.c');
 
-    await measured('bootstrap_compile_stage1', process.execPath, [path.join(root, 'bootstrap/compiler.js'), path.join(root, 'src/argon.ar'), stage1]);
-    await measured('stage1_compile_workload', stage1, [workloadAr, '-o', argonProgram]);
+    await measured('bootstrap_compile_stage1', process.execPath, [path.join(root, 'bootstrap/compiler.js'), path.join(root, 'src/valen.ar'), stage1]);
+    await measured('stage1_compile_workload', stage1, [workloadAr, '-o', valenProgram]);
     await measured('c_o0_compile_workload', 'cc', ['-std=c11', '-O0', workloadC, '-o', cO0Program]);
     await measured('c_o2_compile_workload', 'cc', ['-std=c11', '-O2', workloadC, '-o', cO2Program]);
 
     const expectedOutput = '1249999707\n';
-    await runRepeated('argon_run_integer_loop', argonProgram, expectedOutput);
+    await runRepeated('valen_run_integer_loop', valenProgram, expectedOutput);
     await runRepeated('c_o0_run_integer_loop', cO0Program, expectedOutput);
     await runRepeated('c_o2_run_integer_loop', cO2Program, expectedOutput);
 
     if (includeGeneration2) {
-        await measured('stage1_compile_stage2', stage1, [path.join(root, 'src/argon.ar'), '-o', stage2]);
+        await measured('stage1_compile_stage2', stage1, [path.join(root, 'src/valen.ar'), '-o', stage2]);
         await measured('stage2_compile_workload', stage2, [workloadAr, '-o', stage2Program]);
         await runRepeated('stage2_run_integer_loop', stage2Program, expectedOutput);
     }
@@ -174,8 +174,8 @@ try {
         metrics,
         artifacts: {
             stage1CompilerBytes: fileSize(stage1),
-            argonObjectBytes: fileSize(`${argonProgram}.o`),
-            argonExecutableBytes: fileSize(argonProgram),
+            valenObjectBytes: fileSize(`${valenProgram}.o`),
+            valenExecutableBytes: fileSize(valenProgram),
             cO0ExecutableBytes: fileSize(cO0Program),
             cO2ExecutableBytes: fileSize(cO2Program),
             ...(includeGeneration2 ? {stage2CompilerBytes: fileSize(stage2), stage2CompilerObjectBytes: fileSize(`${stage2}.o`),

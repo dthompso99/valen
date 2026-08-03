@@ -1,8 +1,8 @@
 # Reproducible root-level compiler and sample outputs
-/argon
-/argon.s
+/valen
+/valen.s
 /nested
 /nested.s
 /sample
 /sample.s
-/.argon-cache/
+/.valen-cache/

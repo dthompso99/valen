@@ -1,8 +1,8 @@
-# Argon language roadmap
+# Valen language roadmap
 
 The bootstrap compiler proves the language can compile native programs. This roadmap begins with language semantics and ergonomics; optimization and additional machine targets come after the object and type models are stable.
 
-Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/argon/issues?labels=1). The unchecked entries below are the roadmap snapshot from which those issues were created; update and close the corresponding Gitea issue as work progresses rather than maintaining status in two places.
+Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/valen/issues?labels=1). The unchecked entries below are the roadmap snapshot from which those issues were created; update and close the corresponding Gitea issue as work progresses rather than maintaining status in two places.
 
 ## 1. Object model and contracts
 
@@ -107,7 +107,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 
 - [x] JavaScript bootstrap builds compiler generation 0
 - [x] Generation 0 compiles the example programs
-- [x] Generation 0 compiles the Argon compiler source
+- [x] Generation 0 compiles the Valen compiler source
 - [x] Generation 1 passes the compiler test suite
 - [x] Generation 1 builds generation 2 within the supported 3 GiB peak-RSS budget
 - [x] Generations 1 and 2 produce semantically equivalent normalized IR
