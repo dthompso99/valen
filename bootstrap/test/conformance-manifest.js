@@ -23,6 +23,15 @@ export const expectedFailures = [
     {name: 'invalid float conversion status', source: 'bootstrap/test/fixtures/float-conversion-failing.ar', status: 76, stderr: /^$/}
 ];
 
+export const targetFailures = [
+    {
+        name: 'unsupported target native',
+        source: 'bootstrap/test/fixtures/unsupported-native.ar',
+        status: 69,
+        stderr: /argon: target: x86_64-linux runtime does not provide argon_Missing_value/
+    }
+];
+
 export const invalidPrograms = [
     {name: 'invalid token', source: 'bootstrap/test/fixtures/invalid-token.ar', status: 65, stderr: /invalid-token\.ar:2:5: error: Unexpected byte 64/},
     {name: 'missing contract implementation', source: 'bootstrap/test/fixtures/missing-implementation.ar', status: 65, stderr: /missing-implementation\.ar:5:1: error: Object 'Broken' is missing method 'required'/},

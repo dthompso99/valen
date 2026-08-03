@@ -4,7 +4,8 @@ Freestanding Argon is the language and runtime contract for kernels, firmware, b
 and other targets that cannot assume an operating system or C library. It is a capability
 profile, not a separate syntax or a permanently reduced version of Argon.
 
-The current x86-64 Linux backend is hosted. It does not yet emit freestanding binaries. This
+The current x86-64 Linux backend is hosted, but its ordinary executables own their `_start`
+adapter and link without the C runtime. It does not yet emit fully freestanding binaries. This
 document fixes the boundary that future targets and runtime work must implement.
 
 ## Required core
@@ -77,8 +78,10 @@ integrated linker are separate roadmap work.
 
 - The parser, semantic model, ownership checks, and target-independent IR are reusable.
 - The only implemented executable target is hosted x86-64 Linux.
-- Capability manifests, unresolved-native validation, freestanding startup, runtime hooks, and
+- Ordinary x86-64 Linux executables provide `_start`, link with `-nostdlib`, and have no implicit
+  shared-library dependency. Target-native symbols are validated before linking.
+- Foreign C calls and native threading add their libraries explicitly; an unavailable capability
+  still requires an Argon implementation or an explicit target/application provider.
+- General capability manifests, non-Linux startup, injectable runtime hooks, and fully
   freestanding linking are **WIP**.
-- Native replacements and injectable hooks tracked by issue #64 should implement this contract.
 - Additional architectures and operating systems remain tracked separately by issue #56.
-

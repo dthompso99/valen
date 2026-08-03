@@ -35,7 +35,9 @@
 - **WIP:** thread pools
 - **WIP:** event-loop executors for files and networking
 - **WIP:** additional operating systems and architectures
-- **WIP:** freestanding capability manifests, runtime hooks, startup, and code generation
+- x86-64 Linux executables own their `_start` adapter, link without an implicit C runtime, and
+  reject target-native symbols that the backend cannot provide.
+- **WIP:** general freestanding capability manifests, runtime hooks, and non-Linux code generation
 - **WIP:** broader platform capability discovery for native facilities
 
 Platforms without native threads are intended to use `InlineExecutor`; only x86-64 Linux native threading is currently implemented.

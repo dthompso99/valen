@@ -16,6 +16,11 @@ Library names and symbols are restricted to non-shell linker names and C
 identifiers respectively. Duplicate library inputs are removed while preserving
 their first-use order.
 
+Ordinary Argon programs link without libc. A shared-library dependency is introduced only by
+an explicit foreign declaration or target capability that names it. Standard facilities should
+therefore be implemented by Argon, supplied by the target, or exposed through an explicit
+provider rather than silently assuming a package such as libc or OpenSSL is installed.
+
 Foreign declarations are always `unsafe`, and calls therefore require an
 `unsafe` block. This makes the source location that trusts foreign code explicit.
 The supported ABI consists of `bool`, fixed-width integers, `f32`, `f64`, `void` returns, and

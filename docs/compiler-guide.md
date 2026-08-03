@@ -108,6 +108,9 @@ Do not duplicate a feature in generation 0 merely for symmetry. Do update genera
 
 ## Native runtime boundary
 
-Compiler-provided native symbols are emitted by the backend. Foreign C symbols are linked from explicitly named libraries. The current backend and runtime implement the x86-64 System V ABI on Linux.
+Compiler-provided native symbols are emitted and validated by the backend. Ordinary x86-64 Linux
+executables provide their own `_start` adapter and link with `-nostdlib`. Foreign C symbols and
+hosted capabilities are linked only from explicitly named libraries. The current backend and
+runtime implement the x86-64 System V ABI on Linux.
 
 Additional targets, a freestanding runtime, and a stable plugin/package ABI are **WIP**.

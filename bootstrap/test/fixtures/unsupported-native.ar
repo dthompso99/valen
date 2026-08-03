@@ -1,0 +1,9 @@
+library Missing {{
+    native value() -> i64
+}}
+
+entry {{
+    __() -> i64 {
+        return Missing.value()
+    }
+}}

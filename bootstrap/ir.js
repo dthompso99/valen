@@ -193,6 +193,12 @@ export class IrGenerator {
             if (foreignLibrary && !this.program.foreignLibraries.includes(foreignLibrary)) {
                 this.program.foreignLibraries.push(foreignLibrary);
             }
+            const runtimeSymbol = foreignLibrary ? declaration.foreignSymbol : this.runtimeSymbol(symbol);
+            if (runtimeSymbol === 'argon_Operations_threadStart') {
+                for (const library of ['pthread', 'c']) {
+                    if (!this.program.foreignLibraries.includes(library)) this.program.foreignLibraries.push(library);
+                }
+            }
             this.program.externals.push({
                 kind: 'IrExternalFunction',
                 name: this.functionName(symbol),
@@ -202,7 +208,7 @@ export class IrGenerator {
                     type: parameter.type
                 })),
                 returnType: symbol.returnType,
-                runtimeSymbol: foreignLibrary ? declaration.foreignSymbol : this.runtimeSymbol(symbol),
+                runtimeSymbol,
                 foreignLibrary
             });
             return;

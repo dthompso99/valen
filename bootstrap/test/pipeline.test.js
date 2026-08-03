@@ -263,6 +263,7 @@ test('unsafe native operations require an explicit lexical unsafe boundary', () 
     assert.equal(valid.success, true, JSON.stringify(valid.diagnostics));
     const ir = new IrGenerator().generate(valid);
     assert.ok(ir.externals.some(external => external.displayName === 'Raw.touch'));
+    assert.throws(() => new X86_64Backend().generate(ir), /runtime does not provide argon_Raw_touch/);
 
     const invalid = new SemanticAnalyzer().analyze(new Parser().parse(`
         library Raw {{ unsafe native touch(bytes:Array<u8>) -> void }}
@@ -951,7 +952,7 @@ test('IR validation rejects malformed control flow and calls before assembly', (
         error instanceof IrValidationError && /unknown function/.test(error.message) && /unknown block/.test(error.message));
 });
 
-test('generated primitive executable returns success', t => {
+test('generated primitive executable is self-starting and has no implicit shared libraries', t => {
     const semantic = new SemanticAnalyzer().analyze(new Parser().parse(primitiveProgram, 'primitives.ar'));
     const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'argon-test-'));
@@ -959,7 +960,8 @@ test('generated primitive executable returns success', t => {
     const executablePath = path.join(directory, 'primitives');
     fs.writeFileSync(assemblyPath, assembly);
 
-    const compile = spawnSync('cc', ['-no-pie', assemblyPath, '-o', executablePath], {encoding: 'utf8'});
+    assert.match(assembly, /\.globl _start\n_start:/);
+    const compile = spawnSync('cc', ['-nostdlib', '-no-pie', assemblyPath, '-o', executablePath], {encoding: 'utf8'});
     if (compile.error?.code === 'EPERM') {
         fs.rmSync(directory, {recursive: true});
         t.skip('process sandbox does not allow Node to spawn cc');
@@ -968,5 +970,8 @@ test('generated primitive executable returns success', t => {
     assert.equal(compile.status, 0, compile.stderr);
     const run = spawnSync(executablePath, [], {encoding: 'utf8'});
     assert.equal(run.status, 0, run.stderr);
+    const dynamic = spawnSync('readelf', ['-d', executablePath], {encoding: 'utf8'});
+    assert.equal(dynamic.status, 0, dynamic.stderr);
+    assert.doesNotMatch(dynamic.stdout, /NEEDED/);
     fs.rmSync(directory, {recursive: true});
 });

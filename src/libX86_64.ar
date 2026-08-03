@@ -133,6 +133,32 @@ library X86_64 {{
             return false
         }
 
+        validateRuntime() -> Array<string> {
+            local errors = new Array<string>(0)
+            local index:i64 = 0
+            while index < self.program.externals.length {
+                local external = self.program.externals[index]
+                if external.foreignLibrary == null {
+                    if !self.supportsRuntime(external.runtimeName) {
+                        errors.append("x86_64-linux runtime does not provide " + external.runtimeName)
+                    }
+                }
+                index = index + 1
+            }
+            return errors
+        }
+
+        supportsRuntime(name:string) -> bool {
+            if name == "argon_System_print" || name == "argon_System_arguments" || name == "argon_System_exit" || name == "argon_System_write" || name == "argon_System_writeError" { return true }
+            if name == "argon_System_openRead" || name == "argon_System_openWrite" || name == "argon_System_read" || name == "argon_System_writeFile" || name == "argon_System_close" { return true }
+            if name == "argon_System_lastError" || name == "argon_System_currentDirectory" || name == "argon_System_environmentVariable" || name == "argon_System_collectGarbage" { return true }
+            if name == "argon_System_enableProcessArena" || name == "argon_System_link" || name == "argon_System_memoryCopy" || name == "argon_System_memoryCompare" { return true }
+            if name == "argon_Operations_threadAvailable" || name == "argon_Operations_threadStart" || name == "argon_Operations_threadJoin" { return true }
+            if name == "argon_Operations_mutexLock" || name == "argon_Operations_mutexUnlock" || name == "argon_Operations_conditionWait" { return true }
+            if name == "argon_Operations_conditionNotifyOne" || name == "argon_Operations_conditionNotifyAll" || name == "argon_Operations_atomicLoad" { return true }
+            return name == "argon_Operations_atomicStore" || name == "argon_Operations_atomicExchange" || name == "argon_Operations_atomicCompareExchange" || name == "argon_Operations_atomicAdd"
+        }
+
         operationsRuntime() -> void {
             local mutex = ""
             local condition = ""
@@ -911,6 +937,18 @@ library X86_64 {{
         generateMain() -> void {
             local entry = self.findFunction(self.program.entry!)
             local entrySize = self.typeSize(entry!.ownerType)
+            self.writer.line(".globl _start")
+            self.writer.line("_start:")
+            self.writer.line("    xor ebp, ebp")
+            self.writer.line("    mov rdi, QWORD PTR [rsp]")
+            self.writer.line("    lea rsi, [rsp+8]")
+            self.writer.line("    and rsp, -16")
+            self.writer.line("    call main")
+            self.writer.line("    mov edi, eax")
+            self.writer.line("    mov eax, 60")
+            self.writer.line("    syscall")
+            self.writer.line("    ud2")
+            self.writer.line("")
             self.writer.line(".globl main")
             self.writer.line("main:")
             self.writer.line("    push rbp")
@@ -1597,7 +1635,7 @@ library X86_64 {{
             self.writer.line("    jmp .Llink_done")
             self.writer.line(".Llink_child:")
             self.writer.line("    mov rcx, QWORD PTR [r14]")
-            self.writer.line("    lea rax, [rcx+6]")
+            self.writer.line("    lea rax, [rcx+7]")
             self.writer.line("    shl rax, 3")
             self.writer.line("    add rax, 15")
             self.writer.line("    and rax, -16")
@@ -1605,12 +1643,14 @@ library X86_64 {{
             self.writer.line("    mov r15, rsp")
             self.writer.line("    lea rax, [rip+.Llink_cc]")
             self.writer.line("    mov QWORD PTR [r15], rax")
-            self.writer.line("    lea rax, [rip+.Llink_no_pie]")
+            self.writer.line("    lea rax, [rip+.Llink_no_stdlib]")
             self.writer.line("    mov QWORD PTR [r15+8], rax")
-            self.writer.line("    mov QWORD PTR [r15+16], r12")
+            self.writer.line("    lea rax, [rip+.Llink_no_pie]")
+            self.writer.line("    mov QWORD PTR [r15+16], rax")
+            self.writer.line("    mov QWORD PTR [r15+24], r12")
             self.writer.line("    lea rax, [rip+.Llink_output]")
-            self.writer.line("    mov QWORD PTR [r15+24], rax")
-            self.writer.line("    mov QWORD PTR [r15+32], r13")
+            self.writer.line("    mov QWORD PTR [r15+32], rax")
+            self.writer.line("    mov QWORD PTR [r15+40], r13")
             self.writer.line("    xor r8d, r8d")
             self.writer.line(".Llink_library_loop:")
             self.writer.line("    cmp r8, QWORD PTR [r14]")
@@ -1627,11 +1667,11 @@ library X86_64 {{
             self.writer.line("    mov rcx, r10")
             self.writer.line("    rep movsb")
             self.writer.line("    mov BYTE PTR [rsp+r10+2], 0")
-            self.writer.line("    mov QWORD PTR [r15+r8*8+40], rsp")
+            self.writer.line("    mov QWORD PTR [r15+r8*8+48], rsp")
             self.writer.line("    inc r8")
             self.writer.line("    jmp .Llink_library_loop")
             self.writer.line(".Llink_library_done:")
-            self.writer.line("    mov QWORD PTR [r15+r8*8+40], 0")
+            self.writer.line("    mov QWORD PTR [r15+r8*8+48], 0")
             self.writer.line("    lea rdi, [rip+.Llink_cc]")
             self.writer.line("    mov rsi, r15")
             self.writer.line("    mov rdx, QWORD PTR [rip+argon_process_envp]")
@@ -1651,6 +1691,8 @@ library X86_64 {{
             self.writer.line("    ret")
             self.writer.line(".Llink_cc:")
             self.writer.line("    .asciz \"/usr/bin/cc\"")
+            self.writer.line(".Llink_no_stdlib:")
+            self.writer.line("    .asciz \"-nostdlib\"")
             self.writer.line(".Llink_no_pie:")
             self.writer.line("    .asciz \"-no-pie\"")
             self.writer.line(".Llink_output:")

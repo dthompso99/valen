@@ -89,6 +89,17 @@ entry {{
             return 0
         }
         local backend = new X86_64.Backend(ir)
+        local runtimeErrors = backend.validateRuntime()
+        if runtimeErrors.length > 0 {
+            local runtimeErrorIndex:i64 = 0
+            while runtimeErrorIndex < runtimeErrors.length {
+                System.writeError("argon: target: ")
+                System.writeError(runtimeErrors[runtimeErrorIndex])
+                System.writeError("\n")
+                runtimeErrorIndex = runtimeErrorIndex + 1
+            }
+            return 69
+        }
         local assembly = backend.generate()
         if outputPath != null {
             local assemblyPath = outputPath! + ".s"

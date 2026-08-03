@@ -599,6 +599,10 @@ library Ir {{
                 if method.foreignLibrary != null { runtimeName = method.foreignSymbol! }
                 local external = new ExternalFunction(symbol.qualifiedName, symbol.qualifiedName, runtimeName, symbol.returnType!)
                 external.foreignLibrary = method.foreignLibrary
+                if runtimeName == "argon_Operations_threadStart" {
+                    self.addForeignLibrary("pthread")
+                    self.addForeignLibrary("c")
+                }
                 if method.foreignLibrary != null {
                     local found:bool = false
                     local libraryIndex:i64 = 0
@@ -632,6 +636,15 @@ library Ir {{
             }
             if owner.name == "entry" && method.name == "__" { self.program.entry = symbol.qualifiedName }
             self.finishFunction()
+        }
+
+        addForeignLibrary(name:string) -> void {
+            local index:i64 = 0
+            while index < self.program.foreignLibraries.length {
+                if self.program.foreignLibraries[index] == name { return }
+                index = index + 1
+            }
+            self.program.foreignLibraries.append(name)
         }
 
         beginFunction(name:string, displayName:string, ownerType:string, returnType:string) -> void {

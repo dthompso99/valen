@@ -11,7 +11,7 @@ export class Compiler {
         fs.writeFileSync(assemblyPath, assembly);
 
         const libraries = ir.foreignLibraries.map(library => `-l${library}`);
-        const result = spawnSync('cc', ['-no-pie', assemblyPath, '-o', outputPath, ...libraries], {encoding: 'utf8'});
+        const result = spawnSync('cc', ['-nostdlib', '-no-pie', assemblyPath, '-o', outputPath, ...libraries], {encoding: 'utf8'});
         if (result.error) throw result.error;
         if (result.status !== 0) throw new Error(result.stderr || `cc exited with status ${result.status}`);
         return {ir, assembly, assemblyPath, outputPath};
