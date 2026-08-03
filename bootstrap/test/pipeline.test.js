@@ -589,6 +589,15 @@ test('native synchronization and single-worker execution lower through the porta
     assert.match(assembly, /lock xadd QWORD PTR/);
 });
 
+test('readiness work lowers through the event-loop executor and poll runtime', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/event-loop.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
+    assert.match(assembly, /argon_EventLoop_available:/);
+    assert.match(assembly, /argon_EventLoop_wait:[\s\S]*?mov eax, 7/);
+});
+
 test('members default public while private members stay owner-only and non-virtual', () => {
     const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/visibility.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});

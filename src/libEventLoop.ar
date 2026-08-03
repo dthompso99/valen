@@ -1,0 +1,4 @@
+library EventLoop {{
+    native available() -> bool
+    native wait(descriptors:Array<i64>, interests:Array<i64>, timeout:i64) -> i64
+}}

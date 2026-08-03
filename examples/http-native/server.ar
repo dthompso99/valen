@@ -1,34 +1,57 @@
 import Network from 'libNetwork.ar'
+import EventLoop from 'libEventLoop.ar'
 import System from 'libSystem.ar'
 
 entry {{
     __() -> i32 {
+        System.enableProcessArena()
         local listener = Network.listen(8080, 16)
         if listener == null {
             System.writeError("argon-http: listen failed\n")
             return 1
         }
-        System.write("argon-http: listening on http://127.0.0.1:8080\n")
-        local connection = Network.accept(listener!)
-        if connection == null {
+        if !Network.makeListenerNonblocking(listener!) {
             Network.closeListener(listener!)
-            System.writeError("argon-http: accept failed\n")
             return 2
         }
+        System.write("argon-http: serving four requests on http://127.0.0.1:8080\n")
+        local descriptors = new Array<i64>(0)
+        local interests = new Array<i64>(0)
+        descriptors.append(Network.listenerDescriptor(listener!))
+        interests.append(1)
+        local served:i64 = 0
+        while served < 4 {
+            if EventLoop.wait(descriptors, interests, -1) != 0 {
+                Network.closeListener(listener!)
+                return 3
+            }
+            local result = self.serve(listener!)
+            if result != 0 {
+                Network.closeListener(listener!)
+                System.writeError("argon-http: request failed\n")
+                System.print(result)
+                return 4
+            }
+            served = served + 1
+        }
+        Network.closeListener(listener!)
+        return 0
+    }
+
+    serve(listener:Network.Listener) -> i64 {
+        local connection = Network.accept(listener)
+        if connection == null { return Network.lastError() }
         local request = Network.receive(connection!, 4096)
         if request == null {
             Network.closeConnection(connection!)
-            Network.closeListener(listener!)
-            return 3
+            return Network.lastError()
         }
         local response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\nConnection: close\r\n\r\nHello, Argon!"
         if Network.send(connection!, response) != response.length {
             Network.closeConnection(connection!)
-            Network.closeListener(listener!)
-            return 4
+            return Network.lastError()
         }
         Network.closeConnection(connection!)
-        Network.closeListener(listener!)
         return 0
     }
 }}

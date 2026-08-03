@@ -36,7 +36,7 @@ Network.closeListener(listener!)
 
 Listeners and connections are owning native resources and must be closed. The current interface
 is blocking, IPv4, and binds all local interfaces. Nonblocking sockets, address selection, DNS,
-TLS, and the event-loop executor are **WIP**.
+TLS and production protocol handling are **WIP**.
 
 ## Objects and constructors
 
@@ -224,7 +224,11 @@ local operation = executor.submit(new MyWork())
 local result = operation.wait()
 ```
 
-`InlineExecutor` is deterministic and is the portable fallback. x86-64 Linux also provides a joinable single-worker `ThreadExecutor`, mutexes, conditions, and atomics. Thread pools, event loops, and other platform implementations are **WIP**.
+`InlineExecutor` is deterministic and is the portable fallback. x86-64 Linux also provides a
+joinable single-worker `ThreadExecutor`, mutexes, conditions, atomics, and a poll-backed
+`EventLoopExecutor`. Readiness-aware work implements `ReadyWork`, returning its descriptor and
+interest, and is submitted with `submitReady()`. Thread pools and other platform implementations
+are **WIP**.
 
 ## Native and unsafe code
 

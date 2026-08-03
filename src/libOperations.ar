@@ -1,3 +1,5 @@
+import EventLoop from 'libEventLoop.ar'
+
 library Operations {{
     native threadAvailable() -> bool
     native threadStart(operation:ThreadOperation) -> bool
@@ -64,6 +66,11 @@ library Operations {{
         run() -> OperationResult { return new OperationResult() }
     }}
 
+    ReadyWork inherits Work {{
+        descriptor() -> i64 { return -1 }
+        interest() -> i64 { return 0 }
+    }}
+
     Executor {{
         submit(own work:Work) -> Operation { return new Operation() }
     }}
@@ -84,6 +91,116 @@ library Operations {{
             local terminal = work.run()
             delete work
             return new CompletedOperation(terminal)
+        }
+    }}
+
+    EventOperation implements Operation {{
+        private member work:ReadyWork
+        private member terminal:OperationResult?
+        private member cancellationRequested:bool
+
+        __(own work:ReadyWork) -> void {
+            self.work = work
+            self.terminal = null
+            self.cancellationRequested = false
+        }
+
+        descriptor() -> i64 {
+            return self.work.descriptor()
+        }
+        interest() -> i64 {
+            return self.work.interest()
+        }
+        complete() -> bool { return self.terminal != null }
+        cancel() -> bool {
+            if self.terminal != null { return false }
+            self.cancellationRequested = true
+            self.terminal = new Cancelled("requested")
+            return true
+        }
+        runReady() -> bool {
+            if self.terminal != null { return false }
+            if self.cancellationRequested {
+                self.terminal = new Cancelled("requested")
+            } else {
+                self.terminal = self.work.run()
+            }
+            return true
+        }
+        result() -> ref OperationResult? { return self.terminal }
+        wait() -> ref OperationResult {
+            while self.terminal == null {
+                local descriptors = new Array<i64>(0)
+                local interests = new Array<i64>(0)
+                descriptors.append(self.descriptor())
+                interests.append(self.interest())
+                if EventLoop.wait(descriptors, interests, -1) == 0 { self.runReady() }
+            }
+            return self.terminal!
+        }
+    }}
+
+    EventOperationView implements Operation {{
+        private member target:EventOperation
+
+        __(own target:EventOperation) -> void { self.target = target }
+        borrowTarget() -> ref EventOperation { return self.target }
+        complete() -> bool { return self.target.complete() }
+        cancel() -> bool { return self.target.cancel() }
+        result() -> ref OperationResult? { return self.target.result() }
+        wait() -> ref OperationResult { return self.target.wait() }
+    }}
+
+    EventLoopExecutor implements Executor {{
+        private member pending:Array<weak EventOperation?>
+
+        __() -> void { self.pending = new Array<weak EventOperation?>(0) }
+        available() -> bool { return EventLoop.available() }
+
+        submit(own work:Work) -> Operation {
+            local terminal = work.run()
+            delete work
+            return new CompletedOperation(terminal)
+        }
+
+        submitReady(own work:ReadyWork) -> EventOperationView {
+            local view = new EventOperationView(new EventOperation(work))
+            local stored = view.borrowTarget()
+            self.pending.append(stored)
+            if !self.available() || stored.descriptor() < 0 || stored.interest() == 0 { stored.runReady() }
+            return view
+        }
+
+        runOne(timeout:i64=-1) -> bool {
+            local descriptors = new Array<i64>(0)
+            local interests = new Array<i64>(0)
+            local index:i64 = 0
+            while index < self.pending.length {
+                local operation = self.pending[index]
+                if operation != null {
+                    if !operation!.complete() {
+                        descriptors.append(operation!.descriptor())
+                        interests.append(operation!.interest())
+                    }
+                }
+                index = index + 1
+            }
+            if descriptors.length == 0 { return false }
+            local ready = EventLoop.wait(descriptors, interests, timeout)
+            if ready < 0 { return false }
+            local active:i64 = 0
+            index = 0
+            while index < self.pending.length {
+                local operation = self.pending[index]
+                if operation != null {
+                    if !operation!.complete() {
+                        if active == ready { return operation!.runReady() }
+                        active = active + 1
+                    }
+                }
+                index = index + 1
+            }
+            return false
         }
     }}
 

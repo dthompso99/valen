@@ -30,6 +30,21 @@ Exactly one of `succeeded()`, `failed()`, and `cancelled()` is true for every st
 
 Executors must detect or prevent waiting arrangements that would deadlock their own sole worker. That is an executor rule rather than a change to method-call semantics.
 
+## Readiness event loops
+
+`Operations.ReadyWork` adds a native descriptor and readiness interest to ordinary `Work`.
+`EventLoopExecutor.submitReady()` returns an operation immediately; `runOne(timeout)` executes one
+ready item, while `operation.wait()` may synchronously pump that item itself. Interest `1` means
+readable and `4` means writable, matching the portable subset of poll-style readiness events.
+
+The caller owns the returned operation handle. The executor retains only weak scheduling
+references, so dropping a handle also permits its queued work to be reclaimed. Cancellation is
+terminal before dispatch; work already running remains cooperative.
+
+Targets without readiness polling report the capability unavailable and execute readiness work
+inline. On x86-64 Linux the runtime uses the `poll` syscall directly. Regular files may report
+immediately ready on Linux; readiness does not promise that storage latency is asynchronous.
+
 ## Progress
 
 Progress is an optional capability expressed by `Operations.ProgressOperation`:

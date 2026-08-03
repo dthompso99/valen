@@ -59,14 +59,18 @@ export class X86_64Backend {
             'argon_System_link',
             'argon_System_memoryCopy',
             'argon_System_memoryCompare',
+            'argon_System_fileDescriptor', 'argon_System_makeFileNonblocking',
             'argon_Network_listen', 'argon_Network_accept', 'argon_Network_receive',
             'argon_Network_send', 'argon_Network_closeListener', 'argon_Network_closeConnection',
             'argon_Network_lastError',
+            'argon_Network_listenerDescriptor', 'argon_Network_connectionDescriptor',
+            'argon_Network_makeListenerNonblocking', 'argon_Network_makeConnectionNonblocking',
             'argon_Operations_threadAvailable', 'argon_Operations_threadStart', 'argon_Operations_threadJoin',
             'argon_Operations_mutexLock', 'argon_Operations_mutexUnlock',
             'argon_Operations_conditionWait', 'argon_Operations_conditionNotifyOne', 'argon_Operations_conditionNotifyAll',
             'argon_Operations_atomicLoad', 'argon_Operations_atomicStore', 'argon_Operations_atomicExchange',
-            'argon_Operations_atomicCompareExchange', 'argon_Operations_atomicAdd'
+            'argon_Operations_atomicCompareExchange', 'argon_Operations_atomicAdd',
+            'argon_EventLoop_available', 'argon_EventLoop_wait'
         ]);
         for (const external of program.externals) {
             if (!external.foreignLibrary && !supportedRuntimeSymbols.has(external.runtimeSymbol)) {
@@ -112,7 +116,10 @@ export class X86_64Backend {
         if (runtimeSymbols.has('argon_System_link')) lines.push(...this.linkRuntime());
         if (runtimeSymbols.has('argon_System_memoryCopy')) lines.push(...this.memoryCopyRuntime());
         if (runtimeSymbols.has('argon_System_memoryCompare')) lines.push(...this.memoryCompareRuntime());
+        if (runtimeSymbols.has('argon_System_fileDescriptor')) lines.push(...this.descriptorRuntime('argon_System_fileDescriptor'));
+        if (runtimeSymbols.has('argon_System_makeFileNonblocking')) lines.push(...this.nonblockingRuntime('argon_System_makeFileNonblocking'));
         if ([...runtimeSymbols].some(symbol => symbol.startsWith('argon_Network_'))) lines.push(...this.networkRuntime());
+        if ([...runtimeSymbols].some(symbol => symbol.startsWith('argon_EventLoop_'))) lines.push(...this.eventLoopRuntime(runtimeSymbols));
         if ([...runtimeSymbols].some(symbol => symbol.startsWith('argon_Operations_'))) lines.push(...this.operationsRuntime(runtimeSymbols));
         lines.push(...this.runtimeErrorRuntime());
         lines.push(...this.allocationRuntime());
@@ -175,9 +182,51 @@ export class X86_64Backend {
             '.Lnetwork_send_done:', '    mov QWORD PTR [rip+argon_network_error], 0', '    mov rax, r9', '    ret',
             '.Lnetwork_send_error:', '    mov r10, rax', '    neg r10', '    mov QWORD PTR [rip+argon_network_error], r10', '    test r9, r9', '    cmovnz rax, r9', '    ret', '',
             ...close('argon_Network_closeListener'), ...close('argon_Network_closeConnection'),
+            ...this.descriptorRuntime('argon_Network_listenerDescriptor'),
+            ...this.descriptorRuntime('argon_Network_connectionDescriptor'),
+            ...this.nonblockingRuntime('argon_Network_makeListenerNonblocking'),
+            ...this.nonblockingRuntime('argon_Network_makeConnectionNonblocking'),
             '.globl argon_Network_lastError', 'argon_Network_lastError:', '    mov rax, QWORD PTR [rip+argon_network_error]', '    ret', '',
             '.Lnetwork_error:', '    neg rax', '    mov QWORD PTR [rip+argon_network_error], rax', '    xor eax, eax', '    ret', ''
         ];
+    }
+
+    descriptorRuntime(name) {
+        return ['.globl '+name, name+':', '    mov rax, QWORD PTR [rdi]', '    ret', ''];
+    }
+
+    nonblockingRuntime(name) {
+        const error = `.L${name}_error`, done = `.L${name}_done`;
+        return ['.globl '+name, name+':', '    push rbx', '    mov rbx, QWORD PTR [rdi]',
+            '    mov eax, 72', '    mov rdi, rbx', '    mov esi, 3', '    syscall', '    test rax, rax', `    js ${error}`,
+            '    or eax, 2048', '    mov edx, eax', '    mov eax, 72', '    mov rdi, rbx', '    mov esi, 4', '    syscall',
+            '    test rax, rax', `    js ${error}`, '    mov eax, 1', `    jmp ${done}`, `${error}:`, '    xor eax, eax', `${done}:`, '    pop rbx', '    ret', ''];
+    }
+
+    eventLoopRuntime(symbols) {
+        const lines = [];
+        if (symbols.has('argon_EventLoop_available')) lines.push('.globl argon_EventLoop_available', 'argon_EventLoop_available:', '    mov eax, 1', '    ret', '');
+        if (symbols.has('argon_EventLoop_wait')) lines.push(
+            '.globl argon_EventLoop_wait', 'argon_EventLoop_wait:',
+            '    push rbx', '    push r12', '    push r13', '    push r14', '    push r15',
+            '    mov r12, QWORD PTR [rdi]', '    cmp r12, QWORD PTR [rsi]', '    jne .Lio_wait_early',
+            '    test r12, r12', '    je .Lio_wait_early', '    mov r13, QWORD PTR [rdi+16]',
+            '    mov r14, QWORD PTR [rsi+16]', '    mov r15, rdx', '    lea rdi, [r12*8]', '    call argon_alloc',
+            '    mov rbx, rax', '    xor ecx, ecx', '.Lio_wait_fill:', '    cmp rcx, r12', '    jae .Lio_wait_poll',
+            '    mov rax, QWORD PTR [r13+rcx*8]', '    mov DWORD PTR [rbx+rcx*8], eax',
+            '    mov rax, QWORD PTR [r14+rcx*8]', '    mov WORD PTR [rbx+rcx*8+4], ax',
+            '    mov WORD PTR [rbx+rcx*8+6], 0', '    inc rcx', '    jmp .Lio_wait_fill',
+            '.Lio_wait_poll:', '    mov eax, 7', '    mov rdi, rbx', '    mov rsi, r12', '    mov rdx, r15', '    syscall',
+            '    test rax, rax', '    jle .Lio_wait_none', '    xor ecx, ecx',
+            '.Lio_wait_scan:', '    cmp rcx, r12', '    jae .Lio_wait_none', '    cmp WORD PTR [rbx+rcx*8+6], 0',
+            '    jne .Lio_wait_ready', '    inc rcx', '    jmp .Lio_wait_scan',
+            '.Lio_wait_ready:', '    mov rax, rcx', '    jmp .Lio_wait_cleanup',
+            '.Lio_wait_none:', '    mov rax, -1', '.Lio_wait_cleanup:', '    mov r13, rax',
+            '    mov rdi, rbx', '    lea rsi, [r12*8]', '    mov eax, 11', '    syscall', '    mov rax, r13',
+            '    jmp .Lio_wait_done', '.Lio_wait_early:', '    mov rax, -1', '.Lio_wait_done:',
+            '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    pop rbx', '    ret', ''
+        );
+        return lines;
     }
 
     operationsRuntime(symbols) {

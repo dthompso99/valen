@@ -6,6 +6,10 @@ library Network {{
     native closeListener(own listener:Listener) -> i64
     native closeConnection(own connection:Connection) -> i64
     native lastError() -> i64
+    native listenerDescriptor(listener:Listener) -> i64
+    native connectionDescriptor(connection:Connection) -> i64
+    native makeListenerNonblocking(listener:Listener) -> bool
+    native makeConnectionNonblocking(connection:Connection) -> bool
 
     Listener {{ member descriptor:i64 }}
     Connection {{ member descriptor:i64 }}

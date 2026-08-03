@@ -1,0 +1,38 @@
+import Operations from '../../../src/libOperations.ar'
+
+WritableWork implements Operations.ReadyWork {{
+    descriptor() -> i64 { return 1 }
+    interest() -> i64 { return 4 }
+    run() -> Operations.OperationResult { return new Operations.Succeeded() }
+}}
+
+ImmediateWork implements Operations.Work {{
+    run() -> Operations.OperationResult { return new Operations.Failed(17, "inline fallback") }
+}}
+
+entry {{
+    __() -> i32 {
+        local executor = new Operations.EventLoopExecutor()
+        local ready = executor.submitReady(new WritableWork())
+        if ready.complete() { return 1 }
+        local allocation:i64 = 0
+        while allocation < 256 {
+            local scratch = new Array<i64>(0)
+            scratch.append(allocation)
+            allocation = allocation + 1
+        }
+        if !executor.runOne(0) { return 2 }
+        if !ready.complete() { return 3 }
+        if !ready.wait().succeeded() { return 4 }
+        if ready.result()! !== ready.wait() { return 5 }
+
+        local cancelled = executor.submitReady(new WritableWork())
+        if !cancelled.cancel() { return 6 }
+        if !cancelled.wait().cancelled() { return 7 }
+
+        local immediate = executor.submit(new ImmediateWork())
+        if !immediate.complete() { return 8 }
+        if immediate.wait().code() != 17 { return 9 }
+        return 0
+    }
+}}

@@ -61,7 +61,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 - [x] Implement a native single-worker `ThreadExecutor` with portable inline fallback
 - [x] Add native mutex, condition, and atomic synchronization objects
 - [ ] Add a thread-pool executor after single-worker correctness is established
-- [ ] Add event-loop executors for nonblocking file and network I/O
+- [x] Add event-loop executors for nonblocking file and network I/O
 - [x] Implement short-circuit lowering for `&&` and `||`
 - [x] Add iterators and `for` loops
 - [ ] Add `else if` shorthand

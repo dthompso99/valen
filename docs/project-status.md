@@ -33,7 +33,7 @@
 ## WIP: runtime and concurrency
 
 - **WIP:** thread pools
-- **WIP:** event-loop executors for files and networking
+- Poll-backed readiness operations and an event-loop executor for files and networking
 - **WIP:** additional operating systems and architectures
 - x86-64 Linux executables own their `_start` adapter, link without an implicit C runtime, and
   reject target-native symbols that the backend cannot provide.
@@ -42,9 +42,9 @@
 
 Platforms without native threads are intended to use `InlineExecutor`; only x86-64 Linux native threading is currently implemented.
 
-Blocking IPv4 TCP listen, accept, receive, send, and close are implemented directly with x86-64
-Linux syscalls. The native HTTP example uses no external libraries. Nonblocking networking, DNS,
-TLS, and production HTTP parsing remain **WIP**.
+IPv4 TCP listen, accept, receive, send, descriptor access, and nonblocking mode are implemented
+directly with x86-64 Linux syscalls. The native HTTP example uses a persistent readiness loop and
+no external libraries. DNS, TLS, and production HTTP parsing remain **WIP**.
 
 The freestanding language/runtime capability profile is defined for future kernels, firmware,
 and embedded targets.
