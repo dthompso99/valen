@@ -1080,6 +1080,18 @@ library Ir {{
                 return loaded.result!
             }
             local right = self.lowerExpression(expression.right!)
+            if expression.text != null {
+                if left.typeName != expression.text! {
+                    local convertedLeft = self.temporary("convert", expression.text!)
+                    convertedLeft.first = left
+                    left = convertedLeft.result!
+                }
+                if right.typeName != expression.text! && expression.operator! != "<<" && expression.operator! != ">>" {
+                    local convertedRight = self.temporary("convert", expression.text!)
+                    convertedRight.first = right
+                    right = convertedRight.result!
+                }
+            }
             local op = "binary"
             if left.typeName == "string" {
                 if expression.operator! == "+" { op = "string_concat" }

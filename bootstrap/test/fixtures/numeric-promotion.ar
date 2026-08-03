@@ -1,0 +1,27 @@
+entry {{
+    __() -> i32 {
+        local unsigned8:u8 = 250
+        local signed8:i8 = -5
+        local unsigned16:u16 = 60000
+        local signed16:i16 = -1
+        local unsigned32:u32 = 4000000000
+        local signed32:i32 = -2
+        local float32:f32 = 1.5 as f32
+
+        local mixed8 = unsigned8 + signed8
+        local mixed16 = unsigned16 + signed16
+        local mixed32 = unsigned32 + signed32
+        local widenedUnsigned = unsigned8 + unsigned16
+        local mixedFloat = float32 + signed16
+        local mixedBits = unsigned8 & unsigned16
+
+        if mixed8 != 245 { return 1 }
+        if mixed16 != 59999 { return 2 }
+        if mixed32 != 3999999998 { return 3 }
+        if widenedUnsigned != 60250 { return 4 }
+        if mixedFloat != 0.5 { return 5 }
+        if mixedBits != 80 { return 6 }
+        if !(signed16 < unsigned16) { return 7 }
+        return 0
+    }
+}}

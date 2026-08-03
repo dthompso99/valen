@@ -1469,6 +1469,15 @@ library Semantics {{
                 self.applyOptionalNarrowing(expression.left!, operator == "&&", rightScope)
                 right = self.analyzeExpression(expression.right!, rightScope, moduleScope)
             } else { right = self.analyzeExpression(expression.right!, scope, moduleScope) }
+            if self.integerLiteralExpression(expression.left!) && self.isInteger(right) && !self.integerLiteralExpression(expression.right!) {
+                self.typeIntegerLiteral(expression.left!, right)
+                left = right
+            } else {
+                if self.integerLiteralExpression(expression.right!) && self.isInteger(left) && !self.integerLiteralExpression(expression.left!) {
+                    self.typeIntegerLiteral(expression.right!, left)
+                    right = left
+                }
+            }
             if operator == "is" {
                 local sourceBase = left
                 if self.isOptional(sourceBase) { sourceBase = sourceBase.slice(0, sourceBase.length - 1) }
@@ -1479,24 +1488,86 @@ library Semantics {{
             if operator == "&&" || operator == "||" { self.requireCompatible("bool", left, expression.left!.span); self.requireCompatible("bool", right, expression.right!.span); return self.typed(expression, "bool") }
             if operator == "&" || operator == "|" || operator == "^" || operator == "<<" || operator == ">>" {
                 if !self.isInteger(left) || !self.isInteger(right) { self.error(expression.span, "Operator '" + operator + "' requires integer operands"); return self.typed(expression, "error") }
-                self.requireCompatible(left, right, expression.right!.span)
-                return self.typed(expression, left)
+                if operator == "<<" || operator == ">>" { expression.text = left; return self.typed(expression, left) }
+                local promoted = self.numericPromotion(left, right, expression.span)
+                if promoted == null { return self.typed(expression, "error") }
+                expression.text = promoted
+                return self.typed(expression, promoted!)
             }
             if operator == "==" || operator == "!=" {
                 if self.isReference(left) || self.isReference(right) {
                     local compatible = self.isReference(left) && (self.isReference(right) || right == "null")
                     if !compatible { compatible = self.isReference(right) && left == "null" }
                     if !compatible { self.error(expression.span, "Structural equality requires compatible reference operands") }
+                } else {
+                    if (self.isInteger(left) || self.isFloat(left)) && (self.isInteger(right) || self.isFloat(right)) {
+                        local promoted = self.numericPromotion(left, right, expression.span)
+                        if promoted != null { expression.text = promoted }
+                    }
                 }
                 return self.typed(expression, "bool")
             }
-            if operator == "===" || operator == "!==" || operator == "<" || operator == "<=" || operator == ">" || operator == ">=" { return self.typed(expression, "bool") }
+            if operator == "===" || operator == "!==" || operator == "<" || operator == "<=" || operator == ">" || operator == ">=" {
+                if (self.isInteger(left) || self.isFloat(left)) && (self.isInteger(right) || self.isFloat(right)) {
+                    local promoted = self.numericPromotion(left, right, expression.span)
+                    if promoted != null { expression.text = promoted }
+                }
+                return self.typed(expression, "bool")
+            }
             if operator == "+" {
                 if left == "string" && right == "string" { return self.typed(expression, "string") }
             }
             if (!self.isInteger(left) && !self.isFloat(left)) || (!self.isInteger(right) && !self.isFloat(right)) { self.error(expression.span, "Operator '" + operator + "' requires compatible numeric operands"); return self.typed(expression, "error") }
-            self.requireCompatible(left, right, expression.right!.span)
-            return self.typed(expression, left)
+            local promoted = self.numericPromotion(left, right, expression.span)
+            if promoted == null { return self.typed(expression, "error") }
+            expression.text = promoted
+            return self.typed(expression, promoted!)
+        }
+
+        numericPromotion(left:string, right:string, span:Compiler.SourceSpan) -> string? {
+            if left == right { return left }
+            if self.isFloat(left) || self.isFloat(right) {
+                if (!self.isFloat(left) && !self.isInteger(left)) || (!self.isFloat(right) && !self.isInteger(right)) { return null }
+                if left == "f64" || right == "f64" || self.isInteger(left) || self.isInteger(right) { return "f64" }
+                return "f32"
+            }
+            if !self.isInteger(left) || !self.isInteger(right) { return null }
+            local leftBits = self.integerBits(left)
+            local rightBits = self.integerBits(right)
+            local leftSigned = left[0] == 105
+            local rightSigned = right[0] == 105
+            if leftSigned == rightSigned {
+                local bits = leftBits
+                if rightBits > bits { bits = rightBits }
+                if leftSigned { return "i" + bits.toString() }
+                return "u" + bits.toString()
+            }
+            local signedBits = rightBits
+            local unsignedBits = leftBits
+            if leftSigned { signedBits = leftBits; unsignedBits = rightBits }
+            if signedBits > unsignedBits { return "i" + signedBits.toString() }
+            if unsignedBits < 16 && signedBits <= 16 { return "i16" }
+            if unsignedBits < 32 && signedBits <= 32 { return "i32" }
+            if unsignedBits < 64 && signedBits <= 64 { return "i64" }
+            self.error(span, "No lossless implicit promotion exists between '" + left + "' and '" + right + "'; use an explicit conversion")
+            return null
+        }
+
+        integerLiteralExpression(expression:Ast.Expression) -> bool {
+            if expression.kind == "Integer" { return true }
+            return expression.kind == "Unary" && expression.operator! == "-" && expression.left!.kind == "Integer"
+        }
+
+        typeIntegerLiteral(expression:Ast.Expression, typeName:string) -> void {
+            expression.inferredType = typeName
+            if expression.kind == "Unary" { expression.left!.inferredType = typeName }
+        }
+
+        integerBits(typeName:string) -> i64 {
+            if typeName == "u8" || typeName == "i8" { return 8 }
+            if typeName == "u16" || typeName == "i16" { return 16 }
+            if typeName == "u32" || typeName == "i32" { return 32 }
+            return 64
         }
 
         builtinMember(expression:Ast.Expression, ownerType:string) -> string {

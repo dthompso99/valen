@@ -48,7 +48,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 - [x] Add flow-sensitive optional narrowing
 - [x] Generalize safe `Result` propagation
 - [x] Add floating-point types, literals, conversions, arithmetic, NaN rules, and ABI support
-- [ ] Define numeric promotion and mixed-width arithmetic rules
+- [x] Define numeric promotion and mixed-width arithmetic rules
 
 ## 4. Control flow and iteration
 

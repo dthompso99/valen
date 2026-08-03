@@ -330,6 +330,28 @@ test('floating types lower literals, SSE arithmetic, conversions, and mixed ABI 
     assert.match(assembly, /push rax/);
 });
 
+test('mixed-width numeric operations use a lossless common type', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/numeric-promotion.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    const conversions = ir.functions.flatMap(fn => fn.blocks)
+        .flatMap(block => block.instructions)
+        .filter(instruction => instruction.op === 'convert');
+    assert.ok(conversions.some(instruction => instruction.type === 'i16'));
+    assert.ok(conversions.some(instruction => instruction.type === 'i32'));
+    assert.ok(conversions.some(instruction => instruction.type === 'i64'));
+    assert.ok(conversions.some(instruction => instruction.type === 'f64'));
+    assert.doesNotThrow(() => new X86_64Backend().generate(ir));
+});
+
+test('u64 mixed with a signed integer requires an explicit conversion', () => {
+    const source = 'entry {{ __() -> void { local left:u64 = 1; local right:i64 = 1; local invalid = left + right } }}';
+    const result = new SemanticAnalyzer().analyze(new Parser().parse(source, 'numeric-promotion.ar'));
+    assert.equal(result.success, false);
+    assert.match(result.diagnostics[0].message, /No lossless implicit promotion exists between 'u64' and 'i64'/);
+});
+
 test('generic objects monomorphize concrete invariant specializations', () => {
     const semantic = new SemanticAnalyzer().analyze(new Parser().parse(`
         Box<T> {{

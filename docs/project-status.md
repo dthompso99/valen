@@ -27,7 +27,7 @@
 - flow-sensitive optional narrowing for stable locals and parameters
 - **WIP:** optional primitive values
 - **WIP:** generic constraints and generic methods
-- **WIP:** implicit numeric promotion rules
+- lossless mixed-width integer promotion and predictable floating-point promotion
 - **WIP:** `else if`, expression-valued conditionals, and matching
 - safe `?` propagation for optionals and result objects exposing public `valid:bool` and `value` fields
 

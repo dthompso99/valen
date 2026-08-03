@@ -105,7 +105,7 @@ Implemented primitive types include:
 - floating point: `f32`, `f64`
 - `bool`, `string`, and `void`
 
-Conversions are explicit:
+Conversions may be explicit:
 
 ```valen
 local small:i32 = 10
@@ -113,7 +113,9 @@ local wide = small as i64
 local decimal = wide as f64
 ```
 
-Implicit mixed-width numeric promotion is **WIP**. Strings currently expose UTF-8 bytes; Unicode code-point and grapheme operations are **WIP**.
+Mixed-width operators first convert both operands to a common type. Equal signedness keeps that signedness and uses the wider width. Mixed signed/unsigned integers use a wider signed type capable of representing both inputs; combinations such as `u64` and `i64` that have no lossless built-in common type require an explicit conversion. Floating point dominates integers, mixed integer/float operations use `f64`, and `f32` is retained only when both operands are `f32`. Shift results retain the left operand's type.
+
+These rules apply to arithmetic, comparisons, and bitwise operations. Assignment and method arguments remain explicit conversion boundaries. Strings currently expose UTF-8 bytes; Unicode code-point and grapheme operations are **WIP**.
 
 ## Locals and control flow
 

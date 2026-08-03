@@ -469,8 +469,14 @@ export class IrGenerator {
                 if (expression.operator === '&&' || expression.operator === '||') {
                     return this.lowerShortCircuit(expression);
                 }
-                const left = this.lowerExpression(expression.left);
-                const right = this.lowerExpression(expression.right);
+                let left = this.lowerExpression(expression.left);
+                let right = this.lowerExpression(expression.right);
+                if (expression.numericType) {
+                    if (left.type !== expression.numericType) left = this.result('convert', expression.numericType, {value: left, fromType: left.type});
+                    if (right.type !== expression.numericType && expression.operator !== '<<' && expression.operator !== '>>') {
+                        right = this.result('convert', expression.numericType, {value: right, fromType: right.type});
+                    }
+                }
                 if (left.type === 'string' && expression.operator !== '===' && expression.operator !== '!==') {
                     return this.result(
                         expression.operator === '+' ? 'string_concat' : 'string_equal',

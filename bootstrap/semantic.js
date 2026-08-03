@@ -1053,6 +1053,13 @@ export class SemanticAnalyzer {
                     type = BOOL;
                     break;
                 }
+                if (this.isIntegerLiteral(expression.left) && integerTypes.has(right) && !this.isIntegerLiteral(expression.right)) {
+                    this.requireAssignable(left, right, expression.left.span, expression.left);
+                    left = right;
+                } else if (this.isIntegerLiteral(expression.right) && integerTypes.has(left) && !this.isIntegerLiteral(expression.left)) {
+                    this.requireAssignable(right, left, expression.right.span, expression.right);
+                    right = left;
+                }
                 const logical = expression.operator === '&&' || expression.operator === '||';
                 const bitwise = ['&', '|', '^', '<<', '>>'].includes(expression.operator);
                 const identity = expression.operator === '===' || expression.operator === '!==';
@@ -1086,23 +1093,26 @@ export class SemanticAnalyzer {
                 } else if (bitwise) {
                     if (!integerTypes.has(left) || !integerTypes.has(right)) {
                         this.report(expression.span, `Operator '${expression.operator}' requires integer operands`);
-                    } else this.requireAssignable(right, left, expression.right.span, expression.right);
-                    type = left;
+                    } else if (expression.operator === '<<' || expression.operator === '>>') {
+                        expression.numericType = left;
+                        type = left;
+                    } else {
+                        const promoted = this.numericPromotion(left, right, expression.span);
+                        if (promoted) expression.numericType = promoted;
+                        type = promoted ?? UNKNOWN;
+                    }
                 } else if (['==', '!='].includes(expression.operator) && this.isReferenceType(left) && this.isReferenceType(right)) {
                     const compatible = left === right || this.conformsTo(left, right) || this.conformsTo(right, left);
                     if (!compatible) this.report(expression.span, `Structural equality requires compatible references, got '${left}' and '${right}'`);
                     type = BOOL;
+                } else if (left === BOOL && right === BOOL && ['==', '!=', '===', '!=='].includes(expression.operator)) {
+                    type = BOOL;
                 } else if ((!integerTypes.has(left) && !this.isFloat(left)) || (!integerTypes.has(right) && !this.isFloat(right))) {
                     this.report(expression.span, `Operator '${expression.operator}' requires numeric operands`);
                 } else {
-                    if (this.isIntegerLiteral(expression.left) && !this.isIntegerLiteral(expression.right)) {
-                        this.requireAssignable(left, right, expression.left.span, expression.left);
-                        left = right;
-                    } else if (this.isIntegerLiteral(expression.right) && !this.isIntegerLiteral(expression.left)) {
-                        this.requireAssignable(right, left, expression.right.span, expression.right);
-                        right = left;
-                    } else this.requireAssignable(right, left, expression.right.span, expression.right);
-                    type = comparison ? BOOL : left;
+                    const promoted = this.numericPromotion(left, right, expression.span);
+                    if (promoted) expression.numericType = promoted;
+                    type = comparison ? BOOL : promoted ?? UNKNOWN;
                 }
                 break;
             }
@@ -1290,6 +1300,28 @@ export class SemanticAnalyzer {
 
         this.annotate(expression, type, symbol);
         return type;
+    }
+
+    numericPromotion(left, right, span) {
+        if (left === right) return left;
+        if (this.isFloat(left) || this.isFloat(right)) {
+            if ((!this.isFloat(left) && !integerTypes.has(left)) || (!this.isFloat(right) && !integerTypes.has(right))) return null;
+            if (left === F64 || right === F64 || integerTypes.has(left) || integerTypes.has(right)) return F64;
+            return F32;
+        }
+        if (!integerTypes.has(left) || !integerTypes.has(right)) return null;
+        const leftBits = Number(left.slice(1));
+        const rightBits = Number(right.slice(1));
+        const leftSigned = left.startsWith('i');
+        const rightSigned = right.startsWith('i');
+        if (leftSigned === rightSigned) return `${leftSigned ? 'i' : 'u'}${Math.max(leftBits, rightBits)}`;
+        const signedBits = leftSigned ? leftBits : rightBits;
+        const unsignedBits = leftSigned ? rightBits : leftBits;
+        if (signedBits > unsignedBits) return `i${signedBits}`;
+        const widerSigned = [8, 16, 32, 64].find(bits => bits > unsignedBits && bits >= signedBits);
+        if (widerSigned) return `i${widerSigned}`;
+        this.report(span, `No lossless implicit promotion exists between '${left}' and '${right}'; use an explicit conversion`);
+        return null;
     }
 
     resolveConstructedType(expression, scope, currentObject) {
