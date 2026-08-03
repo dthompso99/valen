@@ -325,7 +325,8 @@ export class X86Assembler {
     parse(lines) {
         const program = {items: [], globals: new Set(), externals: new Set(), commons: []};
         let section = '.text';
-        for (const line of lines) {
+        const numericLabels = new Map();
+        for (let line of lines) {
             if (line === '.intel_syntax noprefix' || line === '.note.GNU-stack,"",@progbits') continue;
             if (line === '.text') { section = '.text'; continue; }
             if (line === '.data') { section = '.data'; continue; }
@@ -336,6 +337,13 @@ export class X86Assembler {
             if (line.startsWith('.comm ')) {
                 const [name, size, alignment] = splitOperands(line.slice(6));
                 program.commons.push({name, size: Number(size), alignment: Number(alignment)}); continue;
+            }
+            if (/^[0-9]+:$/.test(line)) {
+                const number = line.slice(0, -1);
+                const sequence = (numericLabels.get(number) ?? 0) + 1;
+                numericLabels.set(number, sequence);
+                program.items.push({kind: 'label', section, name: `.Lnumeric_${number}_${sequence}`});
+                continue;
             }
             if (line.endsWith(':')) { program.items.push({kind: 'label', section, name: line.slice(0, -1)}); continue; }
             if (line.startsWith('.align ')) { program.items.push({kind: 'align', section, alignment: Number(line.slice(7))}); continue; }
@@ -348,11 +356,18 @@ export class X86Assembler {
             if (line.startsWith('.asciz ')) {
                 const text = JSON.parse(line.slice(7)); program.items.push({kind: 'bytes', section, bytes: [...Buffer.from(`${text}\0`)]}); continue;
             }
+            if (line.startsWith('.ascii ')) {
+                const text = JSON.parse(line.slice(7)); program.items.push({kind: 'bytes', section, bytes: [...Buffer.from(text)]}); continue;
+            }
             let instruction = line;
             let prefix = null;
             if (instruction.startsWith('lock ') || instruction.startsWith('rep ') || instruction.startsWith('repe ')) {
                 [prefix, instruction] = [instruction.split(' ', 1)[0], instruction.slice(instruction.indexOf(' ') + 1)];
             }
+            instruction = instruction.replace(/\b([0-9]+)([fb])\b/g, (_match, number, direction) => {
+                const sequence = (numericLabels.get(number) ?? 0) + (direction === 'f' ? 1 : 0);
+                return `.Lnumeric_${number}_${sequence}`;
+            });
             const space = instruction.indexOf(' ');
             const mnemonic = space < 0 ? instruction : instruction.slice(0, space);
             const operands = space < 0 ? [] : splitOperands(instruction.slice(space + 1)).map(parseOperand);

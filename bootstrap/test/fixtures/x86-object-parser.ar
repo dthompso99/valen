@@ -1,0 +1,27 @@
+import X86Object from '../../../src/libX86Object.ar'
+
+test X86ObjectParserTests {{
+    parsesRegistersAndMemory() -> void {
+        local parser = new X86Object.Parser()
+        local register = parser.operand("r12d")
+        expect(register.kind == "register")
+        expect(register.code == 12)
+        expect(register.size == 4)
+        local memory = parser.operand("QWORD PTR [rax+r14*8-32]")
+        expect(memory.kind == "memory")
+        expect(memory.size == 8)
+        expect(memory.base == 0)
+        expect(memory.index == 14)
+        expect(memory.scale == 8)
+        expect(memory.displacement == -32)
+        local relative = parser.operand("QWORD PTR [rip+target]")
+        expect(relative.base == 16)
+        expect(relative.symbol! == "target")
+    }
+
+    parsesAssemblerIntegers() -> void {
+        local parser = new X86Object.Parser()
+        expect(parser.integer("-128") == -128)
+        expect(parser.integer("0x7fffffff") == 2147483647)
+    }
+}}

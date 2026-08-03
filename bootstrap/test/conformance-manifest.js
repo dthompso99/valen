@@ -16,7 +16,8 @@ export const validPrograms = [
     {name: 'readiness event loop', source: 'bootstrap/test/fixtures/event-loop.ar'},
     {name: 'iterators and for loops', source: 'bootstrap/test/fixtures/for-loops.ar'},
     {name: 'short-circuit control flow', source: 'bootstrap/test/fixtures/short-circuit.ar'},
-    {name: 'native test runner', source: 'bootstrap/test/fixtures/native-tests.ar'}
+    {name: 'native test runner', source: 'bootstrap/test/fixtures/native-tests.ar'},
+    {name: 'self-hosted x86 object parser', source: 'bootstrap/test/fixtures/x86-object-parser.ar'}
 ];
 
 export const expectedFailures = [

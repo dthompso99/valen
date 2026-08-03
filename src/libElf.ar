@@ -18,27 +18,33 @@ library Elf {{
             local index:i64 = 0
             while index < value.length { self.values.append(value[index]); index = index + 1 }
         }
-        u16(value:i64) -> void { self.unsigned(value as u64, 2) }
-        u32(value:i64) -> void { self.unsigned(value as u64, 4) }
-        u64(value:i64) -> void { self.unsigned(value as u64, 8) }
-        unsigned(value:u64, count:i64) -> void {
+        u16(value:i64) -> void { self.unsigned(value, 2) }
+        u32(value:i64) -> void { self.unsigned(value, 4) }
+        u64(value:i64) -> void { self.unsigned(value, 8) }
+        unsigned(value:i64, count:i64) -> void {
             local remaining = value
             local index:i64 = 0
             while index < count {
-                self.values.append((remaining - (remaining / 256) * 256) as u8)
-                remaining = remaining / 256
+                local next = remaining / 256
+                local byteValue = remaining - next * 256
+                if byteValue < 0 { byteValue = byteValue + 256; next = (remaining - byteValue) / 256 }
+                self.values.append(byteValue as u8)
+                remaining = next
                 index = index + 1
             }
         }
-        patch16(offset:i64, value:i64) -> void { self.patch(offset, value as u64, 2) }
-        patch32(offset:i64, value:i64) -> void { self.patch(offset, value as u64, 4) }
-        patch64(offset:i64, value:i64) -> void { self.patch(offset, value as u64, 8) }
-        patch(offset:i64, value:u64, count:i64) -> void {
+        patch16(offset:i64, value:i64) -> void { self.patch(offset, value, 2) }
+        patch32(offset:i64, value:i64) -> void { self.patch(offset, value, 4) }
+        patch64(offset:i64, value:i64) -> void { self.patch(offset, value, 8) }
+        patch(offset:i64, value:i64, count:i64) -> void {
             local remaining = value
             local index:i64 = 0
             while index < count {
-                self.values[offset + index] = (remaining - (remaining / 256) * 256) as u8
-                remaining = remaining / 256
+                local next = remaining / 256
+                local byteValue = remaining - next * 256
+                if byteValue < 0 { byteValue = byteValue + 256; next = (remaining - byteValue) / 256 }
+                self.values[offset + index] = byteValue as u8
+                remaining = next
                 index = index + 1
             }
         }

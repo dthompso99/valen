@@ -1,0 +1,188 @@
+import Elf from 'libElf.ar'
+
+library X86Object {{
+    Operand {{
+        member kind:string
+        member name:string
+        member code:i64
+        member size:i64
+        member value:i64
+        member base:i64
+        member index:i64
+        member scale:i64
+        member displacement:i64
+        member symbol:string?
+
+        __(kind:string) -> void {
+            self.kind = kind; self.name = ""; self.code = 0; self.size = 0; self.value = 0
+            self.base = -1; self.index = -1; self.scale = 1; self.displacement = 0; self.symbol = null
+        }
+    }}
+
+    Label {{
+        member name:string
+        member section:string
+        member offset:i64
+        __(name:string, section:string, offset:i64) -> void { self.name = name; self.section = section; self.offset = offset }
+    }}
+
+    Fixup {{
+        member section:string
+        member offset:i64
+        member symbol:string
+        member end:i64
+        member relocationType:i64
+        member addend:i64
+        __(section:string, offset:i64, symbol:string, end:i64, relocationType:i64, addend:i64) -> void {
+            self.section = section; self.offset = offset; self.symbol = symbol; self.end = end
+            self.relocationType = relocationType; self.addend = addend
+        }
+    }}
+
+    Section {{
+        member name:string
+        member bytes:Elf.Bytes
+        member type:i64
+        member flags:i64
+        member alignment:i64
+        member logicalSize:i64
+        __(name:string, type:i64, flags:i64, alignment:i64) -> void {
+            self.name = name; self.bytes = new Elf.Bytes(); self.type = type; self.flags = flags
+            self.alignment = alignment; self.logicalSize = 0
+        }
+        offset() -> i64 { if self.type == 8 { return self.logicalSize }; return self.bytes.length() }
+    }}
+
+    Parser {{
+        trim(value:string) -> string {
+            local start:i64 = 0
+            local end = value.length
+            while start < end { if value[start] == 32 || value[start] == 9 || value[start] == 13 { start = start + 1 } else { break } }
+            while end > start { if value[end - 1] == 32 || value[end - 1] == 9 || value[end - 1] == 13 { end = end - 1 } else { break } }
+            return value.slice(start, end - start)
+        }
+
+        starts(value:string, prefix:string) -> bool {
+            if value.length < prefix.length { return false }
+            return value.slice(0, prefix.length) == prefix
+        }
+
+        integer(value:string) -> i64 {
+            local negative:bool = false
+            local index:i64 = 0
+            if value.length > 0 { if value[0] == 45 { negative = true; index = 1 } }
+            local radix:i64 = 10
+            if value.length >= index + 2 {
+                if value[index] == 48 && (value[index + 1] == 120 || value[index + 1] == 88) { radix = 16; index = index + 2 }
+            }
+            local result:i64 = 0
+            while index < value.length {
+                local byte = value[index]
+                local digit:i64 = byte as i64 - 48
+                if byte >= 97 { digit = byte as i64 - 87 }
+                if byte >= 65 && byte <= 70 { digit = byte as i64 - 55 }
+                result = result * radix + digit
+                index = index + 1
+            }
+            if negative { return 0 - result }
+            return result
+        }
+
+        register(value:string) -> Operand? {
+            local names = new Array<string>(0)
+            names.append("rax"); names.append("rcx"); names.append("rdx"); names.append("rbx")
+            names.append("rsp"); names.append("rbp"); names.append("rsi"); names.append("rdi")
+            local code:i64 = 0
+            while code < names.length {
+                if value == names[code] { return self.reg(value, code, 8, "register") }
+                code = code + 1
+            }
+            if value.length >= 2 { if value[0] == 114 && value[1] >= 48 && value[1] <= 57 {
+                local end = value.length
+                local size:i64 = 8
+                if value[end - 1] == 98 { size = 1; end = end - 1 }
+                if value[end - 1] == 119 { size = 2; end = end - 1 }
+                if value[end - 1] == 100 { size = 4; end = end - 1 }
+                return self.reg(value, self.integer(value.slice(1, end - 1)), size, "register")
+            }}
+            local baseNames = new Array<string>(0)
+            baseNames.append("al"); baseNames.append("cl"); baseNames.append("dl"); baseNames.append("bl")
+            baseNames.append("spl"); baseNames.append("bpl"); baseNames.append("sil"); baseNames.append("dil")
+            code = 0
+            while code < baseNames.length { if value == baseNames[code] { return self.reg(value, code, 1, "register") }; code = code + 1 }
+            local wordNames = new Array<string>(0)
+            wordNames.append("ax"); wordNames.append("cx"); wordNames.append("dx"); wordNames.append("bx")
+            wordNames.append("sp"); wordNames.append("bp"); wordNames.append("si"); wordNames.append("di")
+            code = 0
+            while code < wordNames.length { if value == wordNames[code] { return self.reg(value, code, 2, "register") }; code = code + 1 }
+            local dwordNames = new Array<string>(0)
+            dwordNames.append("eax"); dwordNames.append("ecx"); dwordNames.append("edx"); dwordNames.append("ebx")
+            dwordNames.append("esp"); dwordNames.append("ebp"); dwordNames.append("esi"); dwordNames.append("edi")
+            code = 0
+            while code < dwordNames.length { if value == dwordNames[code] { return self.reg(value, code, 4, "register") }; code = code + 1 }
+            if self.starts(value, "xmm") { return self.reg(value, self.integer(value.slice(3, value.length - 3)), 16, "xmm") }
+            return null
+        }
+
+        reg(name:string, code:i64, size:i64, kind:string) -> Operand {
+            local result = new Operand(kind); result.name = name; result.code = code; result.size = size; return result
+        }
+
+        operand(input:string) -> Operand {
+            local value = self.trim(input)
+            local explicitSize:i64 = 0
+            if self.starts(value, "BYTE PTR ") { explicitSize = 1; value = value.slice(9, value.length - 9) }
+            if self.starts(value, "WORD PTR ") { explicitSize = 2; value = value.slice(9, value.length - 9) }
+            if self.starts(value, "DWORD PTR ") { explicitSize = 4; value = value.slice(10, value.length - 10) }
+            if self.starts(value, "QWORD PTR ") { explicitSize = 8; value = value.slice(10, value.length - 10) }
+            if value.length >= 2 { if value[0] == 91 && value[value.length - 1] == 93 { return self.memory(value.slice(1, value.length - 2), explicitSize) } }
+            local register = self.register(value)
+            if register != null { return copy register! }
+            if self.isNumber(value) { local result = new Operand("immediate"); result.value = self.integer(value); return result }
+            local symbol = new Operand("symbol"); symbol.name = value; return symbol
+        }
+
+        isNumber(value:string) -> bool {
+            if value.length == 0 { return false }
+            local index:i64 = 0
+            if value[0] == 45 { index = 1 }
+            if index >= value.length { return false }
+            return value[index] >= 48 && value[index] <= 57
+        }
+
+        memory(value:string, size:i64) -> Operand {
+            local result = new Operand("memory"); result.size = size
+            local start:i64 = 0
+            local index:i64 = 0
+            while index <= value.length {
+                local separator:bool = index == value.length
+                if !separator { separator = value[index] == 43 || (value[index] == 45 && index > start) }
+                if separator {
+                    local part = value.slice(start, index - start)
+                    local sign:i64 = 1
+                    if part.length > 0 { if part[0] == 45 { sign = -1; part = part.slice(1, part.length - 1) } }
+                    local star = self.find(part, 42)
+                    if star >= 0 {
+                        local indexed = self.register(part.slice(0, star))
+                        result.index = indexed!.code; result.scale = self.integer(part.slice(star + 1, part.length - star - 1))
+                    } else {
+                        if part == "rip" { result.base = 16 } else {
+                            local register = self.register(part)
+                            if register != null { if result.base < 0 { result.base = register!.code } else { result.index = register!.code } }
+                            else { if self.isNumber(part) { result.displacement = result.displacement + sign * self.integer(part) } else { result.symbol = part } }
+                        }
+                    }
+                    if index < value.length { if value[index] == 45 { start = index } else { start = index + 1 } }
+                }
+                index = index + 1
+            }
+            return result
+        }
+
+        find(value:string, byte:u8) -> i64 {
+            local index:i64 = 0
+            while index < value.length { if value[index] == byte { return index }; index = index + 1 }
+            return -1
+        }
+    }}
+}}
