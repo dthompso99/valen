@@ -1,0 +1,22 @@
+import System from '../../../src/libSystem.ar'
+import Elf from '../../../src/libElf.ar'
+
+entry {{
+    __() -> i32 {
+        local arguments = System.arguments()
+        if arguments.length != 2 { return 64 }
+        local code = new Array<u8>(0)
+        code.append(184); code.append(60); code.append(0); code.append(0); code.append(0)
+        code.append(49); code.append(255); code.append(15); code.append(5)
+        local object = new Elf.Object()
+        object.addSection(".text", code, 1, 6, 16)
+        object.addSymbol("_start", ".text", 0, 9, 1, 2)
+        local bytes = object.build()
+        local output = System.openWrite(arguments[1])
+        if output == null { return 74 }
+        local written = System.writeBytes(output!, bytes)
+        local closed = System.close(output!)
+        if written != bytes.length || closed != 0 { return 74 }
+        return 0
+    }
+}}

@@ -152,7 +152,7 @@ library X86_64 {{
 
         supportsRuntime(name:string) -> bool {
             if name == "argon_System_print" || name == "argon_System_arguments" || name == "argon_System_exit" || name == "argon_System_write" || name == "argon_System_writeError" { return true }
-            if name == "argon_System_openRead" || name == "argon_System_openWrite" || name == "argon_System_read" || name == "argon_System_writeFile" || name == "argon_System_close" { return true }
+            if name == "argon_System_openRead" || name == "argon_System_openWrite" || name == "argon_System_read" || name == "argon_System_writeFile" || name == "argon_System_writeBytes" || name == "argon_System_close" { return true }
             if name == "argon_System_lastError" || name == "argon_System_currentDirectory" || name == "argon_System_environmentVariable" || name == "argon_System_collectGarbage" { return true }
             if name == "argon_System_enableProcessArena" || name == "argon_System_link" || name == "argon_System_memoryCopy" || name == "argon_System_memoryCompare" { return true }
             if name == "argon_System_fileDescriptor" || name == "argon_System_makeFileNonblocking" { return true }
@@ -1986,6 +1986,29 @@ library X86_64 {{
             self.writer.line("    mov r10, rax")
             self.writer.line("    neg r10")
             self.writer.line("    mov QWORD PTR [rip+argon_filesystem_error], r10")
+            self.writer.line("    ret")
+            self.writer.line("")
+            self.writer.line(".globl argon_System_writeBytes")
+            self.writer.line("argon_System_writeBytes:")
+            self.writer.line("    mov r8, QWORD PTR [rdi]")
+            self.writer.line("    mov rdx, QWORD PTR [rsi]")
+            self.writer.line("    mov rsi, QWORD PTR [rsi+16]")
+            self.writer.line("    xor r9d, r9d")
+            self.writer.line(".Lfile_write_bytes_next:")
+            self.writer.line("    test rdx, rdx")
+            self.writer.line("    je .Lfile_write_bytes_done")
+            self.writer.line("    mov eax, 1")
+            self.writer.line("    mov rdi, r8")
+            self.writer.line("    syscall")
+            self.writer.line("    test rax, rax")
+            self.writer.line("    js .Lfile_write_error")
+            self.writer.line("    add r9, rax")
+            self.writer.line("    add rsi, rax")
+            self.writer.line("    sub rdx, rax")
+            self.writer.line("    jmp .Lfile_write_bytes_next")
+            self.writer.line(".Lfile_write_bytes_done:")
+            self.writer.line("    mov QWORD PTR [rip+argon_filesystem_error], 0")
+            self.writer.line("    mov rax, r9")
             self.writer.line("    ret")
             self.writer.line("")
             self.writer.line(".globl argon_System_close")

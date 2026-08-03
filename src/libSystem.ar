@@ -11,6 +11,7 @@ library System {{
     native openWrite(path:string) -> File?
     native read(file:File, count:i64) -> string?
     native writeFile(file:File, input:string) -> i64
+    native writeBytes(file:File, input:Array<u8>) -> i64
     native close(own file:File) -> i64
     native lastError() -> i64
     native currentDirectory() -> string?

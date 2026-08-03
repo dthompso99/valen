@@ -224,6 +224,15 @@ test('file operations lower to native open, read, write, and close facilities', 
     }
 });
 
+test('self-hosted ELF writer lowers binary object output without string conversion', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/elf-writer.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
+    assert.match(assembly, /argon_System_writeBytes:/);
+    assert.match(assembly, /mov rsi, QWORD PTR \[rsi\+16\]/);
+});
+
 test('native networking lowers socket lifecycle operations without foreign libraries', () => {
     const filePath = path.join(projectRoot, 'examples/http-native/server.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot, libraryPath: path.join(projectRoot, 'lib')});

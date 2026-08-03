@@ -50,6 +50,7 @@ export class X86_64Backend {
             'argon_System_openWrite',
             'argon_System_read',
             'argon_System_writeFile',
+            'argon_System_writeBytes',
             'argon_System_close',
             'argon_System_lastError',
             'argon_System_currentDirectory',
@@ -83,7 +84,7 @@ export class X86_64Backend {
         this.needsProcessArguments = runtimeSymbols.has('argon_System_arguments') || runtimeSymbols.has('argon_System_link') || runtimeSymbols.has('argon_System_environmentVariable');
         this.needsFilesystemState = [
             'argon_System_openRead', 'argon_System_openWrite', 'argon_System_read',
-            'argon_System_writeFile', 'argon_System_close', 'argon_System_lastError',
+            'argon_System_writeFile', 'argon_System_writeBytes', 'argon_System_close', 'argon_System_lastError',
             'argon_System_currentDirectory'
         ].some(symbol => runtimeSymbols.has(symbol));
 
@@ -107,6 +108,7 @@ export class X86_64Backend {
         if (runtimeSymbols.has('argon_System_openWrite')) lines.push(...this.openRuntime('argon_System_openWrite', 577));
         if (runtimeSymbols.has('argon_System_read')) lines.push(...this.fileReadRuntime());
         if (runtimeSymbols.has('argon_System_writeFile')) lines.push(...this.fileWriteRuntime());
+        if (runtimeSymbols.has('argon_System_writeBytes')) lines.push(...this.fileWriteBytesRuntime());
         if (runtimeSymbols.has('argon_System_close')) lines.push(...this.fileCloseRuntime());
         if (runtimeSymbols.has('argon_System_lastError')) lines.push(...this.lastErrorRuntime());
         if (runtimeSymbols.has('argon_System_currentDirectory')) lines.push(...this.currentDirectoryRuntime());
@@ -1380,6 +1382,34 @@ export class X86_64Backend {
             '    mov QWORD PTR [rip+argon_filesystem_error], r10',
             '    test r9, r9',
             '    cmovnz rax, r9',
+            '    ret',
+            ''
+        ];
+    }
+
+    fileWriteBytesRuntime() {
+        return [
+            '.globl argon_System_writeBytes',
+            'argon_System_writeBytes:',
+            '    mov r8, QWORD PTR [rdi]',
+            '    mov rdx, QWORD PTR [rsi]',
+            '    mov rsi, QWORD PTR [rsi+16]',
+            '    xor r9d, r9d',
+            '.Lfile_write_bytes_next:',
+            '    test rdx, rdx',
+            '    je .Lfile_write_bytes_done',
+            '    mov eax, 1',
+            '    mov rdi, r8',
+            '    syscall',
+            '    test rax, rax',
+            '    js .Lfile_write_error',
+            '    add r9, rax',
+            '    add rsi, rax',
+            '    sub rdx, rax',
+            '    jmp .Lfile_write_bytes_next',
+            '.Lfile_write_bytes_done:',
+            '    mov QWORD PTR [rip+argon_filesystem_error], 0',
+            '    mov rax, r9',
             '    ret',
             ''
         ];

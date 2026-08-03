@@ -1,0 +1,303 @@
+library Elf {{
+    Bytes {{
+        member values:Array<u8>
+
+        __() -> void { self.values = new Array<u8>(0) }
+
+        length() -> i64 { return self.values.length }
+        byte(value:i64) -> void { self.values.append(value as u8) }
+        raw(values:Array<u8>) -> void {
+            local index:i64 = 0
+            while index < values.length { self.values.append(values[index]); index = index + 1 }
+        }
+        zeros(count:i64) -> void {
+            local index:i64 = 0
+            while index < count { self.values.append(0); index = index + 1 }
+        }
+        text(value:string) -> void {
+            local index:i64 = 0
+            while index < value.length { self.values.append(value[index]); index = index + 1 }
+        }
+        u16(value:i64) -> void { self.unsigned(value as u64, 2) }
+        u32(value:i64) -> void { self.unsigned(value as u64, 4) }
+        u64(value:i64) -> void { self.unsigned(value as u64, 8) }
+        unsigned(value:u64, count:i64) -> void {
+            local remaining = value
+            local index:i64 = 0
+            while index < count {
+                self.values.append((remaining - (remaining / 256) * 256) as u8)
+                remaining = remaining / 256
+                index = index + 1
+            }
+        }
+        patch16(offset:i64, value:i64) -> void { self.patch(offset, value as u64, 2) }
+        patch32(offset:i64, value:i64) -> void { self.patch(offset, value as u64, 4) }
+        patch64(offset:i64, value:i64) -> void { self.patch(offset, value as u64, 8) }
+        patch(offset:i64, value:u64, count:i64) -> void {
+            local remaining = value
+            local index:i64 = 0
+            while index < count {
+                self.values[offset + index] = (remaining - (remaining / 256) * 256) as u8
+                remaining = remaining / 256
+                index = index + 1
+            }
+        }
+        align(alignment:i64) -> void {
+            while self.values.length - (self.values.length / alignment) * alignment != 0 { self.values.append(0) }
+        }
+    }}
+
+    StringTable {{
+        member bytes:Bytes
+        member names:Array<string>
+        member offsets:Array<i64>
+
+        __() -> void {
+            self.bytes = new Bytes()
+            self.bytes.byte(0)
+            self.names = new Array<string>(0)
+            self.offsets = new Array<i64>(0)
+        }
+
+        add(value:string) -> i64 {
+            local index:i64 = 0
+            while index < self.names.length {
+                if self.names[index] == value { return self.offsets[index] }
+                index = index + 1
+            }
+            local offset = self.bytes.length()
+            self.names.append(value)
+            self.offsets.append(offset)
+            self.bytes.text(value)
+            self.bytes.byte(0)
+            return offset
+        }
+    }}
+
+    Section {{
+        member name:string
+        member data:Array<u8>
+        member type:i64
+        member flags:i64
+        member alignment:i64
+        member size:i64
+        member entrySize:i64
+        member info:i64
+        member linkName:string?
+        member targetName:string?
+        member nameOffset:i64
+        member fileOffset:i64
+
+        __(name:string, data:Array<u8>, type:i64, flags:i64, alignment:i64) -> void {
+            self.name = name
+            self.data = data
+            self.type = type
+            self.flags = flags
+            self.alignment = alignment
+            self.size = data.length
+            self.entrySize = 0
+            self.info = 0
+            self.linkName = null
+            self.targetName = null
+            self.nameOffset = 0
+            self.fileOffset = 0
+        }
+    }}
+
+    Symbol {{
+        member name:string
+        member sectionName:string?
+        member value:i64
+        member size:i64
+        member binding:i64
+        member type:i64
+
+        __(name:string, sectionName:string?, value:i64, size:i64, binding:i64, type:i64) -> void {
+            self.name = name
+            self.sectionName = sectionName
+            self.value = value
+            self.size = size
+            self.binding = binding
+            self.type = type
+        }
+    }}
+
+    Relocation {{
+        member sectionName:string
+        member offset:i64
+        member symbolName:string
+        member type:i64
+        member addend:i64
+
+        __(sectionName:string, offset:i64, symbolName:string, type:i64, addend:i64) -> void {
+            self.sectionName = sectionName
+            self.offset = offset
+            self.symbolName = symbolName
+            self.type = type
+            self.addend = addend
+        }
+    }}
+
+    Object {{
+        member sections:Array<Section>
+        member symbols:Array<Symbol>
+        member relocations:Array<Relocation>
+
+        __() -> void {
+            self.sections = new Array<Section>(0)
+            self.symbols = new Array<Symbol>(0)
+            self.relocations = new Array<Relocation>(0)
+        }
+
+        addSection(name:string, data:Array<u8>, type:i64, flags:i64, alignment:i64) -> void {
+            self.sections.append(new Section(name, data, type, flags, alignment))
+        }
+        addBss(size:i64, alignment:i64) -> void {
+            local section = new Section(".bss", new Array<u8>(0), 8, 3, alignment)
+            section.size = size
+            self.sections.append(section)
+        }
+        addSymbol(name:string, sectionName:string?, value:i64, size:i64, binding:i64, type:i64) -> void {
+            self.symbols.append(new Symbol(name, sectionName, value, size, binding, type))
+        }
+        addRelocation(sectionName:string, offset:i64, symbolName:string, type:i64, addend:i64) -> void {
+            self.relocations.append(new Relocation(sectionName, offset, symbolName, type, addend))
+        }
+
+        build() -> Array<u8> {
+            local strings = new StringTable()
+            local ordered = new Array<ref Symbol>(0)
+            local localCount:i64 = 1
+            local index:i64 = 0
+            while index < self.symbols.length {
+                if self.symbols[index].binding == 0 { ordered.append(self.symbols[index]); localCount = localCount + 1 }
+                index = index + 1
+            }
+            index = 0
+            while index < self.symbols.length {
+                if self.symbols[index].binding != 0 { ordered.append(self.symbols[index]) }
+                index = index + 1
+            }
+
+            local symbolData = new Bytes()
+            symbolData.zeros(24)
+            index = 0
+            while index < ordered.length {
+                local symbol = ordered[index]
+                symbolData.u32(strings.add(symbol.name))
+                symbolData.byte(symbol.binding * 16 + symbol.type)
+                symbolData.byte(0)
+                local sectionIndex:i64 = 0
+                if symbol.sectionName != null { sectionIndex = self.sectionIndex(symbol.sectionName!) }
+                symbolData.u16(sectionIndex)
+                symbolData.u64(symbol.value)
+                symbolData.u64(symbol.size)
+                index = index + 1
+            }
+
+            local originalCount = self.sections.length
+            index = 0
+            while index < originalCount {
+                local target = self.sections[index]
+                local relocationData = new Bytes()
+                local relocationIndex:i64 = 0
+                while relocationIndex < self.relocations.length {
+                    local relocation = self.relocations[relocationIndex]
+                    if relocation.sectionName == target.name {
+                        relocationData.u64(relocation.offset)
+                        local symbolIndex = self.orderedSymbolIndex(ordered, relocation.symbolName)
+                        relocationData.u64(symbolIndex * 4294967296 + relocation.type)
+                        relocationData.u64(relocation.addend)
+                    }
+                    relocationIndex = relocationIndex + 1
+                }
+                if relocationData.length() > 0 {
+                    local relocationSection = new Section(".rela" + target.name, relocationData.values, 4, 0, 8)
+                    relocationSection.entrySize = 24
+                    relocationSection.linkName = ".symtab"
+                    relocationSection.targetName = target.name
+                    self.sections.append(relocationSection)
+                }
+                index = index + 1
+            }
+
+            local symbolSection = new Section(".symtab", symbolData.values, 2, 0, 8)
+            symbolSection.entrySize = 24
+            symbolSection.info = localCount
+            symbolSection.linkName = ".strtab"
+            self.sections.append(symbolSection)
+            self.sections.append(new Section(".strtab", strings.bytes.values, 3, 0, 1))
+            local sectionStrings = new StringTable()
+            index = 0
+            while index < self.sections.length {
+                self.sections[index].nameOffset = sectionStrings.add(self.sections[index].name)
+                index = index + 1
+            }
+            local sectionNameOffset = sectionStrings.add(".shstrtab")
+            local sectionNames = new Section(".shstrtab", sectionStrings.bytes.values, 3, 0, 1)
+            sectionNames.nameOffset = sectionNameOffset
+            self.sections.append(sectionNames)
+
+            local output = new Bytes()
+            output.zeros(64)
+            index = 0
+            while index < self.sections.length {
+                local section = self.sections[index]
+                output.align(section.alignment)
+                section.fileOffset = output.length()
+                if section.type != 8 { output.raw(section.data) }
+                index = index + 1
+            }
+            output.align(8)
+            local sectionHeaders = output.length()
+            output.zeros(64)
+            index = 0
+            while index < self.sections.length {
+                local section = self.sections[index]
+                output.u32(section.nameOffset)
+                output.u32(section.type)
+                output.u64(section.flags)
+                output.u64(0)
+                output.u64(section.fileOffset)
+                output.u64(section.size)
+                local link:i64 = 0
+                local info:i64 = 0
+                if section.linkName != null { link = self.sectionIndex(section.linkName!) }
+                if section.targetName != null { info = self.sectionIndex(section.targetName!) }
+                if section.name == ".symtab" { info = section.info }
+                output.u32(link)
+                output.u32(info)
+                output.u64(section.alignment)
+                output.u64(section.entrySize)
+                index = index + 1
+            }
+
+            output.patch(0, 1179403647, 4)
+            output.values[4] = 2; output.values[5] = 1; output.values[6] = 1
+            output.patch16(16, 1); output.patch16(18, 62); output.patch32(20, 1)
+            output.patch64(40, sectionHeaders)
+            output.patch16(52, 64); output.patch16(58, 64)
+            output.patch16(60, self.sections.length + 1)
+            output.patch16(62, self.sectionIndex(".shstrtab"))
+            return copy output.values
+        }
+
+        sectionIndex(name:string) -> i64 {
+            local index:i64 = 0
+            while index < self.sections.length {
+                if self.sections[index].name == name { return index + 1 }
+                index = index + 1
+            }
+            return 0
+        }
+
+        orderedSymbolIndex(symbols:Array<ref Symbol>, name:string) -> i64 {
+            local index:i64 = 0
+            while index < symbols.length {
+                if symbols[index].name == name { return index + 1 }
+                index = index + 1
+            }
+            return 0
+        }
+    }}
+}}
