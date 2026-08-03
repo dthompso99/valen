@@ -96,7 +96,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 - [ ] Reduce temporary immutable-string allocation during assembly generation
 - [x] Add IR validation and canonicalization passes
 - [ ] Add dead-block, dead-value, and constant-folding passes
-- [ ] Add register allocation
+- [x] Add register allocation
 - [ ] Add instruction selection and peephole optimization
 - [ ] Add optimization-level flags with predictable semantics
 - [x] Measure compile time, peak memory, executable size, and runtime performance

@@ -68,7 +68,8 @@ and embedded targets.
 - The editor-neutral language server provides live diagnostics, quick fixes, hover, go-to-definition, and document symbols; editor packaging and the formatter remain **WIP**.
 - Diagnostics have named error/warning/note severities, primary and secondary source labels, explanatory notes, and precise replacement hints with generation parity.
 - **WIP:** package metadata, versioning, and compiled libraries
-- **WIP:** optimization levels, register allocation, and peephole optimization
+- Primitive SSA temporaries use conservative linear-scan allocation across `r12`-`r15`, with stack spills and GC-visible managed references.
+- **WIP:** optimization levels and peephole optimization
 - Generation 0 and the self-hosted compiler emit ELF64 relocatable objects without a system assembler.
 - **WIP:** an integrated linker
 - Repeatable compiler and generated-code benchmarks report compile time, memory, executable size, and runtime speed; expanding the workload corpus remains **WIP**.

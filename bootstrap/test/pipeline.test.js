@@ -459,6 +459,22 @@ test('stack arguments, runtime errors, division checks, and symbol mangling are 
     assert.notEqual(backend.mangle('A/B'), backend.mangle('A_2f_B'));
 });
 
+test('linear-scan register allocation keeps primitive temporaries across calls and reduces stack slots', () => {
+    const source = `entry {{
+        value() -> i64 { return 20 }
+        __() -> i64 { return self.value() + self.value() + self.value() }
+    }}`;
+    const semantic = new SemanticAnalyzer().analyze(new Parser().parse(source, 'register-allocation.ar'));
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
+    const constructor = assembly.match(/\.globl (__valen_entry[^\n]*_5f__5f_)\n[\s\S]*?\1__return:[\s\S]*?\n    ret/)?.[0];
+    assert.ok(constructor);
+    assert.match(constructor, /mov QWORD PTR \[rbp-\d+\], r1[2-5]/);
+    assert.match(constructor, /call QWORD PTR[\s\S]*mov r1[2-5], rax[\s\S]*call QWORD PTR/);
+    const frameSize = Number(constructor.match(/sub rsp, (\d+)/)?.[1]);
+    assert.ok(frameSize <= 48, `expected an allocated frame no larger than 48 bytes, got ${frameSize}`);
+});
+
 test('contract dispatch preserves register and stack arguments', () => {
     const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/abi-contract-arguments.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});

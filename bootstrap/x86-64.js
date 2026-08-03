@@ -309,6 +309,7 @@ export class X86_64Backend {
     generateFunction(fn) {
         this.fn = fn;
         this.slots = new Map();
+        this.registers = this.allocateRegisters(fn);
         const slotTypes = new Map();
         let slotCount = 0;
         const reserve = (key, type = null) => {
@@ -318,11 +319,12 @@ export class X86_64Backend {
 
         for (const parameter of fn.parameters) reserve(`name:${parameter.name}`, parameter.type);
         for (const instruction of fn.blocks.flatMap(block => block.instructions)) {
-            if (instruction.result) reserve(`temp:${instruction.result}`, instruction.type);
+            if (instruction.result && !this.registers.has(instruction.result)) reserve(`temp:${instruction.result}`, instruction.type);
             if (instruction.op === 'declare_local' || instruction.op === 'store_local') {
                 reserve(`name:${instruction.name}`, instruction.type ?? instruction.value?.type);
             }
         }
+        for (const register of new Set(this.registers.values())) reserve(`save:${register}`);
 
         const roots = [...slotTypes].filter(([, type]) => this.isManagedReferenceType(type));
         const rootRecordSize = 24;
@@ -340,6 +342,7 @@ export class X86_64Backend {
         for (let offset = 8; offset <= frameSize; offset += 8) {
             lines.push(`    mov QWORD PTR [rbp-${offset}], 0`);
         }
+        for (const register of new Set(this.registers.values())) lines.push(`    mov ${this.slot(`save:${register}`)}, ${register}`);
         const rootTraceLabel = `${symbol}__gc_roots`;
         lines.push('    mov rax, QWORD PTR [rip+valen_gc_roots]', `    mov QWORD PTR [rbp-${rootRecordOffset}], rax`,
             `    lea rax, [rip+${rootTraceLabel}]`, `    mov QWORD PTR [rbp-${rootRecordOffset - 8}], rax`,
@@ -360,11 +363,56 @@ export class X86_64Backend {
             }
         }
 
-        lines.push(`${endLabel}:`, `    mov rcx, QWORD PTR [rbp-${rootRecordOffset}]`, '    mov QWORD PTR [rip+valen_gc_roots], rcx', '    leave', '    ret',
+        lines.push(`${endLabel}:`, `    mov rcx, QWORD PTR [rbp-${rootRecordOffset}]`, '    mov QWORD PTR [rip+valen_gc_roots], rcx');
+        for (const register of new Set(this.registers.values())) lines.push(`    mov ${register}, ${this.slot(`save:${register}`)}`);
+        lines.push('    leave', '    ret',
             `${rootTraceLabel}:`, '    push rbx', '    mov rbx, rdi');
         for (const [key] of roots) lines.push(`    mov rdi, QWORD PTR [rbx-${this.slots.get(key)}]`, '    call valen_gc_mark');
         lines.push('    pop rbx', '    ret', '');
         return lines;
+    }
+
+    allocateRegisters(fn) {
+        const instructions = fn.blocks.flatMap(block => block.instructions);
+        const definitions = new Map();
+        const lastUses = new Map();
+        for (let index = 0; index < instructions.length; index++) {
+            const instruction = instructions[index];
+            if (instruction.result && !this.isManagedReferenceType(instruction.type)) {
+                definitions.set(instruction.result, {name: instruction.result, type: instruction.type, start: index, end: index});
+            }
+            const visit = value => {
+                if (!value || typeof value !== 'object') return;
+                if (value.kind === 'temporary') {
+                    lastUses.set(value.name, index);
+                    return;
+                }
+                if (Array.isArray(value)) for (const item of value) visit(item);
+                else for (const [key, item] of Object.entries(value)) if (key !== 'result') visit(item);
+            };
+            for (const [key, value] of Object.entries(instruction)) if (key !== 'result') visit(value);
+        }
+        const intervals = [...definitions.values()]
+            .filter(interval => lastUses.has(interval.name))
+            .map(interval => ({...interval, end: lastUses.get(interval.name)}))
+            .sort((left, right) => left.start - right.start || left.end - right.end);
+        const available = ['r12', 'r13', 'r14', 'r15'];
+        const active = [];
+        const allocation = new Map();
+        for (const interval of intervals) {
+            for (let index = active.length - 1; index >= 0; index--) {
+                if (active[index].end <= interval.start) {
+                    available.push(active[index].register);
+                    active.splice(index, 1);
+                }
+            }
+            if (available.length === 0) continue;
+            const register = available.pop();
+            allocation.set(interval.name, register);
+            active.push({...interval, register});
+            active.sort((left, right) => left.end - right.end);
+        }
+        return allocation;
     }
 
     isManagedReferenceType(type) {
@@ -2383,6 +2431,7 @@ export class X86_64Backend {
     }
 
     temp(name) {
+        if (this.registers?.has(name)) return this.registers.get(name);
         return this.slot(`temp:${name}`);
     }
 

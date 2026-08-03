@@ -47,6 +47,14 @@ library X86_64 {{
         __(key:string, offset:i64, typeName:string) -> void { self.key = key; self.offset = offset; self.typeName = typeName }
     }}
 
+    Allocation {{
+        member name:string
+        member start:i64
+        member end:i64
+        member registerName:string
+        __(name:string, start:i64) -> void { self.name = name; self.start = start; self.end = start; self.registerName = "" }
+    }}
+
     Backend {{
         member program:Ir.Program
         member writer:Writer
@@ -56,6 +64,7 @@ library X86_64 {{
         member literals:Array<Literal>
         member floatLiterals:Array<Literal>
         member slots:Array<Slot>
+        member allocations:Array<Allocation>
         member currentFunctionSymbol:string
         member nextLabel:i64
         member usesPrint:bool
@@ -71,6 +80,7 @@ library X86_64 {{
             self.literals = new Array<Literal>(0)
             self.floatLiterals = new Array<Literal>(0)
             self.slots = new Array<Slot>(0)
+            self.allocations = new Array<Allocation>(0)
             self.currentFunctionSymbol = ""
             self.nextLabel = 0
             self.usesPrint = false
@@ -331,6 +341,7 @@ library X86_64 {{
         generateFunction(function:Ir.Function) -> void {
             self.currentFunctionSymbol = self.functionSymbol(function.name)
             self.slots = new Array<Slot>(0)
+            self.allocateRegisters(function)
             local parameterIndex:i64 = 0
             while parameterIndex < function.parameters.length {
                 self.reserve("name:" + function.parameters[parameterIndex].name, function.parameters[parameterIndex].typeName)
@@ -342,12 +353,21 @@ library X86_64 {{
                 local index:i64 = 0
                 while index < instructions.length {
                     local instruction = instructions[index]
-                    if instruction.result != null { self.reserve("temp:" + instruction.result!.name, instruction.result!.typeName) }
+                    if instruction.result != null {
+                        local allocation = self.findAllocation(instruction.result!.name)
+                        if allocation == null || allocation!.registerName.length == 0 { self.reserve("temp:" + instruction.result!.name, instruction.result!.typeName) }
+                    }
                     if instruction.op == "declare_local" { self.reserve("name:" + instruction.name!, instruction.typeName!) }
                     if instruction.op == "store_local" { self.reserve("name:" + instruction.name!, instruction.first!.typeName) }
                     index = index + 1
                 }
                 blockIndex = blockIndex + 1
+            }
+            local registerIndex:i64 = 0
+            while registerIndex < 4 {
+                local registerName = self.allocationRegister(registerIndex)
+                if self.usesAllocationRegister(registerName) { self.reserve("save:" + registerName, "") }
+                registerIndex = registerIndex + 1
             }
             local roots = new Array<ref Slot>(0)
             local slotIndex:i64 = 0
@@ -370,6 +390,12 @@ library X86_64 {{
             while clearOffset <= frameSize {
                 self.writer.line("    mov QWORD PTR [rbp-" + clearOffset.toString() + "], 0")
                 clearOffset = clearOffset + 8
+            }
+            registerIndex = 0
+            while registerIndex < 4 {
+                local registerName = self.allocationRegister(registerIndex)
+                if self.usesAllocationRegister(registerName) { self.writer.line("    mov " + self.slot("save:" + registerName) + ", " + registerName) }
+                registerIndex = registerIndex + 1
             }
             self.writer.line("    mov rax, QWORD PTR [rip+valen_gc_roots]")
             self.writer.line("    mov QWORD PTR [rbp-" + rootRecordOffset.toString() + "], rax")
@@ -415,6 +441,12 @@ library X86_64 {{
             self.writer.line(endLabel + ":")
             self.writer.line("    mov rcx, QWORD PTR [rbp-" + rootRecordOffset.toString() + "]")
             self.writer.line("    mov QWORD PTR [rip+valen_gc_roots], rcx")
+            registerIndex = 0
+            while registerIndex < 4 {
+                local registerName = self.allocationRegister(registerIndex)
+                if self.usesAllocationRegister(registerName) { self.writer.line("    mov " + registerName + ", " + self.slot("save:" + registerName)) }
+                registerIndex = registerIndex + 1
+            }
             self.writer.line("    leave")
             self.writer.line("    ret")
             self.writer.line(rootTraceLabel + ":")
@@ -2810,6 +2842,84 @@ library X86_64 {{
             self.writer.line("")
         }
 
+        allocateRegisters(function:Ir.Function) -> void {
+            self.allocations = new Array<Allocation>(0)
+            local position:i64 = 0
+            local blockIndex:i64 = 0
+            while blockIndex < function.blocks.length {
+                local instructionIndex:i64 = 0
+                while instructionIndex < function.blocks[blockIndex].instructions.length {
+                    local instruction = function.blocks[blockIndex].instructions[instructionIndex]
+                    if instruction.result != null {
+                        if !self.isManagedReferenceType(instruction.result!.typeName) { self.allocations.append(new Allocation(instruction.result!.name, position)) }
+                    }
+                    self.recordAllocationUse(instruction.first, position)
+                    self.recordAllocationUse(instruction.second, position)
+                    self.recordAllocationUse(instruction.third, position)
+                    local argumentIndex:i64 = 0
+                    while argumentIndex < instruction.arguments.length {
+                        self.recordAllocationUse(instruction.arguments[argumentIndex], position)
+                        argumentIndex = argumentIndex + 1
+                    }
+                    position = position + 1
+                    instructionIndex = instructionIndex + 1
+                }
+                blockIndex = blockIndex + 1
+            }
+            local allocationIndex:i64 = 0
+            while allocationIndex < self.allocations.length {
+                local allocation = self.allocations[allocationIndex]
+                if allocation.end > allocation.start {
+                    local registerIndex:i64 = 0
+                    local assigned:bool = false
+                    while registerIndex < 4 && !assigned {
+                        local candidate = self.allocationRegister(registerIndex)
+                        local available:bool = true
+                        local priorIndex:i64 = 0
+                        while priorIndex < allocationIndex {
+                            local prior = self.allocations[priorIndex]
+                            if prior.registerName == candidate && prior.end > allocation.start { available = false }
+                            priorIndex = priorIndex + 1
+                        }
+                        if available { allocation.registerName = candidate; assigned = true }
+                        registerIndex = registerIndex + 1
+                    }
+                }
+                allocationIndex = allocationIndex + 1
+            }
+        }
+
+        recordAllocationUse(value:Ir.Value?, position:i64) -> void {
+            if value == null || value!.kind != "temporary" { return }
+            local allocation = self.findAllocation(value!.name)
+            if allocation != null { if position > allocation!.end { allocation!.end = position } }
+        }
+
+        allocationRegister(index:i64) -> string {
+            if index == 0 { return "r12" }
+            if index == 1 { return "r13" }
+            if index == 2 { return "r14" }
+            return "r15"
+        }
+
+        usesAllocationRegister(registerName:string) -> bool {
+            local index:i64 = 0
+            while index < self.allocations.length {
+                if self.allocations[index].registerName == registerName { return true }
+                index = index + 1
+            }
+            return false
+        }
+
+        findAllocation(name:string) -> ref Allocation? {
+            local index:i64 = 0
+            while index < self.allocations.length {
+                if self.allocations[index].name == name { return self.allocations[index] }
+                index = index + 1
+            }
+            return null
+        }
+
         load(value:Ir.Value, register:string) -> void {
             if value.kind == "parameter" || value.kind == "local" { self.writer.line("    mov " + register + ", " + self.named(value.name)); return }
             if value.kind == "temporary" { self.writer.line("    mov " + register + ", " + self.temp(value.name)); return }
@@ -2847,7 +2957,11 @@ library X86_64 {{
 
         slot(key:string) -> string { return "QWORD PTR [rbp-" + self.findSlot(key)!.offset.toString() + "]" }
         named(name:string) -> string { return self.slot("name:" + name) }
-        temp(name:string) -> string { return self.slot("temp:" + name) }
+        temp(name:string) -> string {
+            local allocation = self.findAllocation(name)
+            if allocation != null { if allocation!.registerName.length > 0 { return allocation!.registerName } }
+            return self.slot("temp:" + name)
+        }
         blockLabel(name:string) -> string { return self.currentFunctionSymbol + "__" + name }
 
         findSlot(key:string) -> ref Slot? {
