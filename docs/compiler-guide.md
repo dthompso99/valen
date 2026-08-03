@@ -39,6 +39,13 @@ dependency therefore produces a cold build; a matching build skips semantic anal
 lowering and validation, and backend generation. Set `ARGON_CACHE_TRACE=1` to report cache hits,
 misses, and writes. Missing, unwritable, or invalid entries fall back to an ordinary build.
 
+Object emission and linking are separate policy choices. Direct ELF emission does not imply a
+freestanding executable: the emitted object may be linked without foreign libraries for the
+self-contained Linux runtime, or passed to the hosted system linker with the explicit libraries
+collected from `native ... from` declarations. The future integrated linker will be an additional
+provider, not the removal of hosted linking. Generation 0 can stop after object emission with
+`node bootstrap/compiler.js --emit-object <source> <output.o>`.
+
 Direct object-file emission, an integrated linker, register allocation, and optimization levels are **WIP**.
 
 ## Repository map

@@ -6,6 +6,7 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {ElfObject} from '../elf.js';
 import {X86Assembler} from '../x86-assembler.js';
+import {Compiler} from '../compiler.js';
 
 test('ELF writer produces a directly linkable x86-64 relocatable object', t => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'argon-elf-'));
@@ -77,6 +78,20 @@ message:
         }
         assert.equal(link.status, 0, link.stderr);
         assert.equal(spawnSync(executablePath).status, 0);
+    } finally {
+        fs.rmSync(directory, {recursive: true, force: true});
+    }
+});
+
+test('compiler can stop at a relocatable object without selecting a linker', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'argon-emit-object-'));
+    try {
+        const sourcePath = path.join(directory, 'main.ar');
+        const objectPath = path.join(directory, 'main.o');
+        fs.writeFileSync(sourcePath, 'entry {{ __() -> i32 { return 0 } }}\n');
+        const result = new Compiler().emitObject(sourcePath, objectPath);
+        assert.equal(result.objectPath, objectPath);
+        assert.equal(fs.readFileSync(objectPath).subarray(0, 4).toString('binary'), '\x7fELF');
     } finally {
         fs.rmSync(directory, {recursive: true, force: true});
     }

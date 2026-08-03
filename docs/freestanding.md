@@ -72,9 +72,11 @@ before trapping.
 
 ## Toolchain boundary
 
-Freestanding describes the produced program's dependencies. The compiler may initially use a
-host assembler or linker while generating a freestanding target. Direct object emission and an
-integrated linker are separate roadmap work.
+Freestanding describes the produced program's dependencies, not which linker produced it. Direct
+object emission removes the assembler dependency while leaving link policy selectable. An Argon
+object can be linked into a self-contained image, linked by the hosted system toolchain with
+explicit libraries such as libc, or eventually linked by Argon's integrated linker. Supporting
+one route must not remove the others.
 
 ## Current implementation status
 
