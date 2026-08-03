@@ -54,10 +54,10 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 
 - [x] Define all method calls as synchronous; unfinished work must be represented explicitly by a returned object
 - [x] Define the standard operation state, stable result objects, cooperative cancellation, optional progress, and explicit waiting
-- [ ] Define a `Work` contract with a synchronous `run()` entry point
-- [ ] Define an `Executor` contract whose `submit(work)` returns an operation object
-- [ ] Implement `InlineExecutor` as the deterministic reference execution policy
-- [ ] Specify ownership transfer and retained references for submitted work and operation results
+- [x] Define a `Work` contract with a synchronous `run()` entry point
+- [x] Define an `Executor` contract whose `submit(work)` returns an operation object
+- [x] Implement `InlineExecutor` as the deterministic reference execution policy and non-threaded fallback
+- [x] Specify ownership transfer and retained references for submitted work and operation results
 - [ ] Implement a native single-worker `ThreadExecutor`
 - [ ] Add native mutex, condition, and atomic synchronization objects
 - [ ] Add a thread-pool executor after single-worker correctness is established

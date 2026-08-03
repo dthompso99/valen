@@ -45,4 +45,31 @@ library Operations {{
         completedUnits() -> i64 { return 0 }
         totalUnits() -> i64 { return 0 }
     }}
+
+    Work {{
+        run() -> OperationResult { return new OperationResult() }
+    }}
+
+    Executor {{
+        submit(own work:Work) -> Operation { return new Operation() }
+    }}
+
+    CompletedOperation implements Operation {{
+        member terminal:OperationResult
+
+        __(own terminal:OperationResult) -> void { self.terminal = terminal }
+
+        complete() -> bool { return true }
+        cancel() -> bool { return false }
+        result() -> ref OperationResult? { return self.terminal }
+        wait() -> ref OperationResult { return self.terminal }
+    }}
+
+    InlineExecutor implements Executor {{
+        submit(own work:Work) -> Operation {
+            local terminal = work.run()
+            delete work
+            return new CompletedOperation(terminal)
+        }
+    }}
 }}

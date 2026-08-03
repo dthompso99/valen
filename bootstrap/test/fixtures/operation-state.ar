@@ -18,6 +18,14 @@ ManualOperation implements Operations.Operation {{
     }
 }}
 
+SuccessfulWork implements Operations.Work {{
+    run() -> Operations.OperationResult { return new Operations.Succeeded() }
+}}
+
+FailingWork implements Operations.Work {{
+    run() -> Operations.OperationResult { return new Operations.Failed(23, "work failed") }
+}}
+
 entry {{
     __() -> i32 {
         local successful:Operations.Operation = new ManualOperation()
@@ -38,6 +46,19 @@ entry {{
         if !failure.failed() { return 9 }
         if failure.code() != 81 { return 10 }
         if failure.detail()! != "printer offline" { return 11 }
+
+        local executor:Operations.Executor = new Operations.InlineExecutor()
+        local successfulWork = new SuccessfulWork()
+        local inlineSuccess = executor.submit(successfulWork)
+        if !inlineSuccess.complete() { return 12 }
+        if inlineSuccess.cancel() { return 13 }
+        if !inlineSuccess.wait().succeeded() { return 14 }
+        if inlineSuccess.wait() !== inlineSuccess.result()! { return 15 }
+
+        local failingWork = new FailingWork()
+        local inlineFailure = executor.submit(failingWork)
+        if !inlineFailure.wait().failed() { return 16 }
+        if inlineFailure.wait().code() != 23 { return 17 }
         return 0
     }
 }}

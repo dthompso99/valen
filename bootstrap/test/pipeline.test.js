@@ -548,6 +548,13 @@ test('operation state has stable success, failure, cancellation, and waiting sem
     assert.ok(ir.functions.some(fn => fn.displayName === 'Operations.Operation.wait'));
     assert.ok(ir.functions.some(fn => fn.displayName === 'ManualOperation.cancel'));
     assert.doesNotThrow(() => new X86_64Backend().generate(ir));
+
+    const reusedWork = new SemanticAnalyzer().analyze(new Parser().parse(
+        'Result {{}} Work {{ run() -> Result { return new Result() } }} Executor {{ submit(own work:Work) -> Result { return work.run() } }} Job implements Work {{ run() -> Result { return new Result() } }} Direct implements Executor {{ submit(own work:Work) -> Result { return work.run() } }} entry {{ __() -> void { local executor:Executor = new Direct(); local work = new Job(); executor.submit(work); executor.submit(work) } }}',
+        'submitted-work-reuse.ar'
+    ));
+    assert.equal(reusedWork.success, false);
+    assert.match(reusedWork.diagnostics[0].message, /Cannot pass borrowed reference 'work'/);
 });
 
 test('members default public while private members stay owner-only and non-virtual', () => {
