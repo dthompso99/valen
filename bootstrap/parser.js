@@ -218,12 +218,23 @@ export class Parser {
         const returnReference = this.match('REF');
         const returnType = this.parseTypeReference();
         if (isNative) {
+            let foreignLibrary = null;
+            let foreignSymbol = null;
+            if (this.match('FROM')) {
+                const library = this.consume('STRING_LITERAL', "Expected a library name after 'from'");
+                foreignLibrary = this.decodeString(library);
+                if (this.match('AS')) {
+                    foreignSymbol = this.decodeString(this.consume('STRING_LITERAL', "Expected a symbol name after 'as'"));
+                }
+            }
             if (!this.atSeparator() && !(this.check('RIGHT_BRACE') && this.peek(1).type === 'RIGHT_BRACE')) {
                 this.error(this.peek(), `Native method '${name.value}' cannot have a body`);
             }
             const method = new MethodDeclaration(name.value, parameters, returnType, null, true, this.span(start, returnType));
             method.visibility = visibility;
             method.returnReference = returnReference;
+            method.foreignLibrary = foreignLibrary;
+            method.foreignSymbol = foreignSymbol ?? name.value;
             return method;
         }
         const body = this.parseBlock();

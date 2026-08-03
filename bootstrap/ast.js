@@ -52,6 +52,8 @@ export class MethodDeclaration extends AstNode {
         this.body = body;
         this.isNative = isNative;
         this.isUnsafe = false;
+        this.foreignLibrary = null;
+        this.foreignSymbol = null;
         this.visibility = 'public';
         this.returnReference = false;
     }

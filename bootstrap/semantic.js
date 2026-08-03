@@ -570,6 +570,7 @@ export class SemanticAnalyzer {
                 this.report(declaration.span, 'Native methods can only be declared in libraries');
             }
             if (declaration.body) this.report(declaration.span, `Native method '${method.qualifiedName}' cannot have a body`);
+            if (declaration.foreignLibrary) this.validateForeignMethod(declaration, method);
             return;
         }
         if (declaration.isUnsafe) this.report(declaration.span, "Only native library methods may be declared 'unsafe'");
@@ -601,6 +602,33 @@ export class SemanticAnalyzer {
         if (method.returnType !== VOID && !returns) {
             this.report(declaration.span, `Method '${method.qualifiedName}' may exit without returning ${method.returnType}`);
         }
+    }
+
+    validateForeignMethod(declaration, method) {
+        if (!declaration.isUnsafe) {
+            this.report(declaration.span, `Foreign method '${method.qualifiedName}' must be declared unsafe`);
+        }
+        if (!/^[A-Za-z0-9_.+-]+$/.test(declaration.foreignLibrary)) {
+            this.report(declaration.span, `Invalid foreign library name '${declaration.foreignLibrary}'`);
+        }
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(declaration.foreignSymbol)) {
+            this.report(declaration.span, `Invalid foreign symbol name '${declaration.foreignSymbol}'`);
+        }
+        for (const parameter of method.parameters) {
+            if (!this.isForeignAbiType(parameter.type, false)) {
+                this.report(parameter.declaration.span, `Foreign parameter '${parameter.name}' has unsupported ABI type '${parameter.type}'`);
+            }
+        }
+        if (!this.isForeignAbiType(method.returnType, true)) {
+            this.report(declaration.returnType.span, `Foreign method '${method.qualifiedName}' has unsupported return ABI type '${method.returnType}'`);
+        }
+    }
+
+    isForeignAbiType(type, allowVoid) {
+        if (allowVoid && type === VOID) return true;
+        if (integerTypes.has(type) || type === BOOL) return true;
+        const base = this.isOptionalType(type) ? this.optionalBaseType(type) : type;
+        return this.findObjectType(base)?.externalResource === true;
     }
 
     analyzeBlock(block, parentScope, object, method) {

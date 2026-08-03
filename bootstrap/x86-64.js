@@ -58,7 +58,7 @@ export class X86_64Backend {
             'argon_System_memoryCompare'
         ]);
         for (const external of program.externals) {
-            if (!supportedRuntimeSymbols.has(external.runtimeSymbol)) {
+            if (!external.foreignLibrary && !supportedRuntimeSymbols.has(external.runtimeSymbol)) {
                 throw new Error(`x86_64-linux runtime does not provide ${external.runtimeSymbol}`);
             }
             this.functionSymbols.set(external.name, external.runtimeSymbol);
@@ -73,6 +73,9 @@ export class X86_64Backend {
         ].some(symbol => runtimeSymbols.has(symbol));
 
         const lines = ['.intel_syntax noprefix', '.text'];
+        for (const external of program.externals) {
+            if (external.foreignLibrary) lines.push(`.extern ${external.runtimeSymbol}`);
+        }
         for (const fn of program.functions) lines.push(...this.generateFunction(fn));
         lines.push(...this.generateMain());
         lines.push(...this.structuralRuntime());
@@ -470,7 +473,7 @@ export class X86_64Backend {
         }
         const stackBytes = stackArguments.length * 8 + padding;
         if (stackBytes) lines.push(`    add rsp, ${stackBytes}`);
-        if (instruction.result) lines.push(`    mov ${this.temp(instruction.result)}, rax`);
+        if (instruction.result) lines.push(...this.normalize('rax', instruction.type), `    mov ${this.temp(instruction.result)}, rax`);
         return lines;
     }
 
@@ -495,7 +498,7 @@ export class X86_64Backend {
         lines.push('    call r11');
         const stackBytes = stackArguments.length * 8 + padding;
         if (stackBytes) lines.push(`    add rsp, ${stackBytes}`);
-        if (instruction.result) lines.push(`    mov ${this.temp(instruction.result)}, rax`);
+        if (instruction.result) lines.push(...this.normalize('rax', instruction.type), `    mov ${this.temp(instruction.result)}, rax`);
         return lines;
     }
 
@@ -1274,23 +1277,26 @@ export class X86_64Backend {
             '    mov rbp, rsp',
             '    push r12',
             '    push r13',
+            '    push r14',
+            '    push r15',
             '    sub rsp, 16',
             '    mov r12, QWORD PTR [rdi]',
             '    mov r13, QWORD PTR [rsi]',
+            '    mov r14, rdx',
             '    mov eax, 57',
             '    syscall',
             '    test rax, rax',
             '    js .Llink_fork_error',
             '    jz .Llink_child',
             '    mov rdi, rax',
-            '    lea rsi, [rbp-24]',
+            '    lea rsi, [rbp-40]',
             '    xor edx, edx',
             '    xor r10d, r10d',
             '    mov eax, 61',
             '    syscall',
             '    test rax, rax',
             '    js .Llink_wait_error',
-            '    mov eax, DWORD PTR [rbp-24]',
+            '    mov eax, DWORD PTR [rbp-40]',
             '    mov edx, eax',
             '    and edx, 127',
             '    jnz .Llink_signaled',
@@ -1305,18 +1311,44 @@ export class X86_64Backend {
             '    mov eax, 127',
             '    jmp .Llink_done',
             '.Llink_child:',
-            '    sub rsp, 48',
+            '    mov rcx, QWORD PTR [r14]',
+            '    lea rax, [rcx+6]',
+            '    shl rax, 3',
+            '    add rax, 15',
+            '    and rax, -16',
+            '    sub rsp, rax',
+            '    mov r15, rsp',
             '    lea rax, [rip+.Llink_cc]',
-            '    mov QWORD PTR [rsp], rax',
+            '    mov QWORD PTR [r15], rax',
             '    lea rax, [rip+.Llink_no_pie]',
-            '    mov QWORD PTR [rsp+8], rax',
-            '    mov QWORD PTR [rsp+16], r12',
+            '    mov QWORD PTR [r15+8], rax',
+            '    mov QWORD PTR [r15+16], r12',
             '    lea rax, [rip+.Llink_output]',
-            '    mov QWORD PTR [rsp+24], rax',
-            '    mov QWORD PTR [rsp+32], r13',
-            '    mov QWORD PTR [rsp+40], 0',
+            '    mov QWORD PTR [r15+24], rax',
+            '    mov QWORD PTR [r15+32], r13',
+            '    xor r8d, r8d',
+            '.Llink_library_loop:',
+            '    cmp r8, QWORD PTR [r14]',
+            '    jae .Llink_library_done',
+            '    mov rax, QWORD PTR [r14+16]',
+            '    mov rax, QWORD PTR [rax+r8*8]',
+            '    mov r10, QWORD PTR [rax+8]',
+            '    lea rcx, [r10+3]',
+            '    sub rsp, rcx',
+            '    mov BYTE PTR [rsp], 45',
+            '    mov BYTE PTR [rsp+1], 108',
+            '    mov rsi, QWORD PTR [rax]',
+            '    lea rdi, [rsp+2]',
+            '    mov rcx, r10',
+            '    rep movsb',
+            '    mov BYTE PTR [rsp+r10+2], 0',
+            '    mov QWORD PTR [r15+r8*8+40], rsp',
+            '    inc r8',
+            '    jmp .Llink_library_loop',
+            '.Llink_library_done:',
+            '    mov QWORD PTR [r15+r8*8+40], 0',
             '    lea rdi, [rip+.Llink_cc]',
-            '    mov rsi, rsp',
+            '    mov rsi, r15',
             '    mov rdx, QWORD PTR [rip+argon_process_envp]',
             '    mov eax, 59',
             '    syscall',
@@ -1326,6 +1358,8 @@ export class X86_64Backend {
             '    ud2',
             '.Llink_done:',
             '    add rsp, 16',
+            '    pop r15',
+            '    pop r14',
             '    pop r13',
             '    pop r12',
             '    leave',

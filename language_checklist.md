@@ -83,7 +83,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 
 - [ ] Finalize package and module search-path rules
 - [ ] Define library versioning and compiled-library metadata
-- [ ] Define stable native and dynamic-library FFI boundaries
+- [x] Define stable native and dynamic-library FFI boundaries
 - [ ] Add diagnostic severity enums, notes, fix hints, and multi-span labels
 - [x] Add source-level test syntax and a native test runner
 - [ ] Add formatter rules while preserving optional condition parentheses

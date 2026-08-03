@@ -63,6 +63,8 @@ library Ast {{
         member body:Block?
         member isNative:bool
         member isUnsafe:bool
+        member foreignLibrary:string?
+        member foreignSymbol:string?
         member visibility:string
         member reference:bool
         member weakReference:bool
@@ -84,6 +86,8 @@ library Ast {{
             self.body = null
             self.isNative = false
             self.isUnsafe = false
+            self.foreignLibrary = null
+            self.foreignSymbol = null
             self.visibility = "public"
             self.reference = false
             self.weakReference = false

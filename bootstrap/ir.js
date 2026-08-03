@@ -12,6 +12,7 @@ export class IrGenerator {
             types: [],
             functions: [],
             externals: [],
+            foreignLibraries: [],
             entry: null
         };
 
@@ -188,6 +189,10 @@ export class IrGenerator {
         const symbol = declaration.semanticSymbol;
         const owner = ownerDeclaration.semanticSymbol;
         if (declaration.isNative) {
+            const foreignLibrary = declaration.foreignLibrary;
+            if (foreignLibrary && !this.program.foreignLibraries.includes(foreignLibrary)) {
+                this.program.foreignLibraries.push(foreignLibrary);
+            }
             this.program.externals.push({
                 kind: 'IrExternalFunction',
                 name: this.functionName(symbol),
@@ -197,7 +202,8 @@ export class IrGenerator {
                     type: parameter.type
                 })),
                 returnType: symbol.returnType,
-                runtimeSymbol: this.runtimeSymbol(symbol)
+                runtimeSymbol: foreignLibrary ? declaration.foreignSymbol : this.runtimeSymbol(symbol),
+                foreignLibrary
             });
             return;
         }

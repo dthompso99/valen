@@ -869,6 +869,7 @@ library Semantics {{
 
         analyzeMethod(method:Ast.MemberDeclaration, owner:Symbols.Symbol, moduleScope:Symbols.Scope) -> void {
             if method.isUnsafe && !method.isNative { self.error(method.span, "Only native library methods may be declared 'unsafe'") }
+            if method.foreignLibrary != null { self.validateForeignMethod(method) }
             if owner.kind == "Test" {
                 if method.name == "__" { self.error(method.span, "Test suites cannot declare constructors") }
                 if method.isNative { self.error(method.span, "Tests cannot be native") }
@@ -900,6 +901,39 @@ library Semantics {{
             if method.body != null { self.analyzeBlock(method.body!, scope, moduleScope, method.symbol!.returnType!, false) }
             self.currentOwner = previousOwner
             self.currentMethod = previousMethod
+        }
+
+        validateForeignMethod(method:Ast.MemberDeclaration) -> void {
+            if !method.isUnsafe { self.error(method.span, "Foreign method '" + method.symbol!.qualifiedName + "' must be declared unsafe") }
+            if !self.validForeignName(method.foreignLibrary!, true) { self.error(method.span, "Invalid foreign library name '" + method.foreignLibrary! + "'") }
+            if method.foreignSymbol == null || !self.validForeignName(method.foreignSymbol!, false) { self.error(method.span, "Invalid foreign symbol name") }
+            local index:i64 = 0
+            while index < method.symbol!.parameters.length {
+                local parameter = method.symbol!.parameters[index]
+                if !self.isForeignAbiType(parameter.typeName!, false) { self.error(parameter.span, "Foreign parameter '" + parameter.name + "' has unsupported ABI type '" + parameter.typeName! + "'") }
+                index = index + 1
+            }
+            if !self.isForeignAbiType(method.symbol!.returnType!, true) { self.error(method.span, "Foreign method has unsupported return ABI type '" + method.symbol!.returnType! + "'") }
+        }
+
+        isForeignAbiType(typeName:string, allowVoid:bool) -> bool {
+            if allowVoid && typeName == "void" { return true }
+            if self.isInteger(typeName) || typeName == "bool" { return true }
+            return self.isExternalResource(typeName)
+        }
+
+        validForeignName(value:string, allowPunctuation:bool) -> bool {
+            if value.length == 0 { return false }
+            local index:i64 = 0
+            while index < value.length {
+                local byte = value[index]
+                local valid = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 95
+                if allowPunctuation { valid = valid || byte == 46 || byte == 43 || byte == 45 }
+                if !valid { return false }
+                if index == 0 && !allowPunctuation && byte >= 48 && byte <= 57 { return false }
+                index = index + 1
+            }
+            return true
         }
 
         analyzeBlock(block:Ast.Block, parent:Symbols.Scope, moduleScope:Symbols.Scope, returnType:string, inLoop:bool) -> void {

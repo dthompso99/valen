@@ -155,6 +155,18 @@ library Parsing {{
             local returnReference = self.match("REF")
             method.returnType = self.parseTypeReference()
             method.returnReference = returnReference
+            if isNative {
+                if self.match("FROM") {
+                    local libraryToken = self.consume("STRING_LITERAL", "Expected a library name after 'from'")
+                    method.foreignLibrary = self.decodeString(libraryToken.lexeme)
+                    if self.match("AS") {
+                        local symbol = self.consume("STRING_LITERAL", "Expected a symbol name after 'as'")
+                        method.foreignSymbol = self.decodeString(symbol.lexeme)
+                    } else {
+                        method.foreignSymbol = method.name
+                    }
+                }
+            }
             if !isNative { method.body = self.parseBlock() }
             method.span = self.span(start.span, self.previous().span)
             return method

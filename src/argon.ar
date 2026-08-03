@@ -97,7 +97,7 @@ entry {{
                 System.writeError("\n")
                 return 74
             }
-            local linkResult = System.link(assemblyPath, outputPath!)
+            local linkResult = System.link(assemblyPath, outputPath!, ir.foreignLibraries)
             if linkResult != 0 {
                 System.writeError("argon: linker exited with status ")
                 System.writeError(linkResult.toString())

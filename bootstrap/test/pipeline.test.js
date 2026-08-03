@@ -272,6 +272,27 @@ test('unsafe native operations require an explicit lexical unsafe boundary', () 
     assert.match(invalid.diagnostics[0].message, /only be called inside an unsafe block/);
 });
 
+test('foreign native declarations lower explicit libraries and C symbols', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/foreign-libc.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    assert.deepEqual(ir.foreignLibraries, ['c']);
+    const external = ir.externals.find(item => item.displayName === 'Posix.processId');
+    assert.equal(external.runtimeSymbol, 'getpid');
+    assert.equal(external.foreignLibrary, 'c');
+    assert.match(new X86_64Backend().generate(ir), /\.extern getpid/);
+
+    for (const source of [
+        'library Bad {{ native call() -> i64 from "c" as "getpid" }}',
+        'library Bad {{ unsafe native call(value:string) -> i64 from "c" }}',
+        'library Bad {{ unsafe native call() -> i64 from "c;rm" }}'
+    ]) {
+        const result = new SemanticAnalyzer().analyze(new Parser().parse(source, 'invalid-ffi.ar'));
+        assert.equal(result.success, false);
+    }
+});
+
 test('generic objects monomorphize concrete invariant specializations', () => {
     const semantic = new SemanticAnalyzer().analyze(new Parser().parse(`
         Box<T> {{

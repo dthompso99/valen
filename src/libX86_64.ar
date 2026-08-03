@@ -83,6 +83,11 @@ library X86_64 {{
             self.writer.line(".intel_syntax noprefix")
             self.writer.line(".text")
             local index:i64 = 0
+            while index < self.program.externals.length {
+                if self.program.externals[index].foreignLibrary != null { self.writer.line(".extern " + self.program.externals[index].runtimeName) }
+                index = index + 1
+            }
+            index = 0
             while index < self.program.functions.length {
                 self.generateFunction(self.program.functions[index])
                 index = index + 1
@@ -638,7 +643,7 @@ library X86_64 {{
             self.writer.line("    call " + self.functionSymbol(instruction.target!))
             local stackBytes = stackCount * 8 + padding
             if stackBytes > 0 { self.writer.line("    add rsp, " + stackBytes.toString()) }
-            if instruction.result != null { self.storeResult(instruction, "rax") }
+            if instruction.result != null { self.normalize("rax", instruction.typeName!); self.storeResult(instruction, "rax") }
         }
 
         generateVirtualCall(instruction:Ir.Instruction) -> void {
@@ -662,7 +667,7 @@ library X86_64 {{
             self.writer.line("    call QWORD PTR [rax+" + (40 + instruction.slot * 8).toString() + "]")
             local stackBytes = stackCount * 8 + padding
             if stackBytes > 0 { self.writer.line("    add rsp, " + stackBytes.toString()) }
-            if instruction.result != null { self.storeResult(instruction, "rax") }
+            if instruction.result != null { self.normalize("rax", instruction.typeName!); self.storeResult(instruction, "rax") }
         }
 
         generateContractCall(instruction:Ir.Instruction) -> void {
@@ -706,7 +711,7 @@ library X86_64 {{
             self.writer.line("    call r11")
             local stackBytes = stackCount * 8 + padding
             if stackBytes > 0 { self.writer.line("    add rsp, " + stackBytes.toString()) }
-            if instruction.result != null { self.storeResult(instruction, "rax") }
+            if instruction.result != null { self.normalize("rax", instruction.typeName!); self.storeResult(instruction, "rax") }
         }
 
         generateMain() -> void {
@@ -1313,23 +1318,26 @@ library X86_64 {{
             self.writer.line("    mov rbp, rsp")
             self.writer.line("    push r12")
             self.writer.line("    push r13")
+            self.writer.line("    push r14")
+            self.writer.line("    push r15")
             self.writer.line("    sub rsp, 16")
             self.writer.line("    mov r12, QWORD PTR [rdi]")
             self.writer.line("    mov r13, QWORD PTR [rsi]")
+            self.writer.line("    mov r14, rdx")
             self.writer.line("    mov eax, 57")
             self.writer.line("    syscall")
             self.writer.line("    test rax, rax")
             self.writer.line("    js .Llink_fork_error")
             self.writer.line("    jz .Llink_child")
             self.writer.line("    mov rdi, rax")
-            self.writer.line("    lea rsi, [rbp-24]")
+            self.writer.line("    lea rsi, [rbp-40]")
             self.writer.line("    xor edx, edx")
             self.writer.line("    xor r10d, r10d")
             self.writer.line("    mov eax, 61")
             self.writer.line("    syscall")
             self.writer.line("    test rax, rax")
             self.writer.line("    js .Llink_wait_error")
-            self.writer.line("    mov eax, DWORD PTR [rbp-24]")
+            self.writer.line("    mov eax, DWORD PTR [rbp-40]")
             self.writer.line("    mov edx, eax")
             self.writer.line("    and edx, 127")
             self.writer.line("    jnz .Llink_signaled")
@@ -1344,18 +1352,44 @@ library X86_64 {{
             self.writer.line("    mov eax, 127")
             self.writer.line("    jmp .Llink_done")
             self.writer.line(".Llink_child:")
-            self.writer.line("    sub rsp, 48")
+            self.writer.line("    mov rcx, QWORD PTR [r14]")
+            self.writer.line("    lea rax, [rcx+6]")
+            self.writer.line("    shl rax, 3")
+            self.writer.line("    add rax, 15")
+            self.writer.line("    and rax, -16")
+            self.writer.line("    sub rsp, rax")
+            self.writer.line("    mov r15, rsp")
             self.writer.line("    lea rax, [rip+.Llink_cc]")
-            self.writer.line("    mov QWORD PTR [rsp], rax")
+            self.writer.line("    mov QWORD PTR [r15], rax")
             self.writer.line("    lea rax, [rip+.Llink_no_pie]")
-            self.writer.line("    mov QWORD PTR [rsp+8], rax")
-            self.writer.line("    mov QWORD PTR [rsp+16], r12")
+            self.writer.line("    mov QWORD PTR [r15+8], rax")
+            self.writer.line("    mov QWORD PTR [r15+16], r12")
             self.writer.line("    lea rax, [rip+.Llink_output]")
-            self.writer.line("    mov QWORD PTR [rsp+24], rax")
-            self.writer.line("    mov QWORD PTR [rsp+32], r13")
-            self.writer.line("    mov QWORD PTR [rsp+40], 0")
+            self.writer.line("    mov QWORD PTR [r15+24], rax")
+            self.writer.line("    mov QWORD PTR [r15+32], r13")
+            self.writer.line("    xor r8d, r8d")
+            self.writer.line(".Llink_library_loop:")
+            self.writer.line("    cmp r8, QWORD PTR [r14]")
+            self.writer.line("    jae .Llink_library_done")
+            self.writer.line("    mov rax, QWORD PTR [r14+16]")
+            self.writer.line("    mov rax, QWORD PTR [rax+r8*8]")
+            self.writer.line("    mov r10, QWORD PTR [rax+8]")
+            self.writer.line("    lea rcx, [r10+3]")
+            self.writer.line("    sub rsp, rcx")
+            self.writer.line("    mov BYTE PTR [rsp], 45")
+            self.writer.line("    mov BYTE PTR [rsp+1], 108")
+            self.writer.line("    mov rsi, QWORD PTR [rax]")
+            self.writer.line("    lea rdi, [rsp+2]")
+            self.writer.line("    mov rcx, r10")
+            self.writer.line("    rep movsb")
+            self.writer.line("    mov BYTE PTR [rsp+r10+2], 0")
+            self.writer.line("    mov QWORD PTR [r15+r8*8+40], rsp")
+            self.writer.line("    inc r8")
+            self.writer.line("    jmp .Llink_library_loop")
+            self.writer.line(".Llink_library_done:")
+            self.writer.line("    mov QWORD PTR [r15+r8*8+40], 0")
             self.writer.line("    lea rdi, [rip+.Llink_cc]")
-            self.writer.line("    mov rsi, rsp")
+            self.writer.line("    mov rsi, r15")
             self.writer.line("    mov rdx, QWORD PTR [rip+argon_process_envp]")
             self.writer.line("    mov eax, 59")
             self.writer.line("    syscall")
@@ -1365,6 +1399,8 @@ library X86_64 {{
             self.writer.line("    ud2")
             self.writer.line(".Llink_done:")
             self.writer.line("    add rsp, 16")
+            self.writer.line("    pop r15")
+            self.writer.line("    pop r14")
             self.writer.line("    pop r13")
             self.writer.line("    pop r12")
             self.writer.line("    leave")

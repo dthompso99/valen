@@ -97,6 +97,7 @@ library Ir {{
         member runtimeName:string
         member parameters:Array<ref Parameter>
         member returnType:string
+        member foreignLibrary:string?
 
         __(name:string, displayName:string, runtimeName:string, returnType:string) -> void {
             self.name = name
@@ -104,6 +105,7 @@ library Ir {{
             self.runtimeName = runtimeName
             self.parameters = new Array<ref Parameter>(0)
             self.returnType = returnType
+            self.foreignLibrary = null
         }
     }}
 
@@ -169,12 +171,14 @@ library Ir {{
         member types:Array<ref Type>
         member functions:Array<ref Function>
         member externals:Array<ref ExternalFunction>
+        member foreignLibraries:Array<string>
         member entry:string?
 
         __() -> void {
             self.types = new Array<ref Type>(0)
             self.functions = new Array<ref Function>(0)
             self.externals = new Array<ref ExternalFunction>(0)
+            self.foreignLibraries = new Array<string>(0)
             self.entry = null
         }
 
@@ -498,7 +502,19 @@ library Ir {{
         lowerMethod(method:Ast.MemberDeclaration, owner:Symbols.Symbol) -> void {
             local symbol = method.symbol!
             if method.isNative {
-                local external = new ExternalFunction(symbol.qualifiedName, symbol.qualifiedName, self.runtimeName(symbol), symbol.returnType!)
+                local runtimeName = self.runtimeName(symbol)
+                if method.foreignLibrary != null { runtimeName = method.foreignSymbol! }
+                local external = new ExternalFunction(symbol.qualifiedName, symbol.qualifiedName, runtimeName, symbol.returnType!)
+                external.foreignLibrary = method.foreignLibrary
+                if method.foreignLibrary != null {
+                    local found:bool = false
+                    local libraryIndex:i64 = 0
+                    while libraryIndex < self.program.foreignLibraries.length {
+                        if self.program.foreignLibraries[libraryIndex] == method.foreignLibrary! { found = true }
+                        libraryIndex = libraryIndex + 1
+                    }
+                    if !found { self.program.foreignLibraries.append(method.foreignLibrary!) }
+                }
                 local parameterIndex:i64 = 0
                 while parameterIndex < symbol.parameters.length {
                     local parameter = symbol.parameters[parameterIndex]

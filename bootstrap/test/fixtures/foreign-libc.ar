@@ -1,0 +1,16 @@
+library Posix {{
+    unsafe native processId() -> i32 from "c" as "getpid"
+    unsafe native closeInvalid(file:i32) -> i32 from "c" as "close"
+}}
+
+entry {{
+    __() -> i32 {
+        local pid:i32 = 0
+        unsafe { pid = Posix.processId() }
+        if pid <= 0 { return 1 }
+        local closeResult:i32 = 0
+        unsafe { closeResult = Posix.closeInvalid(-1) }
+        if closeResult != -1 { return 2 }
+        return 0
+    }
+}}
