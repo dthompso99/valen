@@ -28,3 +28,8 @@ Strings, arrays, builders, ordinary managed objects, callbacks, variadic
 functions and aggregates passed by value are rejected at
 the boundary. A wrapper library must translate those representations until a
 dedicated ABI rule is specified for them.
+
+Freestanding targets do not implicitly provide a C ABI or libc. A `from` declaration requires
+the target's explicit `foreign-abi` capability; otherwise it is a compile-time error. Plain
+`native` declarations may instead resolve to target runtime facilities or application hooks.
+See [the freestanding profile](docs/freestanding.md).

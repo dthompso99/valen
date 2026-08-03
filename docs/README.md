@@ -11,6 +11,7 @@ For compiler contributors:
 - [Compiler developer guide](compiler-guide.md) explains the bootstrap, self-hosted pipeline, repository layout, and tests.
 - [Contributor and agent guide](agent-guide.md) records the project’s working conventions.
 - [Bootstrap checklist](bootstrap_checklist.md) preserves the original self-hosting plan.
+- [Freestanding profile](freestanding.md) defines the capability boundary for kernels, firmware, and embedded targets.
 
 Focused technical references remain at the repository root:
 

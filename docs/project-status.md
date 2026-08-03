@@ -35,10 +35,13 @@
 - **WIP:** thread pools
 - **WIP:** event-loop executors for files and networking
 - **WIP:** additional operating systems and architectures
-- **WIP:** freestanding/kernel/embedded runtime subset
+- **WIP:** freestanding capability manifests, runtime hooks, startup, and code generation
 - **WIP:** broader platform capability discovery for native facilities
 
 Platforms without native threads are intended to use `InlineExecutor`; only x86-64 Linux native threading is currently implemented.
+
+The freestanding language/runtime capability profile is defined for future kernels, firmware,
+and embedded targets.
 
 ## WIP: compiler and tooling
 

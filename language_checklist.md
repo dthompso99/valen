@@ -115,4 +115,4 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 - [x] Retain JavaScript generation 0 as the stable path from zero; native generations have no JavaScript runtime dependency
 - [x] Stabilize the x86-64 Linux ABI and runtime
 - [ ] Add ARM64 and additional operating-system targets
-- [ ] Define the freestanding subset required for kernels and embedded systems
+- [x] Define the freestanding capability profile required for kernels and embedded systems
