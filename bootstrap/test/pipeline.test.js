@@ -271,6 +271,61 @@ test('unsafe native operations require an explicit lexical unsafe boundary', () 
     assert.match(invalid.diagnostics[0].message, /only be called inside an unsafe block/);
 });
 
+test('generic objects monomorphize concrete invariant specializations', () => {
+    const semantic = new SemanticAnalyzer().analyze(new Parser().parse(`
+        Box<T> {{
+            member value:T
+            __(value:T) -> void { self.value = value }
+            get() -> ref T { return self.value }
+        }}
+        Engine {{ member code:i64 }}
+        entry {{
+            __() -> i64 {
+                local engine = new Engine()
+                local box = new Box<Engine>(engine)
+                return box.get().code
+            }
+        }}
+    `, 'generic-object.ar'));
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    assert.ok(ir.types.some(type => type.name === 'Box<Engine>'));
+    assert.ok(ir.functions.some(fn => fn.owner === 'Box<Engine>' && fn.displayName.includes('.get')));
+    assert.doesNotThrow(() => new X86_64Backend().generate(ir));
+
+    const multiple = new SemanticAnalyzer().analyze(new Parser().parse(`
+        Box<T> {{ member value:T; __(value:T) -> void { self.value = value } }}
+        Animal {{}}
+        Dog inherits Animal {{}}
+        entry {{
+            __() -> void {
+                local animal = new Animal()
+                local dog = new Dog()
+                local animalBox = new Box<Animal>(animal)
+                local dogBox = new Box<Dog>(dog)
+            }
+        }}
+    `, 'generic-specializations.ar'));
+    assert.equal(multiple.success, true, JSON.stringify(multiple.diagnostics));
+    const multipleIr = new IrGenerator().generate(multiple);
+    assert.ok(multipleIr.types.some(type => type.name === 'Box<Animal>'));
+    assert.ok(multipleIr.types.some(type => type.name === 'Box<Dog>'));
+
+    const open = new SemanticAnalyzer().analyze(new Parser().parse(`
+        Box<T> {{ member value:T }}
+        entry {{ __() -> void { local box:Box } }}
+    `, 'open-generic.ar'));
+    assert.equal(open.success, false);
+    assert.match(open.diagnostics[0].message, /requires type arguments/);
+
+    const wrongArity = new SemanticAnalyzer().analyze(new Parser().parse(`
+        Pair<A, B> {{ member left:A; member right:B }}
+        entry {{ __() -> void { local pair:Pair<i64> } }}
+    `, 'generic-arity.ar'));
+    assert.equal(wrongArity.success, false);
+    assert.match(wrongArity.diagnostics[0].message, /requires 2 type arguments, got 1/);
+});
+
 test('unconditional field-initializer allocation cycles are rejected', () => {
     const cyclic = new SemanticAnalyzer().analyze(new Parser().parse(`
         First {{ member second:Second = new Second() }}

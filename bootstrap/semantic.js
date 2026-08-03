@@ -26,6 +26,7 @@ export class SemanticAnalyzer {
     analyze(program) {
         this.initialize();
         this.program = program;
+        this.prepareGenericSpecializations(program);
         for (const declaration of program.imports) this.declareImport(declaration);
         for (const declaration of program.objects) this.declareObject(declaration, null, this.globals);
         for (const declaration of program.libraries) this.declareObject(declaration, null, this.globals, 'Library');
@@ -68,6 +69,7 @@ export class SemanticAnalyzer {
 
         for (const module of graph.modules.values()) {
             this.moduleScopes.set(module, new Scope(this.globals, `module ${module.id}`, module.id));
+            this.prepareGenericSpecializations(module.program);
         }
         for (const module of graph.modules.values()) {
             const scope = this.moduleScopes.get(module);
@@ -115,6 +117,73 @@ export class SemanticAnalyzer {
                 this.annotate(imported.declaration, target.type, target);
             }
         }
+    }
+
+    prepareGenericSpecializations(program) {
+        const templates = new Map(program.objects.filter(item => item.typeParameters?.length).map(item => [item.name, item]));
+        if (templates.size === 0) return;
+        const concrete = new Map(program.objects.filter(item => !item.typeParameters?.length).map(item => [item.name, item]));
+        const pending = [];
+        const render = reference => {
+            const argumentsText = reference.typeArguments?.length ? `<${reference.typeArguments.map(render).join(',')}>` : '';
+            return `${reference.ownership && reference.ownership !== 'owned' ? `${reference.ownership} ` : ''}${reference.name}${argumentsText}${reference.optional ? '?' : ''}`;
+        };
+        const substitute = (node, bindings) => {
+            if (!node || typeof node !== 'object') return;
+            if (node.kind === 'TypeReference' && bindings.has(node.name) && node.typeArguments.length === 0) {
+                const replacement = structuredClone(bindings.get(node.name));
+                const span = node.span;
+                Object.assign(node, replacement, {span});
+                return;
+            }
+            for (const value of Object.values(node)) {
+                if (Array.isArray(value)) for (const child of value) substitute(child, bindings);
+                else substitute(value, bindings);
+            }
+        };
+        const specialize = (template, argumentsList, span) => {
+            if (argumentsList.length !== template.typeParameters.length) {
+                this.report(span, `Generic type '${template.name}' requires ${template.typeParameters.length} type arguments, got ${argumentsList.length}`);
+                return template.name;
+            }
+            const name = `${template.name}<${argumentsList.map(render).join(',')}>`;
+            if (!concrete.has(name)) {
+                const declaration = structuredClone(template);
+                declaration.name = name;
+                declaration.typeParameters = [];
+                declaration.genericTemplateName = template.name;
+                declaration.genericArguments = argumentsList.map(argument => structuredClone(argument));
+                substitute(declaration, new Map(template.typeParameters.map((parameter, index) => [parameter, argumentsList[index]])));
+                concrete.set(name, declaration);
+                program.objects.push(declaration);
+                pending.push(declaration);
+            }
+            return name;
+        };
+        const visit = node => {
+            if (!node || typeof node !== 'object') return;
+            if (node.kind === 'ObjectDeclaration' && node.typeParameters?.length) return;
+            if (node.kind === 'TypeReference' && templates.has(node.name)) {
+                if (node.typeArguments.length === 0) this.report(node.span, `Generic type '${node.name}' requires type arguments`);
+                else {
+                    node.name = specialize(templates.get(node.name), node.typeArguments, node.span);
+                    node.typeArguments = [];
+                }
+            } else if (node.kind === 'NewExpression' && node.callee?.kind === 'IdentifierExpression' && templates.has(node.callee.name)) {
+                if (node.typeArguments.length === 0) this.report(node.span, `Generic type '${node.callee.name}' requires type arguments`);
+                else {
+                    node.callee.name = specialize(templates.get(node.callee.name), node.typeArguments, node.span);
+                    node.typeArguments = [];
+                }
+            }
+            for (const value of Object.values(node)) {
+                if (Array.isArray(value)) for (const child of value) visit(child);
+                else visit(value);
+            }
+        };
+        for (const declaration of [...program.objects, ...program.libraries]) visit(declaration);
+        while (pending.length) visit(pending.shift());
+        program.objects = program.objects.filter(item => !item.typeParameters?.length);
     }
 
     declareImport(declaration) {

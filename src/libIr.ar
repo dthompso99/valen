@@ -259,7 +259,7 @@ library Ir {{
                 local declarations = self.analysis.graph.modules[moduleIndex].program.declarations
                 local index:i64 = 0
                 while index < declarations.length {
-                    self.declareContainer(declarations[index])
+                    if declarations[index].typeParameters.length == 0 { self.declareContainer(declarations[index]) }
                     index = index + 1
                 }
                 moduleIndex = moduleIndex + 1
@@ -269,7 +269,7 @@ library Ir {{
                 local declarations = self.analysis.graph.modules[moduleIndex].program.declarations
                 local index:i64 = 0
                 while index < declarations.length {
-                    self.lowerContainer(declarations[index])
+                    if declarations[index].typeParameters.length == 0 { self.lowerContainer(declarations[index]) }
                     index = index + 1
                 }
                 moduleIndex = moduleIndex + 1

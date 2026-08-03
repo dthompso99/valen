@@ -47,6 +47,14 @@ library Parsing {{
             local start = self.peek(0)
             if kind == "Library" { start = self.consume("LIBRARY", "Expected 'library'") }
             local name = self.consume("IDENTIFIER", "Expected a declaration name")
+            local typeParameters = new Array<string>(0)
+            if kind == "Object" {
+                if self.match("LESS") {
+                    typeParameters.append(self.consume("IDENTIFIER", "Expected a type parameter name").lexeme)
+                    while self.match("COMMA") { typeParameters.append(self.consume("IDENTIFIER", "Expected a type parameter name").lexeme) }
+                    self.consume("GREATER", "Expected '>' after type parameters")
+                }
+            }
             local inheritedType:Ast.TypeReference? = null
             local implementedTypes = new Array<Ast.TypeReference>(0)
             if kind == "Object" {
@@ -70,6 +78,7 @@ library Parsing {{
             local declaration = new Ast.Declaration(kind, name.lexeme, members, self.span(start.span, end.span))
             declaration.inheritedType = inheritedType
             declaration.implementedTypes = implementedTypes
+            declaration.typeParameters = typeParameters
             return declaration
         }
 
@@ -89,6 +98,7 @@ library Parsing {{
                 nested.members = declaration.members
                 nested.inheritedType = declaration.inheritedType
                 nested.implementedTypes = declaration.implementedTypes
+                nested.typeParameters = declaration.typeParameters
                 nested.visibility = visibility
                 return nested
             }

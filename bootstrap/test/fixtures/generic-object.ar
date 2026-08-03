@@ -1,0 +1,23 @@
+Box<T> {{
+    member value:T
+
+    __(value:T) -> void {
+        self.value = value
+    }
+
+    get() -> ref T {
+        return self.value
+    }
+}}
+
+Engine {{
+    member code:i64 = 42
+}}
+
+entry {{
+    __() -> i64 {
+        local engine = new Engine()
+        local box = new Box<Engine>(engine)
+        return box.get().code - 42
+    }
+}}

@@ -42,7 +42,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/ar
 
 ## 3. Type-system expansion
 
-- [ ] Add general-purpose generics beyond `Array<T>`
+- [x] Add general-purpose generic objects beyond `Array<T>` using invariant monomorphized specializations
 - [ ] Define generic constraints using interfaces or another contract mechanism
 - [ ] Add optional value types for stack primitives
 - [ ] Add flow-sensitive optional narrowing

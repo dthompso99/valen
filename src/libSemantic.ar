@@ -48,6 +48,7 @@ library Semantics {{
 
         analyze() -> Analysis {
             self.defineBuiltins()
+            self.prepareGenericSpecializations()
             self.createModuleScopes()
             self.declareModules()
             self.bindImports()
@@ -58,6 +59,187 @@ library Semantics {{
             self.analyzeModules()
             self.validateFieldInitializerCycles()
             return new Analysis(self.graph, self.diagnostics)
+        }
+
+        prepareGenericSpecializations() -> void {
+            local moduleIndex:i64 = 0
+            while moduleIndex < self.graph.modules.length {
+                local program = self.graph.modules[moduleIndex].program
+                local index:i64 = 0
+                while index < program.declarations.length {
+                    if program.declarations[index].typeParameters.length == 0 { self.visitGenericDeclaration(program, program.declarations[index]) }
+                    index = index + 1
+                }
+                moduleIndex = moduleIndex + 1
+            }
+        }
+
+        visitGenericDeclaration(program:Ast.Program, declaration:Ast.Declaration) -> void {
+            if declaration.inheritedType != null { self.visitGenericType(program, declaration.inheritedType!) }
+            local index:i64 = 0
+            while index < declaration.implementedTypes.length { self.visitGenericType(program, declaration.implementedTypes[index]); index = index + 1 }
+            index = 0
+            while index < declaration.members.length { self.visitGenericMember(program, declaration.members[index]); index = index + 1 }
+        }
+
+        visitGenericMember(program:Ast.Program, memberNode:Ast.MemberDeclaration) -> void {
+            if memberNode.declaredType != null { self.visitGenericType(program, memberNode.declaredType!) }
+            if memberNode.returnType != null { self.visitGenericType(program, memberNode.returnType!) }
+            if memberNode.initializer != null { self.visitGenericExpression(program, memberNode.initializer!) }
+            local index:i64 = 0
+            while index < memberNode.parameters.length {
+                self.visitGenericType(program, memberNode.parameters[index].parameterType)
+                if memberNode.parameters[index].defaultValue != null { self.visitGenericExpression(program, memberNode.parameters[index].defaultValue!) }
+                index = index + 1
+            }
+            if memberNode.body != null { self.visitGenericBlock(program, memberNode.body!) }
+            index = 0
+            while index < memberNode.members.length { self.visitGenericMember(program, memberNode.members[index]); index = index + 1 }
+        }
+
+        visitGenericBlock(program:Ast.Program, block:Ast.Block) -> void {
+            local index:i64 = 0
+            while index < block.statements.length {
+                local statement = block.statements[index]
+                if statement.declaredType != null { self.visitGenericType(program, statement.declaredType!) }
+                if statement.expression != null { self.visitGenericExpression(program, statement.expression!) }
+                if statement.condition != null { self.visitGenericExpression(program, statement.condition!) }
+                if statement.body != null { self.visitGenericBlock(program, statement.body!) }
+                if statement.alternate != null { self.visitGenericBlock(program, statement.alternate!) }
+                index = index + 1
+            }
+        }
+
+        visitGenericExpression(program:Ast.Program, expression:Ast.Expression) -> void {
+            if expression.kind == "New" {
+                if expression.left != null {
+                    if expression.left!.kind == "Identifier" {
+                        local template = self.findGenericTemplate(program, expression.left!.name!)
+                        if template != null {
+                            if expression.typeArguments.length == 0 {
+                                self.error(expression.span, "Generic type '" + template!.name + "' requires type arguments")
+                            } else {
+                                expression.left!.name = self.specializeGeneric(program, template!, expression.typeArguments, expression.span)
+                                expression.typeArguments = new Array<Ast.TypeReference>(0)
+                            }
+                        }
+                    }
+                }
+            }
+            local index:i64 = 0
+            while index < expression.typeArguments.length { self.visitGenericType(program, expression.typeArguments[index]); index = index + 1 }
+            if expression.left != null { self.visitGenericExpression(program, expression.left!) }
+            if expression.right != null { self.visitGenericExpression(program, expression.right!) }
+            index = 0
+            while index < expression.arguments.length { self.visitGenericExpression(program, expression.arguments[index]); index = index + 1 }
+        }
+
+        visitGenericType(program:Ast.Program, reference:Ast.TypeReference) -> void {
+            local index:i64 = 0
+            while index < reference.arguments.length { self.visitGenericType(program, reference.arguments[index]); index = index + 1 }
+            local template = self.findGenericTemplate(program, reference.name)
+            if template == null { return }
+            if reference.arguments.length == 0 { self.error(reference.span, "Generic type '" + reference.name + "' requires type arguments"); return }
+            reference.name = self.specializeGeneric(program, template!, reference.arguments, reference.span)
+            reference.arguments = new Array<Ast.TypeReference>(0)
+        }
+
+        specializeGeneric(program:Ast.Program, template:Ast.Declaration, arguments:Array<Ast.TypeReference>, span:Compiler.SourceSpan) -> string {
+            if arguments.length != template.typeParameters.length {
+                self.error(span, "Generic type '" + template.name + "' requires " + template.typeParameters.length.toString() + " type arguments, got " + arguments.length.toString())
+                return template.name
+            }
+            local name = template.name + "<"
+            local index:i64 = 0
+            while index < arguments.length { if index > 0 { name = name + "," }; name = name + self.renderGenericType(arguments[index]); index = index + 1 }
+            name = name + ">"
+            index = 0
+            while index < program.declarations.length { if program.declarations[index].name == name { return name }; index = index + 1 }
+            local declaration = copy template
+            declaration.name = name
+            declaration.typeParameters = new Array<string>(0)
+            self.substituteDeclaration(declaration, template.typeParameters, arguments)
+            program.declarations.append(declaration)
+            self.visitGenericDeclaration(program, declaration)
+            return name
+        }
+
+        renderGenericType(reference:Ast.TypeReference) -> string {
+            local result = reference.name
+            if reference.arguments.length > 0 {
+                result = result + "<"
+                local index:i64 = 0
+                while index < reference.arguments.length { if index > 0 { result = result + "," }; result = result + self.renderGenericType(reference.arguments[index]); index = index + 1 }
+                result = result + ">"
+            }
+            if reference.optional { result = result + "?" }
+            return result
+        }
+
+        substituteDeclaration(declaration:Ast.Declaration, parameters:Array<string>, arguments:Array<Ast.TypeReference>) -> void {
+            if declaration.inheritedType != null { self.substituteType(declaration.inheritedType!, parameters, arguments) }
+            local index:i64 = 0
+            while index < declaration.implementedTypes.length { self.substituteType(declaration.implementedTypes[index], parameters, arguments); index = index + 1 }
+            index = 0
+            while index < declaration.members.length { self.substituteMember(declaration.members[index], parameters, arguments); index = index + 1 }
+        }
+
+        substituteMember(memberNode:Ast.MemberDeclaration, parameters:Array<string>, arguments:Array<Ast.TypeReference>) -> void {
+            if memberNode.declaredType != null { self.substituteType(memberNode.declaredType!, parameters, arguments) }
+            if memberNode.returnType != null { self.substituteType(memberNode.returnType!, parameters, arguments) }
+            local index:i64 = 0
+            while index < memberNode.parameters.length { self.substituteType(memberNode.parameters[index].parameterType, parameters, arguments); index = index + 1 }
+            if memberNode.body != null { self.substituteBlock(memberNode.body!, parameters, arguments) }
+            index = 0
+            while index < memberNode.members.length { self.substituteMember(memberNode.members[index], parameters, arguments); index = index + 1 }
+        }
+
+        substituteBlock(block:Ast.Block, parameters:Array<string>, arguments:Array<Ast.TypeReference>) -> void {
+            local index:i64 = 0
+            while index < block.statements.length {
+                local statement = block.statements[index]
+                if statement.declaredType != null { self.substituteType(statement.declaredType!, parameters, arguments) }
+                if statement.expression != null { self.substituteExpression(statement.expression!, parameters, arguments) }
+                if statement.condition != null { self.substituteExpression(statement.condition!, parameters, arguments) }
+                if statement.body != null { self.substituteBlock(statement.body!, parameters, arguments) }
+                if statement.alternate != null { self.substituteBlock(statement.alternate!, parameters, arguments) }
+                index = index + 1
+            }
+        }
+
+        substituteExpression(expression:Ast.Expression, parameters:Array<string>, arguments:Array<Ast.TypeReference>) -> void {
+            local index:i64 = 0
+            while index < expression.typeArguments.length { self.substituteType(expression.typeArguments[index], parameters, arguments); index = index + 1 }
+            if expression.left != null { self.substituteExpression(expression.left!, parameters, arguments) }
+            if expression.right != null { self.substituteExpression(expression.right!, parameters, arguments) }
+            index = 0
+            while index < expression.arguments.length { self.substituteExpression(expression.arguments[index], parameters, arguments); index = index + 1 }
+        }
+
+        substituteType(reference:Ast.TypeReference, parameters:Array<string>, arguments:Array<Ast.TypeReference>) -> void {
+            local index:i64 = 0
+            while index < parameters.length {
+                if reference.name == parameters[index] && reference.arguments.length == 0 {
+                    local replacement = copy arguments[index]
+                    reference.name = replacement.name
+                    reference.arguments = replacement.arguments
+                    if replacement.optional { reference.optional = true }
+                    return
+                }
+                index = index + 1
+            }
+            index = 0
+            while index < reference.arguments.length { self.substituteType(reference.arguments[index], parameters, arguments); index = index + 1 }
+        }
+
+        findGenericTemplate(program:Ast.Program, name:string) -> ref Ast.Declaration? {
+            local index:i64 = 0
+            while index < program.declarations.length {
+                local declaration = program.declarations[index]
+                if declaration.name == name && declaration.typeParameters.length > 0 { return declaration }
+                index = index + 1
+            }
+            return null
         }
 
         defineBuiltins() -> void {
@@ -94,7 +276,7 @@ library Semantics {{
                 local item = self.modules[index]
                 local declarationIndex:i64 = 0
                 while declarationIndex < item.module.program.declarations.length {
-                    self.declareDeclaration(item.module.program.declarations[declarationIndex], item.scope, null, "")
+                    if item.module.program.declarations[declarationIndex].typeParameters.length == 0 { self.declareDeclaration(item.module.program.declarations[declarationIndex], item.scope, null, "") }
                     declarationIndex = declarationIndex + 1
                 }
                 index = index + 1
@@ -162,7 +344,7 @@ library Semantics {{
                 local index:i64 = 0
                 while index < item.module.program.declarations.length {
                     local declaration = item.module.program.declarations[index]
-                    self.declareMemberList(declaration.members, declaration.symbol!, item.scope)
+                    if declaration.typeParameters.length == 0 { self.declareMemberList(declaration.members, declaration.symbol!, item.scope) }
                     index = index + 1
                 }
                 moduleIndex = moduleIndex + 1
@@ -243,7 +425,7 @@ library Semantics {{
                 local declarations = self.modules[moduleIndex].module.program.declarations
                 local index:i64 = 0
                 while index < declarations.length {
-                    self.bindDeclarationRelationships(declarations[index])
+                    if declarations[index].typeParameters.length == 0 { self.bindDeclarationRelationships(declarations[index]) }
                     index = index + 1
                 }
                 moduleIndex = moduleIndex + 1
@@ -296,7 +478,7 @@ library Semantics {{
                 local declarations = self.modules[moduleIndex].module.program.declarations
                 local index:i64 = 0
                 while index < declarations.length {
-                    self.validateDeclarationRelationships(declarations[index])
+                    if declarations[index].typeParameters.length == 0 { self.validateDeclarationRelationships(declarations[index]) }
                     index = index + 1
                 }
                 moduleIndex = moduleIndex + 1
@@ -655,7 +837,7 @@ library Semantics {{
                 local index:i64 = 0
                 while index < item.module.program.declarations.length {
                     local declaration = item.module.program.declarations[index]
-                    self.analyzeMemberList(declaration.members, declaration.symbol!, item.scope)
+                    if declaration.typeParameters.length == 0 { self.analyzeMemberList(declaration.members, declaration.symbol!, item.scope) }
                     index = index + 1
                 }
                 moduleIndex = moduleIndex + 1
@@ -1247,7 +1429,7 @@ library Semantics {{
             while moduleIndex < self.graph.modules.length {
                 local index:i64 = 0
                 while index < self.graph.modules[moduleIndex].program.declarations.length {
-                    self.validateInitializerDeclaration(self.graph.modules[moduleIndex].program.declarations[index])
+                    if self.graph.modules[moduleIndex].program.declarations[index].typeParameters.length == 0 { self.validateInitializerDeclaration(self.graph.modules[moduleIndex].program.declarations[index]) }
                     index = index + 1
                 }
                 moduleIndex = moduleIndex + 1
