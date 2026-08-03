@@ -1,5 +1,5 @@
-import Ir from 'libIr.ar'
-import System from 'libSystem.ar'
+import Ir from './libIr.ar'
+import System from './libSystem.ar'
 
 library IrValidation {{
     FoldedConstant {{

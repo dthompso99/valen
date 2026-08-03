@@ -31,11 +31,14 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     const levelFlag = args.find(argument => /^-O/.test(argument));
     if (levelFlag && !['-O0', '-O1'].includes(levelFlag)) throw new Error(`Unsupported optimization level '${levelFlag}'`);
     const optimizationLevel = levelFlag === '-O0' ? 0 : 1;
-    const positional = args.filter(argument => argument !== levelFlag);
+    const sourceRootIndex = args.indexOf('--source-root');
+    if (sourceRootIndex >= 0 && !args[sourceRootIndex + 1]) throw new Error('--source-root requires a directory');
+    const sourceRoot = sourceRootIndex >= 0 ? args[sourceRootIndex + 1] : undefined;
+    const positional = args.filter((argument, index) => argument !== levelFlag && (sourceRootIndex < 0 || index !== sourceRootIndex && index !== sourceRootIndex + 1));
     const emitObject = positional[0] === '--emit-object';
     const sourcePath = positional[emitObject ? 1 : 0];
     const outputPath = positional[emitObject ? 2 : 1] ?? (emitObject ? 'a.o' : 'a.out');
     if (!sourcePath) throw new Error('Usage: node compiler.js [-O0|-O1] <source-file> [output]');
-    if (emitObject) new Compiler().emitObject(sourcePath, outputPath, {optimizationLevel});
-    else new Compiler().compile(sourcePath, outputPath, {optimizationLevel});
+    if (emitObject) new Compiler().emitObject(sourcePath, outputPath, {optimizationLevel, sourceRoot});
+    else new Compiler().compile(sourcePath, outputPath, {optimizationLevel, sourceRoot});
 }

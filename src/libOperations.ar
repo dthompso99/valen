@@ -1,4 +1,4 @@
-import EventLoop from 'libEventLoop.ar'
+import EventLoop from './libEventLoop.ar'
 
 library Operations {{
     native threadAvailable() -> bool

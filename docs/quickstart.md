@@ -26,6 +26,11 @@ Tell the compiler where the standard source libraries live:
 export VALEN_LIBRARY_PATH="$PWD/lib"
 ```
 
+Entries in `VALEN_LIBRARY_PATH` may live anywhere on the filesystem and are searched in order.
+Use explicit `./` or `../` imports for project-local modules, `/` for project-root-relative imports,
+and bare names for external libraries. For builds launched outside the project root, pass
+`--source-root <directory>`.
+
 The former `ARGON_LIBRARY_PATH`, `ARGON_CACHE_PATH`, and `ARGON_CACHE_TRACE` names remain temporary compatibility aliases. New tooling should use the `VALEN_*` names.
 
 For repeat native builds, create a cache directory and opt into compiler caching:

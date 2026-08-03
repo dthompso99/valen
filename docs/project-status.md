@@ -14,7 +14,7 @@
 - optionals for references
 - ownership transfer, borrowed/weak references, `copy`, and `delete`
 - tracing garbage collection and cycle-safe equality/hashing
-- modules loaded from source and `VALEN_LIBRARY_PATH`
+- deterministic importer-relative, project-root, and external `VALEN_LIBRARY_PATH` source modules with owning-root confinement
 - source-level tests and native test execution
 - native/C FFI boundaries
 - inline operations, single-worker native execution, mutexes, conditions, and atomics

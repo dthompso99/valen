@@ -1,8 +1,8 @@
-import Ast from 'libAst.ar'
-import Compiler from 'libCompiler.ar'
-import Symbols from 'libSymbols.ar'
-import Diagnostics from 'libDiagnostics.ar'
-import ModuleLoading from 'libModuleLoader.ar'
+import Ast from './libAst.ar'
+import Compiler from './libCompiler.ar'
+import Symbols from './libSymbols.ar'
+import Diagnostics from './libDiagnostics.ar'
+import ModuleLoading from './libModuleLoader.ar'
 
 library Semantics {{
     ModuleScope {{

@@ -1,6 +1,6 @@
-import Ast from 'libAst.ar'
-import Symbols from 'libSymbols.ar'
-import Semantics from 'libSemantic.ar'
+import Ast from './libAst.ar'
+import Symbols from './libSymbols.ar'
+import Semantics from './libSemantic.ar'
 
 library Ir {{
     Value {{

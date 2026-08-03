@@ -223,6 +223,23 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             assert.match(unsupported.stderr, /unsupported optimization level '-O2'/);
         });
 
+        await t.test('native module resolution separates project and external library roots', () => {
+            const fixtureRoot = path.join(projectRoot, 'bootstrap/test/fixtures/library-path');
+            const moduleEnvironment = {...environment, VALEN_LIBRARY_PATH: path.join(fixtureRoot, 'lib')};
+            const executable = path.join(directory, 'library-path');
+            const compile = spawnSync(compilerPath, ['--source-root', path.join(fixtureRoot, 'app'), 'main.ar', '-o', executable], {
+                encoding: 'utf8', env: moduleEnvironment, cwd: projectRoot
+            });
+            assert.equal(compile.status, 0, compile.stderr || compile.stdout);
+            assert.equal(spawnSync(executable).status, 0, 'bare import resolved to the project-local shadow instead of VALEN_LIBRARY_PATH');
+
+            const escaped = spawnSync(compilerPath, ['--source-root', path.join(fixtureRoot, 'app'), 'escape.ar'], {
+                encoding: 'utf8', env: moduleEnvironment, cwd: projectRoot
+            });
+            assert.equal(escaped.status, 65);
+            assert.match(escaped.stderr, /escapes its owning root/);
+        });
+
         let sequence = 0;
         for (const fixture of validPrograms) {
             await t.test(fixture.name, () => {

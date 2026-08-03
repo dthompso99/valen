@@ -1,5 +1,5 @@
-import Compiler from 'libCompiler.ar'
-import Symbols from 'libSymbols.ar'
+import Compiler from './libCompiler.ar'
+import Symbols from './libSymbols.ar'
 
 library Ast {{
     Program {{

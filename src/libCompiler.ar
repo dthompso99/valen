@@ -1,4 +1,4 @@
-import System from 'libSystem.ar'
+import System from './libSystem.ar'
 
 library Compiler {{
     loadSource(path:string) -> SourceFile? {

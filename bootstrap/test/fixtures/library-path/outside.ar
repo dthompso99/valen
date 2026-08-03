@@ -1,0 +1,3 @@
+library Outside {{
+    answer() -> i64 { return 0 }
+}}

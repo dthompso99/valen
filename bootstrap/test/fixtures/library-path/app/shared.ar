@@ -1,0 +1,3 @@
+library Shadowed {{
+    answer() -> i64 { return 9 }
+}}

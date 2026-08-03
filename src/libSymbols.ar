@@ -1,4 +1,4 @@
-import Compiler from 'libCompiler.ar'
+import Compiler from './libCompiler.ar'
 
 library Symbols {{
     Symbol {{

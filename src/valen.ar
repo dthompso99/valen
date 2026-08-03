@@ -1,15 +1,15 @@
-import System from 'libSystem.ar'
-import Compiler from 'libCompiler.ar'
-import Ast from 'libAst.ar'
-import Parsing from 'libParser.ar'
-import Diagnostics from 'libDiagnostics.ar'
-import ModuleLoading from 'libModuleLoader.ar'
-import Semantics from 'libSemantic.ar'
-import Ir from 'libIr.ar'
-import IrValidation from 'libIrValidation.ar'
-import X86_64 from 'libX86_64.ar'
-import X86Object from 'libX86Object.ar'
-import CompilerCache from 'libCompilerCache.ar'
+import System from './libSystem.ar'
+import Compiler from './libCompiler.ar'
+import Ast from './libAst.ar'
+import Parsing from './libParser.ar'
+import Diagnostics from './libDiagnostics.ar'
+import ModuleLoading from './libModuleLoader.ar'
+import Semantics from './libSemantic.ar'
+import Ir from './libIr.ar'
+import IrValidation from './libIrValidation.ar'
+import X86_64 from './libX86_64.ar'
+import X86Object from './libX86Object.ar'
+import CompilerCache from './libCompilerCache.ar'
 
 entry {{
     __() -> i32 {
@@ -18,10 +18,16 @@ entry {{
         local compilerArguments = new Array<string>(0)
         compilerArguments.append(arguments[0])
         local optimizationLevel:i64 = 1
+        local configuredSourceRoot:string? = null
         local argumentIndex:i64 = 1
         while argumentIndex < arguments.length {
             local argument = arguments[argumentIndex]
-            if argument == "-O0" { optimizationLevel = 0 }
+            if argument == "--source-root" {
+                if argumentIndex + 1 >= arguments.length { System.writeError("valen: --source-root requires a directory\n"); return 64 }
+                configuredSourceRoot = arguments[argumentIndex + 1]
+                argumentIndex = argumentIndex + 1
+            }
+            else { if argument == "-O0" { optimizationLevel = 0 }
             else {
                 if argument == "-O1" { optimizationLevel = 1 }
                 else {
@@ -31,7 +37,7 @@ entry {{
                     }
                     compilerArguments.append(argument)
                 }
-            }
+            } }
             argumentIndex = argumentIndex + 1
         }
         if compilerArguments.length == 2 {
@@ -84,9 +90,13 @@ entry {{
             System.writeError("valen: could not determine current directory\n")
             return 74
         }
+        local sourceRoot = cwd!
+        if configuredSourceRoot != null {
+            if configuredSourceRoot!.length > 0 { if configuredSourceRoot![0] == 47 { sourceRoot = configuredSourceRoot! } else { sourceRoot = cwd! + "/" + configuredSourceRoot! } }
+        }
         local libraryPath = System.environmentVariable("VALEN_LIBRARY_PATH")
         if libraryPath == null { libraryPath = System.environmentVariable("ARGON_LIBRARY_PATH") }
-        local loader = new ModuleLoading.ModuleLoader(cwd!, libraryPath)
+        local loader = new ModuleLoading.ModuleLoader(sourceRoot, libraryPath)
         local graph = loader.load(sourcePath!)
         if graph.diagnostics.hasErrors() {
             Diagnostics.write(graph.diagnostics)
@@ -223,6 +233,7 @@ entry {{
     writeUsage() -> void {
         System.write("usage:\n")
         System.write("  optimization: -O0 (no optional optimization), -O1 (default)\n")
+        System.write("  source root: --source-root <directory>\n")
         System.write("  valen <source-file>\n")
         System.write("  valen <source-file> -o <executable>\n")
         System.write("  valen --check <source-file>\n")

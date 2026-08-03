@@ -1,5 +1,5 @@
-import System from 'libSystem.ar'
-import Compiler from 'libCompiler.ar'
+import System from './libSystem.ar'
+import Compiler from './libCompiler.ar'
 
 library Diagnostics {{
     errorSeverity() -> u8 { return 1 }

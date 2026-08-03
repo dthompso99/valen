@@ -1,4 +1,4 @@
-import Operations from 'operations.ar'
+import Operations from './operations.ar'
 
 BaseTask implements Operations.Operation {{
     member state:i64 = 0

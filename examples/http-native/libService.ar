@@ -1,6 +1,6 @@
 import Network from 'libNetwork.ar'
 import EventLoop from 'libEventLoop.ar'
-import Http from 'libHttp.ar'
+import Http from './libHttp.ar'
 
 library Service {{
     Client {{

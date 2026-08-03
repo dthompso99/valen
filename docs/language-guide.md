@@ -10,7 +10,16 @@ Source files use the `.ar` extension. Import a named library from another source
 import System from 'libSystem.ar'
 ```
 
-Resolution checks the importing file’s directory and then directories in `VALEN_LIBRARY_PATH`.
+Import spelling determines resolution without fallback between categories:
+
+- `./module.ar` and `../module.ar` are relative to the importer and must remain inside that module's owning project or library root.
+- `/src/module.ar` is relative to the configured project source root, never the filesystem root.
+- `module.ar` and `package/module.ar` are library imports searched through `VALEN_LIBRARY_PATH` in declared order.
+
+Every import includes its `.ar` extension. Library imports cannot contain `..`. Each
+`VALEN_LIBRARY_PATH` entry may be anywhere accessible on the filesystem; relative imports made
+inside that library remain confined to that library entry. The native compiler accepts
+`--source-root <directory>` and otherwise uses its current working directory.
 
 ```valen
 library Tools {{
@@ -18,7 +27,7 @@ library Tools {{
 }}
 ```
 
-Package metadata, library versions, compiled modules, and finalized search-path rules are **WIP**.
+Package metadata, library versions, and compiled modules are **WIP**.
 
 ## Native networking
 

@@ -16,11 +16,11 @@ export class ModuleLoader {
     load(entryPath) {
         const entry = path.resolve(entryPath);
         if (!this.sourceRoot) this.sourceRoot = path.dirname(entry);
-        const entryModule = this.loadModule(entry, null);
+        const entryModule = this.loadModule(entry, null, this.sourceRoot);
         return {entry: entryModule, modules: this.modules, diagnostics: this.diagnostics};
     }
 
-    loadModule(filePath, importDeclaration) {
+    loadModule(filePath, importDeclaration, owningRoot) {
         const canonicalPath = this.canonicalize(filePath);
         const existing = this.modules.get(canonicalPath);
         if (existing) {
@@ -42,14 +42,15 @@ export class ModuleLoader {
             path: canonicalPath,
             id: this.moduleId(canonicalPath),
             program: new Parser().parse(source, canonicalPath),
-            imports: new Map()
+            imports: new Map(),
+            owningRoot
         };
         this.modules.set(canonicalPath, module);
         this.loading.push(canonicalPath);
 
         for (const declaration of module.program.imports) {
-            const importedPath = this.resolveImport(canonicalPath, declaration.path);
-            const imported = this.loadModule(importedPath, declaration);
+            const resolved = this.resolveImport(module, declaration.path, declaration.span);
+            const imported = resolved ? this.loadModule(resolved.path, declaration, resolved.root) : null;
             if (module.imports.has(declaration.name)) {
                 this.report(declaration.span, `Duplicate import '${declaration.name}'`);
             } else if (imported) {
@@ -61,19 +62,53 @@ export class ModuleLoader {
         return module;
     }
 
-    resolveImport(importerPath, specifier) {
-        let localPath;
+    resolveImport(importer, specifier, span) {
+        if (!specifier.endsWith('.ar')) {
+            this.report(span, `Import '${specifier}' must include the .ar extension`);
+            return null;
+        }
+        if (specifier.startsWith('./') || specifier.startsWith('../')) {
+            const candidate = path.resolve(path.dirname(importer.path), specifier);
+            if (!this.contains(importer.owningRoot, candidate)) {
+                this.report(span, `Import '${specifier}' escapes its owning root '${importer.owningRoot}'`);
+                return null;
+            }
+            return this.resolveCandidate(candidate, importer.owningRoot, specifier, span, [candidate]);
+        }
         if (specifier.startsWith('/')) {
-            localPath = path.resolve(this.sourceRoot, `.${specifier}`);
-        } else {
-            localPath = path.resolve(path.dirname(importerPath), specifier);
+            const candidate = path.resolve(this.sourceRoot, `.${specifier}`);
+            if (!this.contains(this.sourceRoot, candidate)) {
+                this.report(span, `Project import '${specifier}' escapes source root '${this.sourceRoot}'`);
+                return null;
+            }
+            return this.resolveCandidate(candidate, this.sourceRoot, specifier, span, [candidate]);
         }
-        if (this.documents.has(path.resolve(localPath)) || fs.existsSync(localPath) || specifier.startsWith('/')) return localPath;
-        for (const libraryPath of this.libraryPaths) {
-            const candidate = path.resolve(libraryPath, specifier);
-            if (this.documents.has(path.resolve(candidate)) || fs.existsSync(candidate)) return candidate;
+        if (specifier.split('/').includes('..')) {
+            this.report(span, `Library import '${specifier}' cannot contain '..'`);
+            return null;
         }
-        return localPath;
+        const searched = this.libraryPaths.map(root => path.resolve(root, specifier));
+        for (let index = 0; index < searched.length; index++) {
+            if (this.exists(searched[index])) return {path: searched[index], root: this.libraryPaths[index]};
+        }
+        this.report(span, `Cannot resolve library import '${specifier}' from '${importer.path}'; searched: ${searched.join(', ') || '<no VALEN_LIBRARY_PATH entries>'}`);
+        return null;
+    }
+
+    resolveCandidate(candidate, root, specifier, span, searched) {
+        if (this.exists(candidate)) return {path: candidate, root};
+        this.report(span, `Cannot resolve import '${specifier}'; searched: ${searched.join(', ')}`);
+        return null;
+    }
+
+    exists(candidate) {
+        const resolved = path.resolve(candidate);
+        return this.documents.has(resolved) || fs.existsSync(resolved);
+    }
+
+    contains(root, candidate) {
+        const relative = path.relative(path.resolve(root), path.resolve(candidate));
+        return relative === '' || relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
     }
 
     canonicalize(filePath) {

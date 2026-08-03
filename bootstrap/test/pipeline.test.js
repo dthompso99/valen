@@ -11,6 +11,7 @@ import {IrGenerator} from '../ir.js';
 import {IrCanonicalizer, IrValidationError, IrValidator} from '../ir-validation.js';
 import {X86_64Backend} from '../x86-64.js';
 import {formatDiagnostic} from '../diagnostics.js';
+import {ModuleLoader} from '../module-loader.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -550,7 +551,7 @@ test('Valen compiler source foundation and tokenizer load and lower', () => {
     assert.doesNotThrow(() => new X86_64Backend().generate(ir));
 });
 
-test('module imports fall back to VALEN_LIBRARY_PATH after importer-relative resolution', () => {
+test('module imports distinguish local, project-root, and ordered external-library roots', () => {
     const fixtureRoot = path.join(projectRoot, 'bootstrap/test/fixtures/library-path');
     const semantic = new SemanticAnalyzer().analyzeFile(path.join(fixtureRoot, 'app/main.ar'), {
         sourceRoot: fixtureRoot,
@@ -558,6 +559,22 @@ test('module imports fall back to VALEN_LIBRARY_PATH after importer-relative res
     });
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     assert.ok([...semantic.modules.values()].some(module => module.path.endsWith('/lib/shared.ar')));
+    assert.ok([...semantic.modules.values()].some(module => module.path.endsWith('/lib/helper.ar')));
+    assert.ok(![...semantic.modules.values()].some(module => module.path.endsWith('/app/shared.ar')));
+
+    const documents = new Map([
+        [path.join(fixtureRoot, 'project/main.ar'), "import Local from './local.ar'\nimport Root from '/root.ar'\nentry {{ __() -> i64 { return 0 } }}"],
+        [path.join(fixtureRoot, 'project/local.ar'), 'library Local {{}}'],
+        [path.join(fixtureRoot, 'root.ar'), 'library Root {{}}']
+    ]);
+    const graph = new ModuleLoader({sourceRoot: fixtureRoot, documents}).load(path.join(fixtureRoot, 'project/main.ar'));
+    assert.equal(graph.diagnostics.length, 0, JSON.stringify(graph.diagnostics));
+
+    const escaped = new ModuleLoader({sourceRoot: path.join(fixtureRoot, 'app'), documents: new Map([
+        [path.join(fixtureRoot, 'app/escape.ar'), "import Outside from '../outside.ar'\nentry {{ __() -> i64 { return 0 } }}"],
+        [path.join(fixtureRoot, 'outside.ar'), 'library Outside {{}}']
+    ])}).load(path.join(fixtureRoot, 'app/escape.ar'));
+    assert.match(escaped.diagnostics[0].message, /escapes its owning root/);
 });
 
 test('Valen symbols support duplicate checks, parent lookup, and shadowing', () => {

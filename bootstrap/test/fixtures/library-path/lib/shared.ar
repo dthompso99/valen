@@ -1,3 +1,5 @@
+import Helper from './helper.ar'
+
 library Shared {{
-    answer() -> i64 { return 0 }
+    answer() -> i64 { return Helper.answer() }
 }}

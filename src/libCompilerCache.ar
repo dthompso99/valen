@@ -1,6 +1,6 @@
-import System from 'libSystem.ar'
-import Compiler from 'libCompiler.ar'
-import ModuleLoading from 'libModuleLoader.ar'
+import System from './libSystem.ar'
+import Compiler from './libCompiler.ar'
+import ModuleLoading from './libModuleLoader.ar'
 
 library CompilerCache {{
     Artifact {{

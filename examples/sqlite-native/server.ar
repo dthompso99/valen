@@ -3,7 +3,7 @@ import EventLoop from 'libEventLoop.ar'
 import System from 'libSystem.ar'
 import Http from '../http-native/libHttp.ar'
 import Service from '../http-native/libService.ar'
-import SQLite from 'libSqlite.ar'
+import SQLite from './libSqlite.ar'
 
 entry {{
     member serviceName:string

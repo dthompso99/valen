@@ -1,9 +1,9 @@
 import Network from 'libNetwork.ar'
 import EventLoop from 'libEventLoop.ar'
 import System from 'libSystem.ar'
-import Http from 'libHttp.ar'
-import State from 'libState.ar'
-import Service from 'libService.ar'
+import Http from './libHttp.ar'
+import State from './libState.ar'
+import Service from './libService.ar'
 
 entry {{
     member serviceName:string

@@ -1,4 +1,4 @@
-import CycleA from 'module-cycle-a.ar'
+import CycleA from './module-cycle-a.ar'
 
 library CycleB {{
 }}

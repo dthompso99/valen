@@ -1,4 +1,4 @@
-import Elf from 'libElf.ar'
+import Elf from './libElf.ar'
 
 library X86Object {{
     Operand {{
