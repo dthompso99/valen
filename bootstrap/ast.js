@@ -50,6 +50,7 @@ export class MethodDeclaration extends AstNode {
         this.returnType = returnType;
         this.body = body;
         this.isNative = isNative;
+        this.isUnsafe = false;
         this.visibility = 'public';
         this.returnReference = false;
     }
@@ -91,6 +92,13 @@ export class BlockStatement extends AstNode {
     constructor(statements, span) {
         super('BlockStatement', span);
         this.statements = statements;
+    }
+}
+
+export class UnsafeStatement extends AstNode {
+    constructor(body, span) {
+        super('UnsafeStatement', span);
+        this.body = body;
     }
 }
 

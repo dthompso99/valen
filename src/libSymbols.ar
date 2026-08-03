@@ -14,6 +14,7 @@ library Symbols {{
         member parameters:Array<ref Symbol>
         member defaultCount:i64
         member isNative:bool
+        member isUnsafe:bool
         member visibility:string
         member ownership:string
         member declaredOwnership:string
@@ -38,6 +39,7 @@ library Symbols {{
             self.parameters = new Array<ref Symbol>(0)
             self.defaultCount = 0
             self.isNative = false
+            self.isUnsafe = false
             self.visibility = "public"
             self.ownership = "value"
             self.declaredOwnership = "value"

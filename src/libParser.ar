@@ -108,12 +108,14 @@ library Parsing {{
                 field.weakReference = isWeak
                 return field
             }
+            local isUnsafe = self.match("UNSAFE")
             local isNative = self.match("NATIVE")
             local start = self.peek(0)
-            if isNative { start = self.previous() }
+            if isNative || isUnsafe { start = self.previous() }
             local name = self.consume("IDENTIFIER", "Expected a method name")
             local method = new Ast.MemberDeclaration("Method", name.lexeme, self.span(start.span, name.span))
             method.isNative = isNative
+            method.isUnsafe = isUnsafe
             method.visibility = visibility
             self.consume("LEFT_PAREN", "Expected '(' after method name")
             if !self.check("RIGHT_PAREN") {
@@ -225,6 +227,13 @@ library Parsing {{
                 if self.match("COLON") { statement.declaredType = self.parseTypeReference() }
                 if self.match("EQUAL") { statement.expression = self.parseExpression() }
                 statement.span = self.span(start.span, self.previous().span)
+                return statement
+            }
+            if self.match("UNSAFE") {
+                local start = self.previous()
+                local statement = new Ast.Statement("Unsafe", start.span)
+                statement.body = self.parseBlock()
+                statement.span = self.span(start.span, statement.body!.span)
                 return statement
             }
             if self.check("LEFT_BRACE") {

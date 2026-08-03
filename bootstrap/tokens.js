@@ -40,6 +40,7 @@ export const Tokens = [
     {type: 'LOCAL', value: 'local'},
     {type: 'LIBRARY', value: 'library'},
     {type: 'NATIVE', value: 'native'},
+    {type: 'UNSAFE', value: 'unsafe'},
     {type: 'PUBLIC', value: 'public'},
     {type: 'PRIVATE', value: 'private'},
     {type: 'INHERITS', value: 'inherits'},

@@ -34,6 +34,7 @@ library Semantics {{
         member diagnostics:Diagnostics.DiagnosticBag
         member currentOwner:Symbols.Symbol?
         member currentMethod:Symbols.Symbol?
+        member unsafeDepth:i64
 
         __(graph:ModuleLoading.ModuleGraph) -> void {
             self.graph = graph
@@ -42,6 +43,7 @@ library Semantics {{
             self.diagnostics = graph.diagnostics
             self.currentOwner = null
             self.currentMethod = null
+            self.unsafeDepth = 0
         }
 
         analyze() -> Analysis {
@@ -177,6 +179,7 @@ library Semantics {{
                     local symbol = new Symbols.Symbol(memberNode.kind, memberNode.name, owner.qualifiedName + "." + memberNode.name, memberNode.span)
                     symbol.owner = owner
                     symbol.isNative = memberNode.isNative
+                    symbol.isUnsafe = memberNode.isUnsafe
                     symbol.visibility = memberNode.visibility
                     if memberNode.kind == "Field" {
                         symbol.typeName = self.bindType(memberNode.declaredType!, owner.memberScope!)
@@ -683,6 +686,7 @@ library Semantics {{
         }
 
         analyzeMethod(method:Ast.MemberDeclaration, owner:Symbols.Symbol, moduleScope:Symbols.Scope) -> void {
+            if method.isUnsafe && !method.isNative { self.error(method.span, "Only native library methods may be declared 'unsafe'") }
             local defaultIndex:i64 = 0
             while defaultIndex < method.parameters.length {
                 if method.parameters[defaultIndex].defaultValue != null {
@@ -776,6 +780,12 @@ library Semantics {{
                 return
             }
             if statement.kind == "Block" { self.analyzeBlock(statement.body!, scope, moduleScope, returnType, inLoop); return }
+            if statement.kind == "Unsafe" {
+                self.unsafeDepth = self.unsafeDepth + 1
+                self.analyzeBlock(statement.body!, scope, moduleScope, returnType, inLoop)
+                self.unsafeDepth = self.unsafeDepth - 1
+                return
+            }
             if statement.expression != null { self.analyzeExpression(statement.expression!, scope, moduleScope) }
         }
 
@@ -889,6 +899,9 @@ library Semantics {{
                     }
                     if expression.arguments.length != callable!.parameters.length { self.error(expression.span, "Expected " + callable!.parameters.length.toString() + " arguments but received " + expression.arguments.length.toString()) }
                     expression.symbol = callable
+                    if callable!.isUnsafe && self.unsafeDepth == 0 {
+                        self.error(expression.span, "Unsafe native method '" + callable!.qualifiedName + "' may only be called inside an unsafe block")
+                    }
                     return self.typed(expression, callable!.returnType!)
                 }
                 return self.typed(expression, expression.left!.inferredType!)

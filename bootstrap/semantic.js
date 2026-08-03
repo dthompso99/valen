@@ -52,6 +52,7 @@ export class SemanticAnalyzer {
 
     initialize() {
         this.diagnostics = [];
+        this.unsafeDepth = 0;
         this.globals = new Scope(null, 'builtins');
         this.objectSymbols = new Map();
         this.contractTypes = new Set();
@@ -200,6 +201,7 @@ export class SemanticAnalyzer {
                 this.report(method.declaration.returnType.span, `'ref' return requires an object, array, or builder type`);
             }
             method.isNative = method.declaration.isNative;
+            method.isUnsafe = method.declaration.isUnsafe === true;
             method.parameters = method.declaration.parameters.map(parameter => ({
                 kind: 'Parameter',
                 name: parameter.name,
@@ -497,6 +499,7 @@ export class SemanticAnalyzer {
             if (declaration.body) this.report(declaration.span, `Native method '${method.qualifiedName}' cannot have a body`);
             return;
         }
+        if (declaration.isUnsafe) this.report(declaration.span, "Only native library methods may be declared 'unsafe'");
         if (!declaration.body) {
             this.report(declaration.span, `Method '${method.qualifiedName}' requires a body`);
             return;
@@ -506,6 +509,7 @@ export class SemanticAnalyzer {
             scope.define('self', {kind: 'Self', name: 'self', type: object.type, owner: object}, declaration.span, this.diagnostics);
         }
         this.loopDepth = 0;
+        this.unsafeDepth = 0;
         for (const parameter of method.parameters) {
             scope.define(parameter.name, parameter, parameter.declaration.span, this.diagnostics);
             this.annotate(parameter.declaration, parameter.type, parameter);
@@ -543,6 +547,12 @@ export class SemanticAnalyzer {
         switch (statement.kind) {
             case 'BlockStatement':
                 return this.analyzeBlock(statement, scope, object, method);
+            case 'UnsafeStatement': {
+                this.unsafeDepth++;
+                const returns = this.analyzeBlock(statement.body, scope, object, method);
+                this.unsafeDepth--;
+                return returns;
+            }
             case 'LocalDeclaration': {
                 const declared = statement.variableType
                     ? this.resolveTypeReference(statement.variableType, object)
@@ -957,10 +967,16 @@ export class SemanticAnalyzer {
                         this.applyDefaults(method, expression.arguments, argumentTypes);
                         this.checkArguments(method, argumentTypes, expression.arguments, expression.span);
                         this.annotate(expression.callee, method.returnType, method);
+                        if (method.isUnsafe && this.unsafeDepth === 0) {
+                            this.report(expression.span, `Unsafe native method '${method.qualifiedName}' may only be called inside an unsafe block`);
+                        }
                         type = method.returnType;
                     } else type = UNKNOWN;
                 } else if (callee?.kind === 'Method') {
                     this.checkArguments(callee, argumentTypes, expression.arguments, expression.span);
+                    if (callee.isUnsafe && this.unsafeDepth === 0) {
+                        this.report(expression.span, `Unsafe native method '${callee.qualifiedName}' may only be called inside an unsafe block`);
+                    }
                     type = callee.returnType;
                 } else if (callee?.kind === 'ExternalMember') {
                     type = UNKNOWN;

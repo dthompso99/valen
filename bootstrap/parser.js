@@ -11,6 +11,7 @@ import {
     ParameterDeclaration,
     TypeReference,
     BlockStatement,
+    UnsafeStatement,
     ReturnStatement,
     ExpressionStatement,
     LocalDeclaration,
@@ -82,8 +83,12 @@ export class Parser {
                 members.push(this.parseObject(visibility));
             } else if (this.check('MEMBER')) {
                 this.error(this.peek(), 'Libraries cannot declare instance members');
-            } else if (this.check('NATIVE')) {
-                members.push(this.parseMethod(true, visibility));
+            } else if (this.check('NATIVE') || this.check('UNSAFE')) {
+                const isUnsafe = this.match('UNSAFE');
+                if (isUnsafe && !this.check('NATIVE')) this.error(this.peek(), "Expected 'native' after 'unsafe'");
+                const method = this.parseMethod(true, visibility);
+                method.isUnsafe = isUnsafe;
+                members.push(method);
             } else {
                 members.push(this.parseMethod(false, visibility));
             }
@@ -114,7 +119,7 @@ export class Parser {
                 members.push(this.parseObject(memberVisibility));
             } else if (this.check('MEMBER')) {
                 members.push(this.parseField(memberVisibility));
-            } else if (this.check('NATIVE')) {
+            } else if (this.check('NATIVE') || this.check('UNSAFE')) {
                 this.error(this.peek(), 'Native methods can only be declared in libraries');
             } else {
                 members.push(this.parseMethod(false, memberVisibility));
@@ -253,6 +258,11 @@ export class Parser {
         if (this.match('BREAK')) return new BreakStatement(this.span(this.previous(), this.previous()));
         if (this.match('CONTINUE')) return new ContinueStatement(this.span(this.previous(), this.previous()));
         if (this.match('LOCAL')) return this.parseLocal(this.previous());
+        if (this.match('UNSAFE')) {
+            const start = this.previous();
+            const body = this.parseBlock();
+            return new UnsafeStatement(body, this.span(start, body));
+        }
         if (this.check('LEFT_BRACE')) return this.parseBlock();
 
         const expression = this.parseExpression();

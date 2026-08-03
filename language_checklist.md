@@ -2,6 +2,8 @@
 
 The bootstrap compiler proves the language can compile native programs. This roadmap begins with language semantics and ergonomics; optimization and additional machine targets come after the object and type models are stable.
 
+Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/argon/issues?labels=1). The unchecked entries below are the roadmap snapshot from which those issues were created; update and close the corresponding Gitea issue as work progresses rather than maintaining status in two places.
+
 ## 1. Object model and contracts
 
 - [x] Define single object inheritance through `Child inherits Parent {{ ... }}`
@@ -36,7 +38,7 @@ The bootstrap compiler proves the language can compile native programs. This roa
 - [x] Detect unconditional field-initializer cycles
 - [x] Add precise stack-slot root tracking and explicit tracing garbage collection
 - [x] Define cycle collection, weak-reference clearing, and internal runtime finalization behavior
-- [ ] Reserve an explicit unsafe/raw-memory boundary without exposing pointers in ordinary code
+- [x] Reserve an explicit unsafe/raw-memory boundary without exposing pointers in ordinary code
 
 ## 3. Type-system expansion
 

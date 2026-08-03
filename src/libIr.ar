@@ -551,6 +551,7 @@ library Ir {{
                 return
             }
             if statement.kind == "Block" { self.lowerBlock(statement.body!); return }
+            if statement.kind == "Unsafe" { self.lowerBlock(statement.body!); return }
             if statement.expression != null { self.lowerExpression(statement.expression!) }
         }
 

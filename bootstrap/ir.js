@@ -251,6 +251,9 @@ export class IrGenerator {
             case 'BlockStatement':
                 this.lowerBlock(statement);
                 break;
+            case 'UnsafeStatement':
+                this.lowerBlock(statement.body);
+                break;
             case 'LocalDeclaration': {
                 const value = statement.initializer ? this.lowerExpression(statement.initializer) : null;
                 const local = {

@@ -251,6 +251,26 @@ test('native object handles transfer through owning cleanup operations and canno
     }
 });
 
+test('unsafe native operations require an explicit lexical unsafe boundary', () => {
+    const valid = new SemanticAnalyzer().analyze(new Parser().parse(`
+        library Raw {{
+            unsafe native touch(bytes:Array<u8>) -> void
+            touchSafely(bytes:Array<u8>) -> void { unsafe { Raw.touch(bytes) } }
+        }}
+        entry {{ __() -> void { local bytes = new Array<u8>(1); unsafe { Raw.touch(bytes) } } }}
+    `, 'unsafe-boundary.ar'));
+    assert.equal(valid.success, true, JSON.stringify(valid.diagnostics));
+    const ir = new IrGenerator().generate(valid);
+    assert.ok(ir.externals.some(external => external.displayName === 'Raw.touch'));
+
+    const invalid = new SemanticAnalyzer().analyze(new Parser().parse(`
+        library Raw {{ unsafe native touch(bytes:Array<u8>) -> void }}
+        entry {{ __() -> void { local bytes = new Array<u8>(1); Raw.touch(bytes) } }}
+    `, 'unsafe-call.ar'));
+    assert.equal(invalid.success, false);
+    assert.match(invalid.diagnostics[0].message, /only be called inside an unsafe block/);
+});
+
 test('unconditional field-initializer allocation cycles are rejected', () => {
     const cyclic = new SemanticAnalyzer().analyze(new Parser().parse(`
         First {{ member second:Second = new Second() }}

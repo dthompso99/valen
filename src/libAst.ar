@@ -60,6 +60,7 @@ library Ast {{
         member returnReference:bool
         member body:Block?
         member isNative:bool
+        member isUnsafe:bool
         member visibility:string
         member reference:bool
         member weakReference:bool
@@ -79,6 +80,7 @@ library Ast {{
             self.returnReference = false
             self.body = null
             self.isNative = false
+            self.isUnsafe = false
             self.visibility = "public"
             self.reference = false
             self.weakReference = false
