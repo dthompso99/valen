@@ -11,7 +11,7 @@ Argon is developed through two compiler implementations:
 
 The JavaScript bootstrap is intentionally retained as Argon's stable path from zero. It does not need every language feature: it needs the subset required to compile the current native compiler source. If `src/` begins using a new feature, generation 0 must understand that feature before the bootstrap remains valid.
 
-Generation 1 builds a working generation-2 compiler within a 3 GiB peak-RSS budget. The shared conformance corpus also verifies that generations 1 and 2 emit identical normalized target-independent IR.
+Generation 1 builds a working generation-2 compiler within a 3.25 GiB peak-RSS budget. The shared conformance corpus also verifies that generations 1 and 2 emit identical normalized target-independent IR.
 
 ## Compilation pipeline
 

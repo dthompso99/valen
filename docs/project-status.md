@@ -51,7 +51,7 @@ and embedded targets.
 
 ## WIP: compiler and tooling
 
-- Generation 1 builds a working generation-2 compiler within the supported 3 GiB peak-RSS budget.
+- Generation 1 builds a working generation-2 compiler within the supported 3.25 GiB peak-RSS budget.
 - Generation 1 and generation 2 produce equivalent normalized IR across the shared conformance corpus.
 - Generation 1 and generation 2 report identical diagnostics for the shared invalid-program corpus.
 - JavaScript generation 0 is intentionally retained as the stable path from zero; generated native compilers run without JavaScript.

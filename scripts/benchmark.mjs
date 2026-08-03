@@ -158,7 +158,7 @@ try {
         }
     }
     const report = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         metadata: {
             commit,
             timestamp: new Date().toISOString(),
@@ -174,11 +174,12 @@ try {
         metrics,
         artifacts: {
             stage1CompilerBytes: fileSize(stage1),
-            argonAssemblyBytes: fileSize(`${argonProgram}.s`),
+            argonObjectBytes: fileSize(`${argonProgram}.o`),
             argonExecutableBytes: fileSize(argonProgram),
             cO0ExecutableBytes: fileSize(cO0Program),
             cO2ExecutableBytes: fileSize(cO2Program),
-            ...(includeGeneration2 ? {stage2CompilerBytes: fileSize(stage2), stage2ExecutableBytes: fileSize(stage2Program)} : {})
+            ...(includeGeneration2 ? {stage2CompilerBytes: fileSize(stage2), stage2CompilerObjectBytes: fileSize(`${stage2}.o`),
+                stage2ObjectBytes: fileSize(`${stage2Program}.o`), stage2ExecutableBytes: fileSize(stage2Program)} : {})
         },
         budgets,
         budgetFailures

@@ -14,9 +14,9 @@ library X86Object {{
         member symbol:string?
 
         __(kind:string) -> void {
-            self.kind = kind; self.name = ""; self.code = 0; self.size = 0; self.value = 0
-            self.base = -1; self.index = -1; self.scale = 1; self.displacement = 0; self.symbol = null
+            self.reset(kind)
         }
+        reset(kind:string) -> void { self.kind = kind; self.name = ""; self.code = 0; self.size = 0; self.value = 0; self.base = -1; self.index = -1; self.scale = 1; self.displacement = 0; self.symbol = null }
     }}
 
     Label {{
@@ -65,9 +65,10 @@ library X86Object {{
         member offset:i64
         member bytes:Elf.Bytes
         member fixups:Array<Fixup>
+        member operandCount:i64
 
         __(section:string, offset:i64) -> void {
-            self.section = section; self.offset = offset; self.bytes = new Elf.Bytes(); self.fixups = new Array<Fixup>(0)
+            self.section = section; self.offset = offset; self.bytes = new Elf.Bytes(); self.fixups = new Array<Fixup>(0); self.operandCount = -1
         }
 
         byte(value:i64) -> void { self.bytes.byte(value) }
@@ -290,8 +291,9 @@ library X86Object {{
             }
             if mnemonic == "imul" {
                 local left = operands[0]
-                if operands.length == 1 { self.rex(true, 0, self.rmIndex(left), self.rmBase(left), false); self.byte(247); self.modRm(5, left); return true }
-                if operands.length == 3 { self.regRm(105, left, operands[1], left.size); self.little(operands[2].value, 4); return true }
+                local count = self.operandCount; if count < 0 { count = operands.length }
+                if count == 1 { self.rex(true, 0, self.rmIndex(left), self.rmBase(left), false); self.byte(247); self.modRm(5, left); return true }
+                if count == 3 { self.regRm(105, left, operands[1], left.size); self.little(operands[2].value, 4); return true }
                 self.regRm2(175, left, operands[1], left.size); return true
             }
             if mnemonic == "movsxd" { self.regRm(99, operands[0], operands[1], 8); return true }
@@ -335,6 +337,7 @@ library X86Object {{
             local end = value.length
             while start < end { if value[start] == 32 || value[start] == 9 || value[start] == 13 { start = start + 1 } else { break } }
             while end > start { if value[end - 1] == 32 || value[end - 1] == 9 || value[end - 1] == 13 { end = end - 1 } else { break } }
+            if start == 0 && end == value.length { return value }
             return value.slice(start, end - start)
         }
 
@@ -361,6 +364,12 @@ library X86Object {{
                 index = index + 1
             }
             if negative { return 0 - result }
+            return result
+        }
+
+        decimalRange(value:string, start:i64, end:i64) -> i64 {
+            local result:i64 = 0; local index = start
+            while index < end { result = result * 10 + value[index] as i64 - 48; index = index + 1 }
             return result
         }
 
@@ -404,39 +413,37 @@ library X86Object {{
         }
 
         register(value:string) -> Operand? {
-            local names = new Array<string>(0)
-            names.append("rax"); names.append("rcx"); names.append("rdx"); names.append("rbx")
-            names.append("rsp"); names.append("rbp"); names.append("rsi"); names.append("rdi")
-            local code:i64 = 0
-            while code < names.length {
-                if value == names[code] { return self.reg(value, code, 8, "register") }
-                code = code + 1
-            }
+            local code = self.legacyRegisterCode(value)
+            if code >= 0 { return self.reg(value, code, self.legacyRegisterSize(value), "register") }
             if value.length >= 2 { if value[0] == 114 && value[1] >= 48 && value[1] <= 57 {
                 local end = value.length
                 local size:i64 = 8
                 if value[end - 1] == 98 { size = 1; end = end - 1 }
                 if value[end - 1] == 119 { size = 2; end = end - 1 }
                 if value[end - 1] == 100 { size = 4; end = end - 1 }
-                return self.reg(value, self.integer(value.slice(1, end - 1)), size, "register")
+                return self.reg(value, self.decimalRange(value, 1, end), size, "register")
             }}
-            local baseNames = new Array<string>(0)
-            baseNames.append("al"); baseNames.append("cl"); baseNames.append("dl"); baseNames.append("bl")
-            baseNames.append("spl"); baseNames.append("bpl"); baseNames.append("sil"); baseNames.append("dil")
-            code = 0
-            while code < baseNames.length { if value == baseNames[code] { return self.reg(value, code, 1, "register") }; code = code + 1 }
-            local wordNames = new Array<string>(0)
-            wordNames.append("ax"); wordNames.append("cx"); wordNames.append("dx"); wordNames.append("bx")
-            wordNames.append("sp"); wordNames.append("bp"); wordNames.append("si"); wordNames.append("di")
-            code = 0
-            while code < wordNames.length { if value == wordNames[code] { return self.reg(value, code, 2, "register") }; code = code + 1 }
-            local dwordNames = new Array<string>(0)
-            dwordNames.append("eax"); dwordNames.append("ecx"); dwordNames.append("edx"); dwordNames.append("ebx")
-            dwordNames.append("esp"); dwordNames.append("ebp"); dwordNames.append("esi"); dwordNames.append("edi")
-            code = 0
-            while code < dwordNames.length { if value == dwordNames[code] { return self.reg(value, code, 4, "register") }; code = code + 1 }
-            if self.starts(value, "xmm") { return self.reg(value, self.integer(value.slice(3, value.length - 3)), 16, "xmm") }
+            if self.starts(value, "xmm") { return self.reg(value, self.decimalRange(value, 3, value.length), 16, "xmm") }
             return null
+        }
+
+        legacyRegisterCode(value:string) -> i64 {
+            if value == "rax" || value == "eax" || value == "ax" || value == "al" { return 0 }
+            if value == "rcx" || value == "ecx" || value == "cx" || value == "cl" { return 1 }
+            if value == "rdx" || value == "edx" || value == "dx" || value == "dl" { return 2 }
+            if value == "rbx" || value == "ebx" || value == "bx" || value == "bl" { return 3 }
+            if value == "rsp" || value == "esp" || value == "sp" || value == "spl" { return 4 }
+            if value == "rbp" || value == "ebp" || value == "bp" || value == "bpl" { return 5 }
+            if value == "rsi" || value == "esi" || value == "si" || value == "sil" { return 6 }
+            if value == "rdi" || value == "edi" || value == "di" || value == "dil" { return 7 }
+            return -1
+        }
+
+        legacyRegisterSize(value:string) -> i64 {
+            if value.length == 2 { if value[1] == 108 { return 1 }; return 2 }
+            if value == "spl" || value == "bpl" || value == "sil" || value == "dil" { return 1 }
+            if value[0] == 101 { return 4 }
+            return 8
         }
 
         reg(name:string, code:i64, size:i64, kind:string) -> Operand {
@@ -444,17 +451,43 @@ library X86Object {{
         }
 
         operand(input:string) -> Operand {
+            local result = new Operand(""); self.operandInto(input, result); return result
+        }
+
+        operandInto(input:string, result:Operand) -> void {
             local value = self.trim(input)
             local explicitSize:i64 = 0
-            if self.starts(value, "BYTE PTR ") { explicitSize = 1; value = value.slice(9, value.length - 9) }
-            if self.starts(value, "WORD PTR ") { explicitSize = 2; value = value.slice(9, value.length - 9) }
-            if self.starts(value, "DWORD PTR ") { explicitSize = 4; value = value.slice(10, value.length - 10) }
-            if self.starts(value, "QWORD PTR ") { explicitSize = 8; value = value.slice(10, value.length - 10) }
-            if value.length >= 2 { if value[0] == 91 && value[value.length - 1] == 93 { return self.memory(value.slice(1, value.length - 2), explicitSize) } }
-            local register = self.register(value)
-            if register != null { return copy register! }
-            if self.isNumber(value) { local result = new Operand("immediate"); result.value = self.integer(value); return result }
-            local symbol = new Operand("symbol"); symbol.name = value; return symbol
+            local contentStart:i64 = 0
+            if self.starts(value, "BYTE PTR ") { explicitSize = 1; contentStart = 9 }
+            if self.starts(value, "WORD PTR ") { explicitSize = 2; contentStart = 9 }
+            if self.starts(value, "DWORD PTR ") { explicitSize = 4; contentStart = 10 }
+            if self.starts(value, "QWORD PTR ") { explicitSize = 8; contentStart = 10 }
+            if value.length >= contentStart + 2 { if value[contentStart] == 91 && value[value.length - 1] == 93 { self.memoryInto(value.slice(contentStart + 1, value.length - contentStart - 2), explicitSize, result); return } }
+            if contentStart > 0 { value = value.slice(contentStart, value.length - contentStart) }
+            if self.registerInto(value, result) { return }
+            if self.isNumber(value) { result.reset("immediate"); result.value = self.integer(value); return }
+            result.reset("symbol"); result.name = value
+        }
+
+        registerInto(value:string, result:Operand) -> bool {
+            local code = self.legacyRegisterCode(value)
+            if code >= 0 { result.reset("register"); result.name = value; result.code = code; result.size = self.legacyRegisterSize(value); return true }
+            if value.length >= 2 { if value[0] == 114 && value[1] >= 48 && value[1] <= 57 {
+                local end = value.length; local size:i64 = 8
+                if value[end - 1] == 98 { size = 1; end = end - 1 }; if value[end - 1] == 119 { size = 2; end = end - 1 }; if value[end - 1] == 100 { size = 4; end = end - 1 }
+                result.reset("register"); result.name = value; result.code = self.decimalRange(value, 1, end); result.size = size; return true
+            }}
+            if self.starts(value, "xmm") { result.reset("xmm"); result.name = value; result.code = self.decimalRange(value, 3, value.length); result.size = 16; return true }
+            return false
+        }
+
+        registerCode(value:string) -> i64 {
+            local code = self.legacyRegisterCode(value); if code >= 0 { return code }
+            if value.length >= 2 { if value[0] == 114 && value[1] >= 48 && value[1] <= 57 {
+                local end = value.length; if value[end - 1] == 98 || value[end - 1] == 119 || value[end - 1] == 100 { end = end - 1 }
+                return self.decimalRange(value, 1, end)
+            }}
+            return -1
         }
 
         isNumber(value:string) -> bool {
@@ -466,33 +499,59 @@ library X86Object {{
         }
 
         memory(value:string, size:i64) -> Operand {
-            local result = new Operand("memory"); result.size = size
+            local result = new Operand(""); self.memoryInto(value, size, result); return result
+        }
+
+        memoryInto(value:string, size:i64, result:Operand) -> void {
+            result.reset("memory"); result.size = size
             local start:i64 = 0
             local index:i64 = 0
             while index <= value.length {
                 local separator:bool = index == value.length
                 if !separator { separator = value[index] == 43 || (value[index] == 45 && index > start) }
                 if separator {
-                    local part = value.slice(start, index - start)
                     local sign:i64 = 1
-                    if part.length > 0 { if part[0] == 45 { sign = -1; part = part.slice(1, part.length - 1) } }
-                    local star = self.find(part, 42)
+                    local partStart = start
+                    if partStart < index { if value[partStart] == 45 { sign = -1; partStart = partStart + 1 } }
+                    local star:i64 = -1; local scan = partStart
+                    while scan < index { if value[scan] == 42 { star = scan; break }; scan = scan + 1 }
                     if star >= 0 {
-                        local indexed = self.register(part.slice(0, star))
-                        result.index = indexed!.code; result.scale = self.integer(part.slice(star + 1, part.length - star - 1))
+                        result.index = self.registerCodeRange(value, partStart, star); result.scale = self.decimalRange(value, star + 1, index)
                     } else {
-                        if part == "rip" { result.base = 16 } else {
-                            local register = self.register(part)
-                            if register != null { if result.base < 0 { result.base = register!.code } else { result.index = register!.code } }
-                            else { if self.isNumber(part) { result.displacement = result.displacement + sign * self.integer(part) } else { result.symbol = part } }
+                        if self.rangeEquals(value, partStart, index, "rip") { result.base = 16 } else {
+                            local register = self.registerCodeRange(value, partStart, index)
+                            if register >= 0 { if result.base < 0 { result.base = register } else { result.index = register } }
+                            else { if self.isNumberRange(value, partStart, index) { result.displacement = result.displacement + sign * self.decimalRange(value, partStart, index) } else { result.symbol = value.slice(partStart, index - partStart) } }
                         }
                     }
                     if index < value.length { if value[index] == 45 { start = index } else { start = index + 1 } }
                 }
                 index = index + 1
             }
-            return result
         }
+
+        rangeEquals(value:string, start:i64, end:i64, expected:string) -> bool {
+            if end - start != expected.length { return false }; local index:i64 = 0
+            while index < expected.length { if value[start + index] != expected[index] { return false }; index = index + 1 }; return true
+        }
+
+        registerCodeRange(value:string, start:i64, end:i64) -> i64 {
+            if self.rangeEquals(value, start, end, "rax") || self.rangeEquals(value, start, end, "eax") || self.rangeEquals(value, start, end, "ax") || self.rangeEquals(value, start, end, "al") { return 0 }
+            if self.rangeEquals(value, start, end, "rcx") || self.rangeEquals(value, start, end, "ecx") || self.rangeEquals(value, start, end, "cx") || self.rangeEquals(value, start, end, "cl") { return 1 }
+            if self.rangeEquals(value, start, end, "rdx") || self.rangeEquals(value, start, end, "edx") || self.rangeEquals(value, start, end, "dx") || self.rangeEquals(value, start, end, "dl") { return 2 }
+            if self.rangeEquals(value, start, end, "rbx") || self.rangeEquals(value, start, end, "ebx") || self.rangeEquals(value, start, end, "bx") || self.rangeEquals(value, start, end, "bl") { return 3 }
+            if self.rangeEquals(value, start, end, "rsp") || self.rangeEquals(value, start, end, "esp") || self.rangeEquals(value, start, end, "sp") || self.rangeEquals(value, start, end, "spl") { return 4 }
+            if self.rangeEquals(value, start, end, "rbp") || self.rangeEquals(value, start, end, "ebp") || self.rangeEquals(value, start, end, "bp") || self.rangeEquals(value, start, end, "bpl") { return 5 }
+            if self.rangeEquals(value, start, end, "rsi") || self.rangeEquals(value, start, end, "esi") || self.rangeEquals(value, start, end, "si") || self.rangeEquals(value, start, end, "sil") { return 6 }
+            if self.rangeEquals(value, start, end, "rdi") || self.rangeEquals(value, start, end, "edi") || self.rangeEquals(value, start, end, "di") || self.rangeEquals(value, start, end, "dil") { return 7 }
+            if end > start + 1 { if value[start] == 114 && value[start + 1] >= 48 && value[start + 1] <= 57 {
+                local registerEnd = end; if value[registerEnd - 1] == 98 || value[registerEnd - 1] == 119 || value[registerEnd - 1] == 100 { registerEnd = registerEnd - 1 }
+                return self.decimalRange(value, start + 1, registerEnd)
+            }}
+            return -1
+        }
+
+        isNumberRange(value:string, start:i64, end:i64) -> bool { return start < end && value[start] >= 48 && value[start] <= 57 }
 
         find(value:string, byte:u8) -> i64 {
             local index:i64 = 0
@@ -512,11 +571,15 @@ library X86Object {{
         member numericNames:Array<string>
         member numericCounts:Array<i64>
         member error:string
+        member encoder:Encoder
+        member operandSlots:Array<Operand>
 
         __() -> void {
             self.parser = new Parser(); self.sections = new Array<Section>(0); self.labels = new Array<Label>(0)
             self.globals = new Array<string>(0); self.externals = new Array<string>(0); self.commons = new Array<Common>(0)
             self.fixups = new Array<Fixup>(0); self.numericNames = new Array<string>(0); self.numericCounts = new Array<i64>(0); self.error = ""
+            self.encoder = new Encoder("", 0)
+            self.operandSlots = new Array<Operand>(0); self.operandSlots.append(new Operand("")); self.operandSlots.append(new Operand("")); self.operandSlots.append(new Operand(""))
         }
 
         assemble(source:string) -> Array<u8>? {
@@ -526,7 +589,10 @@ library X86Object {{
             while start <= source.length {
                 local end = start
                 while end < source.length { if source[end] == 10 { break }; end = end + 1 }
-                local line = self.parser.trim(source.slice(start, end - start))
+                local lineStart = start; local lineEnd = end
+                while lineStart < lineEnd { if source[lineStart] == 32 || source[lineStart] == 9 || source[lineStart] == 13 { lineStart = lineStart + 1 } else { break } }
+                while lineEnd > lineStart { if source[lineEnd - 1] == 32 || source[lineEnd - 1] == 9 || source[lineEnd - 1] == 13 { lineEnd = lineEnd - 1 } else { break } }
+                local line = source.slice(lineStart, lineEnd - lineStart)
                 if line.length > 0 {
                     local result = self.line(line, current)
                     if result == "!unsupported" { self.error = line; return null }
@@ -578,21 +644,15 @@ library X86Object {{
             if self.parser.starts(instruction, "lock ") { prefix = "lock"; instruction = instruction.slice(5, instruction.length - 5) }
             if self.parser.starts(instruction, "rep ") { prefix = "rep"; instruction = instruction.slice(4, instruction.length - 4) }
             if self.parser.starts(instruction, "repe ") { prefix = "repe"; instruction = instruction.slice(5, instruction.length - 5) }
-            local space = self.parser.find(instruction, 32); local mnemonic = instruction; local parsed = new Array<Operand>(0)
+            local space = self.parser.find(instruction, 32); local mnemonic = instruction; local operandStart = instruction.length
             if space >= 0 {
-                mnemonic = instruction.slice(0, space); local values = self.operands(instruction.slice(space + 1, instruction.length - space - 1)); local index:i64 = 0
-                while index < values.length {
-                    local value = values[index]
-                    if value.length > 1 { local suffix = value[value.length - 1]; local number = value.slice(0, value.length - 1); if self.numeric(number) && (suffix == 102 || suffix == 98) { value = self.numericReference(number, suffix == 102) } }
-                    parsed.append(self.parser.operand(value)); index = index + 1
-                }
+                mnemonic = instruction.slice(0, space); operandStart = space + 1
             }
-            local encoder = new Encoder(current, target.offset())
-            if prefix != null { if prefix! == "lock" { encoder.byte(240) } else { encoder.byte(243) } }
-            if !encoder.instruction(mnemonic, parsed) { return "!unsupported" }
-            target.bytes.raw(encoder.bytes.values)
-            local fixupIndex:i64 = 0
-            while fixupIndex < encoder.fixups.length { self.fixups.append(copy encoder.fixups[fixupIndex]); fixupIndex = fixupIndex + 1 }
+            local operandCount = self.parseOperandsInto(instruction, operandStart)
+            self.encoder.section = current; self.encoder.offset = 0; self.encoder.bytes = target.bytes; self.encoder.fixups = self.fixups
+            self.encoder.operandCount = operandCount
+            if prefix != null { if prefix! == "lock" { self.encoder.byte(240) } else { self.encoder.byte(243) } }
+            if !self.encoder.instruction(mnemonic, self.operandSlots) { return "!unsupported" }
             return ""
         }
 
@@ -672,6 +732,24 @@ library X86Object {{
                 index = index + 1
             }
             return result
+        }
+
+        parseOperandsInto(value:string, start:i64) -> i64 {
+            local count:i64 = 0; local partStart = start; local depth:i64 = 0; local index = start
+            while index <= value.length {
+                local split = index == value.length
+                if !split { if value[index] == 91 { depth = depth + 1 }; if value[index] == 93 { depth = depth - 1 }; split = value[index] == 44 && depth == 0 }
+                if split {
+                    local part = self.parser.trim(value.slice(partStart, index - partStart))
+                    if part.length > 1 {
+                        local suffix = part[part.length - 1]
+                        if suffix == 102 || suffix == 98 { local number = part.slice(0, part.length - 1); if self.numeric(number) { part = self.numericReference(number, suffix == 102) } }
+                    }
+                    if part.length > 0 { self.parser.operandInto(part, self.operandSlots[count]); count = count + 1 }; partStart = index + 1
+                }
+                index = index + 1
+            }
+            return count
         }
 
         quoted(output:Elf.Bytes, value:string, zero:bool) -> bool {

@@ -104,7 +104,7 @@ test('generation 1 passes the native compiler conformance suite', async t => {
         const build = spawnSync(compilerPath, [path.join(projectRoot, 'src/argon.ar'), '-o', generation2Path], {
             encoding: 'utf8', env: environment, cwd: projectRoot, maxBuffer: 64 * 1024 * 1024
         });
-        assert.equal(build.status, 0, build.stderr || build.stdout);
+        assert.equal(build.status, 0, build.stderr || build.stdout || `generation 2 build terminated by ${build.signal ?? 'an unknown signal'}`);
         assert.equal(fs.existsSync(`${generation2Path}.o`), true, 'generation 2 was not built from a native object');
         assert.equal(fs.existsSync(`${generation2Path}.s`), false, 'generation 2 unexpectedly required an assembler');
 

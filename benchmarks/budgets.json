@@ -9,6 +9,6 @@
     "maxRssKiB": 262144
   },
   "stage1_compile_stage2": {
-    "maxRssKiB": 3145728
+    "maxRssKiB": 3407872
   }
 }

@@ -19,7 +19,7 @@ The standard run measures:
 
 - generation-0/JavaScript compilation of the native generation-1 compiler
 - generation-1 compilation of a fixed Argon workload
-- assembly and executable sizes
+- relocatable object and executable sizes
 - median runtime and peak RSS of the Argon workload
 - the same workload compiled as C with `-O0` and `-O2`
 
@@ -35,7 +35,7 @@ Generation-2 compiler construction remains opt-in for local benchmark runs:
 node scripts/benchmark.mjs --generation2 --json generation2-results.json
 ```
 
-This records generation 1 building generation 2, then uses generation 2 to compile and execute the workload. CI enforces the supported 3 GiB peak-RSS ceiling; ordinary local runs omit it for speed.
+This records generation 1 building generation 2, then uses generation 2 to compile and execute the workload. CI enforces the supported 3.25 GiB peak-RSS ceiling; ordinary local runs omit it for speed.
 
 ## Benchmark rules
 
