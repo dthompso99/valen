@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import {spawnSync} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -20,29 +20,46 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'argon-benchmark-'));
 const environment = {...process.env, ARGON_LIBRARY_PATH: path.join(root, 'lib')};
 const metrics = [];
 
-function measured(name, command, commandArgs, options = {}) {
-    const marker = `__ARGON_BENCH_${name}__`;
+async function measured(name, command, commandArgs, options = {}) {
     const started = process.hrtime.bigint();
-    const result = spawnSync('/usr/bin/time', ['-f', `${marker} %e %M`, command, ...commandArgs], {
+    const child = spawn(command, commandArgs, {
         cwd: root,
         env: environment,
-        encoding: 'utf8',
-        maxBuffer: 64 * 1024 * 1024,
         ...options
     });
+    let stdout = '';
+    let stderr = '';
+    let maxRssKiB = null;
+    const sampleMemory = () => {
+        if (child.pid == null || process.platform !== 'linux') return;
+        try {
+            const status = fs.readFileSync(`/proc/${child.pid}/status`, 'utf8');
+            const match = status.match(/^VmHWM:\s+(\d+) kB$/m) ?? status.match(/^VmRSS:\s+(\d+) kB$/m);
+            if (match) maxRssKiB = Math.max(maxRssKiB ?? 0, Number(match[1]));
+        } catch (error) {
+            if (error.code !== 'ENOENT') throw error;
+        }
+    };
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', chunk => { stdout += chunk; });
+    child.stderr?.on('data', chunk => { stderr += chunk; });
+    sampleMemory();
+    const sampler = setInterval(sampleMemory, 5);
+    const result = await new Promise((resolve, reject) => {
+        child.once('error', reject);
+        child.once('close', (status, signal) => resolve({status, signal}));
+    }).finally(() => clearInterval(sampler));
     const wallSeconds = Number(process.hrtime.bigint() - started) / 1e9;
-    const match = result.stderr?.match(new RegExp(`${marker} ([0-9.]+) ([0-9]+)`));
-    const cleanError = (result.stderr ?? '').replace(new RegExp(`\n?${marker} [^\n]+\n?`), '');
-    if (result.error) throw result.error;
-    if (result.status !== 0) throw new Error(`${name} failed with status ${result.status}\n${cleanError || result.stdout}`);
+    if (result.status !== 0) throw new Error(`${name} failed with status ${result.status}${result.signal ? ` (${result.signal})` : ''}\n${stderr || stdout}`);
     const metric = {
         name,
         wallSeconds: Number(wallSeconds.toFixed(6)),
-        toolSeconds: match ? Number(match[1]) : null,
-        maxRssKiB: match ? Number(match[2]) : null
+        toolSeconds: null,
+        maxRssKiB
     };
     metrics.push(metric);
-    return {metric, stdout: result.stdout, stderr: cleanError};
+    return {metric, stdout, stderr};
 }
 
 function fileSize(file) {
@@ -54,20 +71,21 @@ function median(values) {
     return ordered[Math.floor(ordered.length / 2)];
 }
 
-function runRepeated(name, executable, expectedOutput, repetitions = 5) {
+async function runRepeated(name, executable, expectedOutput, repetitions = 5) {
     const runs = [];
     for (let index = 0; index < repetitions; index++) {
-        const result = measured(`${name}_${index + 1}`, executable, []);
+        const result = await measured(`${name}_${index + 1}`, executable, []);
         if (result.stdout !== expectedOutput) {
             throw new Error(`${name} output mismatch: expected ${JSON.stringify(expectedOutput)}, received ${JSON.stringify(result.stdout)}`);
         }
         runs.push(result.metric);
     }
+    const memorySamples = runs.map(run => run.maxRssKiB).filter(value => value != null);
     const summary = {
         name,
         wallSeconds: Number(median(runs.map(run => run.wallSeconds)).toFixed(6)),
         toolSeconds: median(runs.map(run => run.toolSeconds)),
-        maxRssKiB: Math.max(...runs.map(run => run.maxRssKiB))
+        maxRssKiB: memorySamples.length ? Math.max(...memorySamples) : null
     };
     metrics.push(summary);
     return summary;
@@ -89,7 +107,8 @@ function markdown(report) {
         '| Metric | Wall seconds | Peak RSS |', '| --- | ---: | ---: |'
     ];
     for (const metric of report.metrics.filter(metric => !/_\d+$/.test(metric.name))) {
-        lines.push(`| ${metric.name} | ${metric.wallSeconds.toFixed(3)} | ${(metric.maxRssKiB / 1024).toFixed(1)} MiB |`);
+        const peakRss = metric.maxRssKiB == null ? 'unavailable' : `${(metric.maxRssKiB / 1024).toFixed(1)} MiB`;
+        lines.push(`| ${metric.name} | ${metric.wallSeconds.toFixed(3)} | ${peakRss} |`);
     }
     lines.push('', '| Artifact | Size |', '| --- | ---: |');
     for (const [name, bytes] of Object.entries(report.artifacts)) lines.push(`| ${name} | ${formatBytes(bytes)} |`);
@@ -110,20 +129,20 @@ try {
     const workloadAr = path.join(root, 'benchmarks/workloads/integer-loop.ar');
     const workloadC = path.join(root, 'benchmarks/workloads/integer-loop.c');
 
-    measured('bootstrap_compile_stage1', process.execPath, [path.join(root, 'bootstrap/compiler.js'), path.join(root, 'src/argon.ar'), stage1]);
-    measured('stage1_compile_workload', stage1, [workloadAr, '-o', argonProgram]);
-    measured('c_o0_compile_workload', 'cc', ['-std=c11', '-O0', workloadC, '-o', cO0Program]);
-    measured('c_o2_compile_workload', 'cc', ['-std=c11', '-O2', workloadC, '-o', cO2Program]);
+    await measured('bootstrap_compile_stage1', process.execPath, [path.join(root, 'bootstrap/compiler.js'), path.join(root, 'src/argon.ar'), stage1]);
+    await measured('stage1_compile_workload', stage1, [workloadAr, '-o', argonProgram]);
+    await measured('c_o0_compile_workload', 'cc', ['-std=c11', '-O0', workloadC, '-o', cO0Program]);
+    await measured('c_o2_compile_workload', 'cc', ['-std=c11', '-O2', workloadC, '-o', cO2Program]);
 
     const expectedOutput = '1249999707\n';
-    runRepeated('argon_run_integer_loop', argonProgram, expectedOutput);
-    runRepeated('c_o0_run_integer_loop', cO0Program, expectedOutput);
-    runRepeated('c_o2_run_integer_loop', cO2Program, expectedOutput);
+    await runRepeated('argon_run_integer_loop', argonProgram, expectedOutput);
+    await runRepeated('c_o0_run_integer_loop', cO0Program, expectedOutput);
+    await runRepeated('c_o2_run_integer_loop', cO2Program, expectedOutput);
 
     if (includeGeneration2) {
-        measured('stage1_compile_stage2', stage1, [path.join(root, 'src/argon.ar'), '-o', stage2]);
-        measured('stage2_compile_workload', stage2, [workloadAr, '-o', stage2Program]);
-        runRepeated('stage2_run_integer_loop', stage2Program, expectedOutput);
+        await measured('stage1_compile_stage2', stage1, [path.join(root, 'src/argon.ar'), '-o', stage2]);
+        await measured('stage2_compile_workload', stage2, [workloadAr, '-o', stage2Program]);
+        await runRepeated('stage2_run_integer_loop', stage2Program, expectedOutput);
     }
 
     const commit = spawnSync('git', ['rev-parse', '--short', 'HEAD'], {cwd: root, encoding: 'utf8'}).stdout.trim() || 'unknown';
@@ -131,6 +150,9 @@ try {
     const budgetFailures = [];
     for (const [name, budget] of Object.entries(budgets)) {
         const metric = metrics.find(entry => entry.name === name);
+        if (metric && budget.maxRssKiB != null && metric.maxRssKiB == null) {
+            budgetFailures.push(`${name} peak RSS could not be measured on ${process.platform}`);
+        }
         if (metric && budget.maxRssKiB != null && metric.maxRssKiB > budget.maxRssKiB) {
             budgetFailures.push(`${name} used ${metric.maxRssKiB} KiB RSS; budget is ${budget.maxRssKiB} KiB`);
         }
