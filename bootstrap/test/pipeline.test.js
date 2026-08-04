@@ -582,6 +582,8 @@ test('Valen compiler source foundation and tokenizer load and lower', () => {
     assert.ok(ir.types.some(type => type.displayName === 'Compiler.SourceFile'));
     assert.ok(ir.types.some(type => type.displayName === 'Compiler.SourceSpan'));
     assert.ok(ir.types.some(type => type.displayName === 'Compiler.Token'));
+    const tokenType = ir.types.find(type => type.displayName === 'Compiler.Token');
+    assert.match(tokenType.fields.find(field => field.name === 'kind').type, /Compiler\.TokenKind$/);
     assert.ok(ir.types.some(type => type.displayName === 'Compiler.Tokenizer'));
     assert.ok(ir.functions.some(fn => fn.displayName === 'Compiler.Tokenizer.tokenize'));
     assert.ok(ir.types.some(type => type.displayName === 'Ast.Program'));

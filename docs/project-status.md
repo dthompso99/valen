@@ -67,6 +67,7 @@ and embedded targets.
 - JavaScript generation 0 is intentionally retained as the stable path from zero; generated native compilers run without JavaScript.
 - The editor-neutral language server provides live diagnostics, quick fixes, hover, go-to-definition, document symbols, and deterministic document formatting; editor packaging remains **WIP**.
 - Diagnostics use a first-class `DiagnosticSeverity` enum with exhaustive rendering, primary and secondary source labels, explanatory notes, and precise replacement hints with generation parity.
+- The self-hosted tokenizer and parser exchange first-class `TokenKind` values while preserving source lexemes as strings.
 - Compiled libraries are emitted as relocatable objects with SemVer `.vmeta` manifests containing compiler-interface, target, ABI, dependency-interface, and integrity fingerprints. Registry resolution and lockfiles remain **WIP** package tooling.
 - Primitive SSA temporaries use conservative linear-scan allocation across `r12`-`r15`, with stack spills and GC-visible managed references.
 - IR canonicalization folds integer/boolean constants, simplifies constant branches, removes unreachable blocks, and eliminates unused pure SSA values without suppressing runtime traps or state changes.

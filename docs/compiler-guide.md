@@ -23,7 +23,7 @@ source -> tokens -> AST -> module graph -> semantic symbols
        -> x86-64 encoding -> ELF object -> linker -> executable
 ```
 
-- Tokenization records source spans for diagnostics.
+- Tokenization records source spans for diagnostics. Token categories use the first-class `Compiler.TokenKind` enum while each token retains its original string lexeme.
 - Structured diagnostics retain a primary span, secondary labeled spans, notes, and replacement hints. Generation 0 and the self-hosted compiler render the same stable text form.
 - Parsing constructs object, member, statement, and expression nodes.
 - Module loading separates importer-relative (`./` and `../`), project-root (`/`), and ordered `VALEN_LIBRARY_PATH` imports. Project and library-relative imports cannot escape their owning root.

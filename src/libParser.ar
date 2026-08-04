@@ -19,16 +19,16 @@ library Parsing {{
             local imports = new Array<Ast.ImportDeclaration>(0)
             local declarations = new Array<Ast.Declaration>(0)
             self.skipSeparators()
-            while !self.check("EOF") {
+            while !self.check(Compiler.TokenKind.EOF) {
                 if self.error != null { break }
-                if self.check("IMPORT") {
+                if self.check(Compiler.TokenKind.IMPORT) {
                     imports.append(self.parseImport())
                 } else {
-                    if self.check("LIBRARY") {
+                    if self.check(Compiler.TokenKind.LIBRARY) {
                         declarations.append(self.parseDeclaration("Library"))
                     } else {
-                        if self.check("TEST") { declarations.append(self.parseDeclaration("Test")) } else {
-                            if self.check("ENUM") { declarations.append(self.parseDeclaration("Enum")) } else { declarations.append(self.parseDeclaration("Object")) }
+                        if self.check(Compiler.TokenKind.TEST) { declarations.append(self.parseDeclaration("Test")) } else {
+                            if self.check(Compiler.TokenKind.ENUM) { declarations.append(self.parseDeclaration("Enum")) } else { declarations.append(self.parseDeclaration("Object")) }
                         }
                     }
                 }
@@ -38,59 +38,59 @@ library Parsing {{
         }
 
         parseImport() -> Ast.ImportDeclaration {
-            local start = self.consume("IMPORT", "Expected 'import'")
-            local name = self.consume("IDENTIFIER", "Expected a library name")
-            self.consume("FROM", "Expected 'from' after imported name")
-            local path = self.consume("STRING_LITERAL", "Expected an imported path")
+            local start = self.consume(Compiler.TokenKind.IMPORT, "Expected 'import'")
+            local name = self.consume(Compiler.TokenKind.IDENTIFIER, "Expected a library name")
+            self.consume(Compiler.TokenKind.FROM, "Expected 'from' after imported name")
+            local path = self.consume(Compiler.TokenKind.STRING_LITERAL, "Expected an imported path")
             return new Ast.ImportDeclaration(name.lexeme, self.decodeString(path.lexeme), self.span(start.span, path.span))
         }
 
         parseDeclaration(kind:string) -> Ast.Declaration {
             local start = self.peek(0)
-            if kind == "Library" { start = self.consume("LIBRARY", "Expected 'library'") }
-            if kind == "Test" { start = self.consume("TEST", "Expected 'test'") }
-            if kind == "Enum" { start = self.consume("ENUM", "Expected 'enum'") }
-            local name = self.consume("IDENTIFIER", "Expected a declaration name")
+            if kind == "Library" { start = self.consume(Compiler.TokenKind.LIBRARY, "Expected 'library'") }
+            if kind == "Test" { start = self.consume(Compiler.TokenKind.TEST, "Expected 'test'") }
+            if kind == "Enum" { start = self.consume(Compiler.TokenKind.ENUM, "Expected 'enum'") }
+            local name = self.consume(Compiler.TokenKind.IDENTIFIER, "Expected a declaration name")
             local typeParameters = new Array<string>(0)
             local typeConstraints = new Array<Ast.TypeReference?>(0)
             if kind == "Object" {
-                if self.accept("LESS") {
-                    typeParameters.append(self.consume("IDENTIFIER", "Expected a type parameter name").lexeme)
-                    if self.accept("COLON") { typeConstraints.append(self.parseTypeReference()) } else { typeConstraints.append(null) }
-                    while self.accept("COMMA") {
-                        typeParameters.append(self.consume("IDENTIFIER", "Expected a type parameter name").lexeme)
-                        if self.accept("COLON") { typeConstraints.append(self.parseTypeReference()) } else { typeConstraints.append(null) }
+                if self.accept(Compiler.TokenKind.LESS) {
+                    typeParameters.append(self.consume(Compiler.TokenKind.IDENTIFIER, "Expected a type parameter name").lexeme)
+                    if self.accept(Compiler.TokenKind.COLON) { typeConstraints.append(self.parseTypeReference()) } else { typeConstraints.append(null) }
+                    while self.accept(Compiler.TokenKind.COMMA) {
+                        typeParameters.append(self.consume(Compiler.TokenKind.IDENTIFIER, "Expected a type parameter name").lexeme)
+                        if self.accept(Compiler.TokenKind.COLON) { typeConstraints.append(self.parseTypeReference()) } else { typeConstraints.append(null) }
                     }
-                    self.consume("GREATER", "Expected '>' after type parameters")
+                    self.consume(Compiler.TokenKind.GREATER, "Expected '>' after type parameters")
                 }
             }
             local inheritedType:Ast.TypeReference? = null
             local implementedTypes = new Array<Ast.TypeReference>(0)
             if kind == "Object" {
-                if self.accept("INHERITS") { inheritedType = self.parseTypeReference() }
-                if self.accept("IMPLEMENTS") {
+                if self.accept(Compiler.TokenKind.INHERITS) { inheritedType = self.parseTypeReference() }
+                if self.accept(Compiler.TokenKind.IMPLEMENTS) {
                     implementedTypes.append(self.parseTypeReference())
-                    while self.accept("COMMA") { implementedTypes.append(self.parseTypeReference()) }
+                    while self.accept(Compiler.TokenKind.COMMA) { implementedTypes.append(self.parseTypeReference()) }
                 }
             }
-            self.consume("LEFT_BRACE", "Expected '{{' after declaration name")
-            self.consume("LEFT_BRACE", "Expected '{{' after declaration name")
+            self.consume(Compiler.TokenKind.LEFT_BRACE, "Expected '{{' after declaration name")
+            self.consume(Compiler.TokenKind.LEFT_BRACE, "Expected '{{' after declaration name")
             local members = new Array<Ast.MemberDeclaration>(0)
             self.skipSeparators()
             while !self.atDeclarationEnd() {
                 if self.error != null { break }
                 if kind == "Enum" {
-                    local enumCase = self.consume("IDENTIFIER", "Expected an enum case")
+                    local enumCase = self.consume(Compiler.TokenKind.IDENTIFIER, "Expected an enum case")
                     local caseNode = new Ast.MemberDeclaration("EnumCase", enumCase.lexeme, enumCase.span)
                     members.append(caseNode)
-                    if self.accept("COMMA") {} else {
+                    if self.accept(Compiler.TokenKind.COMMA) {} else {
                         if !self.atSeparator() && !self.atDeclarationEnd() { self.fail("Expected a newline, ',' or ';' after enum case") }
                     }
                 } else { members.append(self.parseMember(kind == "Library" || kind == "Test")) }
                 self.skipSeparators()
             }
-            self.consume("RIGHT_BRACE", "Expected '}}' after declaration")
-            local end = self.consume("RIGHT_BRACE", "Expected '}}' after declaration")
+            self.consume(Compiler.TokenKind.RIGHT_BRACE, "Expected '}}' after declaration")
+            local end = self.consume(Compiler.TokenKind.RIGHT_BRACE, "Expected '}}' after declaration")
             local declaration = new Ast.Declaration(kind, name.lexeme, members, self.span(start.span, end.span))
             declaration.inheritedType = inheritedType
             declaration.implementedTypes = implementedTypes
@@ -101,19 +101,19 @@ library Parsing {{
 
         parseMember(inLibrary:bool) -> Ast.MemberDeclaration {
             local visibility = "public"
-            if self.accept("PRIVATE") { visibility = "private" } else if self.accept("PUBLIC") { visibility = "public" }
+            if self.accept(Compiler.TokenKind.PRIVATE) { visibility = "private" } else if self.accept(Compiler.TokenKind.PUBLIC) { visibility = "public" }
             local nestedObject:bool = false
-            if self.check("ENUM") {
+            if self.check(Compiler.TokenKind.ENUM) {
                 local declaration = self.parseDeclaration("Enum")
                 local nested = new Ast.MemberDeclaration("Enum", declaration.name, declaration.span)
                 nested.members = declaration.members
                 nested.visibility = visibility
                 return nested
             }
-            if self.check("IDENTIFIER") {
-                if self.peek(1).kind == "INHERITS" || self.peek(1).kind == "IMPLEMENTS" { nestedObject = true }
-                if self.peek(1).kind == "LEFT_BRACE" {
-                    if self.peek(2).kind == "LEFT_BRACE" { nestedObject = true }
+            if self.check(Compiler.TokenKind.IDENTIFIER) {
+                if self.peek(1).kind == Compiler.TokenKind.INHERITS || self.peek(1).kind == Compiler.TokenKind.IMPLEMENTS { nestedObject = true }
+                if self.peek(1).kind == Compiler.TokenKind.LEFT_BRACE {
+                    if self.peek(2).kind == Compiler.TokenKind.LEFT_BRACE { nestedObject = true }
                 }
             }
             if nestedObject {
@@ -127,43 +127,43 @@ library Parsing {{
                 nested.visibility = visibility
                 return nested
             }
-            if self.accept("MEMBER") {
+            if self.accept(Compiler.TokenKind.MEMBER) {
                 local start = self.previous()
-                local reference = self.accept("REF")
+                local reference = self.accept(Compiler.TokenKind.REF)
                 local isWeak:bool = false
-                if !reference { isWeak = self.accept("WEAK") }
-                local name = self.consume("IDENTIFIER", "Expected a field name")
-                self.consume("COLON", "Expected ':' after field name")
+                if !reference { isWeak = self.accept(Compiler.TokenKind.WEAK) }
+                local name = self.consume(Compiler.TokenKind.IDENTIFIER, "Expected a field name")
+                self.consume(Compiler.TokenKind.COLON, "Expected ':' after field name")
                 local field = new Ast.MemberDeclaration("Field", name.lexeme, self.span(start.span, name.span))
                 field.declaredType = self.parseTypeReference()
-                if self.accept("EQUAL") { field.initializer = self.parseExpression() }
+                if self.accept(Compiler.TokenKind.EQUAL) { field.initializer = self.parseExpression() }
                 field.span = self.span(start.span, self.previous().span)
                 field.visibility = visibility
                 field.reference = reference
                 field.weakReference = isWeak
                 return field
             }
-            local isUnsafe = self.accept("UNSAFE")
-            local isNative = self.accept("NATIVE")
+            local isUnsafe = self.accept(Compiler.TokenKind.UNSAFE)
+            local isNative = self.accept(Compiler.TokenKind.NATIVE)
             local start = self.peek(0)
             if isNative || isUnsafe { start = self.previous() }
-            local name = self.consume("IDENTIFIER", "Expected a method name")
+            local name = self.consume(Compiler.TokenKind.IDENTIFIER, "Expected a method name")
             local method = new Ast.MemberDeclaration("Method", name.lexeme, self.span(start.span, name.span))
             method.isNative = isNative
             method.isUnsafe = isUnsafe
             method.visibility = visibility
-            self.consume("LEFT_PAREN", "Expected '(' after method name")
-            if !self.check("RIGHT_PAREN") {
+            self.consume(Compiler.TokenKind.LEFT_PAREN, "Expected '(' after method name")
+            if !self.check(Compiler.TokenKind.RIGHT_PAREN) {
                 local more:bool = true
                 while more {
-                    local owning = self.accept("OWN")
+                    local owning = self.accept(Compiler.TokenKind.OWN)
                     local parameterStart = self.peek(0).span
                     if owning { parameterStart = self.previous().span }
-                    local parameterName = self.consume("IDENTIFIER", "Expected a parameter name")
-                    self.consume("COLON", "Expected ':' after parameter name")
+                    local parameterName = self.consume(Compiler.TokenKind.IDENTIFIER, "Expected a parameter name")
+                    self.consume(Compiler.TokenKind.COLON, "Expected ':' after parameter name")
                     local parameterType = self.parseTypeReference()
                     local defaultValue:Ast.Expression? = null
-                    if self.accept("EQUAL") { defaultValue = self.parseExpression() }
+                    if self.accept(Compiler.TokenKind.EQUAL) { defaultValue = self.parseExpression() }
                     method.parameters.append(new Ast.Parameter(
                         parameterName.lexeme,
                         parameterType,
@@ -171,20 +171,20 @@ library Parsing {{
                         self.span(parameterStart, self.previous().span),
                         owning
                     ))
-                    more = self.accept("COMMA")
+                    more = self.accept(Compiler.TokenKind.COMMA)
                 }
             }
-            self.consume("RIGHT_PAREN", "Expected ')' after parameters")
-            self.consume("ARROW", "Expected '->' after parameters")
-            local returnReference = self.accept("REF")
+            self.consume(Compiler.TokenKind.RIGHT_PAREN, "Expected ')' after parameters")
+            self.consume(Compiler.TokenKind.ARROW, "Expected '->' after parameters")
+            local returnReference = self.accept(Compiler.TokenKind.REF)
             method.returnType = self.parseTypeReference()
             method.returnReference = returnReference
             if isNative {
-                if self.accept("FROM") {
-                    local libraryToken = self.consume("STRING_LITERAL", "Expected a library name after 'from'")
+                if self.accept(Compiler.TokenKind.FROM) {
+                    local libraryToken = self.consume(Compiler.TokenKind.STRING_LITERAL, "Expected a library name after 'from'")
                     method.foreignLibrary = self.decodeString(libraryToken.lexeme)
-                    if self.accept("AS") {
-                        local symbol = self.consume("STRING_LITERAL", "Expected a symbol name after 'as'")
+                    if self.accept(Compiler.TokenKind.AS) {
+                        local symbol = self.consume(Compiler.TokenKind.STRING_LITERAL, "Expected a symbol name after 'as'")
                         method.foreignSymbol = self.decodeString(symbol.lexeme)
                     } else {
                         method.foreignSymbol = method.name
@@ -198,58 +198,58 @@ library Parsing {{
 
         parseTypeReference() -> Ast.TypeReference {
             local ownership = "owned"
-            if self.accept("REF") { ownership = "ref" } else if self.accept("WEAK") { ownership = "weak" }
-            local start = self.consume("IDENTIFIER", "Expected a type name")
+            if self.accept(Compiler.TokenKind.REF) { ownership = "ref" } else if self.accept(Compiler.TokenKind.WEAK) { ownership = "weak" }
+            local start = self.consume(Compiler.TokenKind.IDENTIFIER, "Expected a type name")
             local name = start.lexeme
-            while self.accept("DOT") {
-                local part = self.consume("IDENTIFIER", "Expected a qualified type name")
+            while self.accept(Compiler.TokenKind.DOT) {
+                local part = self.consume(Compiler.TokenKind.IDENTIFIER, "Expected a qualified type name")
                 name = name + "." + part.lexeme
             }
             local arguments = new Array<Ast.TypeReference>(0)
-            if self.accept("LESS") {
+            if self.accept(Compiler.TokenKind.LESS) {
                 local more:bool = true
                 while more {
                     arguments.append(self.parseTypeReference())
-                    more = self.accept("COMMA")
+                    more = self.accept(Compiler.TokenKind.COMMA)
                 }
-                self.consume("GREATER", "Expected '>' after type arguments")
+                self.consume(Compiler.TokenKind.GREATER, "Expected '>' after type arguments")
             }
-            local optional = self.accept("QUESTION")
+            local optional = self.accept(Compiler.TokenKind.QUESTION)
             return new Ast.TypeReference(name, arguments, optional, self.span(start.span, self.previous().span), ownership)
         }
 
         parseBlock() -> Ast.Block {
-            local start = self.consume("LEFT_BRACE", "Expected '{'")
+            local start = self.consume(Compiler.TokenKind.LEFT_BRACE, "Expected '{'")
             local statements = new Array<Ast.Statement>(0)
             self.skipSeparators()
-            while !self.check("RIGHT_BRACE") {
-                if self.check("EOF") { break }
+            while !self.check(Compiler.TokenKind.RIGHT_BRACE) {
+                if self.check(Compiler.TokenKind.EOF) { break }
                 if self.error != null { break }
                 statements.append(self.parseStatement())
                 if !self.atSeparator() {
-                    if !self.check("RIGHT_BRACE") { self.fail("Expected a statement delimiter") }
+                    if !self.check(Compiler.TokenKind.RIGHT_BRACE) { self.fail("Expected a statement delimiter") }
                 }
                 self.skipSeparators()
             }
-            local end = self.consume("RIGHT_BRACE", "Expected '}' after block")
+            local end = self.consume(Compiler.TokenKind.RIGHT_BRACE, "Expected '}' after block")
             return new Ast.Block(statements, self.span(start.span, end.span))
         }
 
         parseStatement() -> Ast.Statement {
-            if self.accept("RETURN") {
+            if self.accept(Compiler.TokenKind.RETURN) {
                 local start = self.previous()
                 local statement = new Ast.Statement("Return", start.span)
                 if !self.atSeparator() {
-                    if !self.check("RIGHT_BRACE") { statement.expression = self.parseExpression() }
+                    if !self.check(Compiler.TokenKind.RIGHT_BRACE) { statement.expression = self.parseExpression() }
                 }
                 statement.span = self.span(start.span, self.previous().span)
                 return statement
             }
-            if self.accept("IF") {
+            if self.accept(Compiler.TokenKind.IF) {
                 return self.parseIf(self.previous())
             }
-            if self.accept("MATCH") { return self.parseMatch(self.previous()) }
-            if self.accept("WHILE") {
+            if self.accept(Compiler.TokenKind.MATCH) { return self.parseMatch(self.previous()) }
+            if self.accept(Compiler.TokenKind.WHILE) {
                 local start = self.previous()
                 local statement = new Ast.Statement("While", start.span)
                 statement.condition = self.parseExpression()
@@ -257,10 +257,10 @@ library Parsing {{
                 statement.span = self.span(start.span, self.previous().span)
                 return statement
             }
-            if self.accept("FOR") {
+            if self.accept(Compiler.TokenKind.FOR) {
                 local start = self.previous()
-                local name = self.consume("IDENTIFIER", "Expected an iteration variable after 'for'")
-                self.consume("IN", "Expected 'in' after iteration variable")
+                local name = self.consume(Compiler.TokenKind.IDENTIFIER, "Expected an iteration variable after 'for'")
+                self.consume(Compiler.TokenKind.IN, "Expected 'in' after iteration variable")
                 local statement = new Ast.Statement("For", start.span)
                 statement.name = name.lexeme
                 statement.expression = self.parseExpression()
@@ -268,26 +268,26 @@ library Parsing {{
                 statement.span = self.span(start.span, statement.body!.span)
                 return statement
             }
-            if self.accept("BREAK") { return new Ast.Statement("Break", self.previous().span) }
-            if self.accept("CONTINUE") { return new Ast.Statement("Continue", self.previous().span) }
-            if self.accept("LOCAL") {
+            if self.accept(Compiler.TokenKind.BREAK) { return new Ast.Statement("Break", self.previous().span) }
+            if self.accept(Compiler.TokenKind.CONTINUE) { return new Ast.Statement("Continue", self.previous().span) }
+            if self.accept(Compiler.TokenKind.LOCAL) {
                 local start = self.previous()
-                local name = self.consume("IDENTIFIER", "Expected a local name")
+                local name = self.consume(Compiler.TokenKind.IDENTIFIER, "Expected a local name")
                 local statement = new Ast.Statement("Local", self.span(start.span, name.span))
                 statement.name = name.lexeme
-                if self.accept("COLON") { statement.declaredType = self.parseTypeReference() }
-                if self.accept("EQUAL") { statement.expression = self.parseExpression() }
+                if self.accept(Compiler.TokenKind.COLON) { statement.declaredType = self.parseTypeReference() }
+                if self.accept(Compiler.TokenKind.EQUAL) { statement.expression = self.parseExpression() }
                 statement.span = self.span(start.span, self.previous().span)
                 return statement
             }
-            if self.accept("UNSAFE") {
+            if self.accept(Compiler.TokenKind.UNSAFE) {
                 local start = self.previous()
                 local statement = new Ast.Statement("Unsafe", start.span)
                 statement.body = self.parseBlock()
                 statement.span = self.span(start.span, statement.body!.span)
                 return statement
             }
-            if self.check("LEFT_BRACE") {
+            if self.check(Compiler.TokenKind.LEFT_BRACE) {
                 local block = self.parseBlock()
                 local statement = new Ast.Statement("Block", block.span)
                 statement.body = block
@@ -305,8 +305,8 @@ library Parsing {{
             statement.body = self.parseBlock()
             local saved = self.current
             self.skipNewlines()
-            if self.accept("ELSE") {
-                if self.accept("IF") {
+            if self.accept(Compiler.TokenKind.ELSE) {
+                if self.accept(Compiler.TokenKind.IF) {
                     local nested = self.parseIf(self.previous())
                     local statements = new Array<Ast.Statement>(0)
                     statements.append(nested)
@@ -320,21 +320,21 @@ library Parsing {{
         parseMatch(start:Compiler.Token) -> Ast.Statement {
             local statement = new Ast.Statement("Match", start.span)
             statement.expression = self.parseExpression()
-            self.consume("LEFT_BRACE", "Expected '{' after match expression")
+            self.consume(Compiler.TokenKind.LEFT_BRACE, "Expected '{' after match expression")
             self.skipSeparators()
-            while !self.check("RIGHT_BRACE") && !self.check("EOF") {
-                if self.accept("CASE") {
+            while !self.check(Compiler.TokenKind.RIGHT_BRACE) && !self.check(Compiler.TokenKind.EOF) {
+                if self.accept(Compiler.TokenKind.CASE) {
                     local caseStart = self.previous()
                     local pattern = self.parseExpression()
                     local body = self.parseBlock()
                     statement.matchCases.append(new Ast.MatchCase(pattern, body, self.span(caseStart.span, body.span)))
-                } else if self.accept("ELSE") {
+                } else if self.accept(Compiler.TokenKind.ELSE) {
                     if statement.alternate != null { self.fail("A match may only declare one else branch") }
                     statement.alternate = self.parseBlock()
                 } else { self.fail("Expected 'case', 'else', or '}' in match") }
                 self.skipSeparators()
             }
-            local end = self.consume("RIGHT_BRACE", "Expected '}' after match")
+            local end = self.consume(Compiler.TokenKind.RIGHT_BRACE, "Expected '}' after match")
             statement.span = self.span(start.span, end.span)
             return statement
         }
@@ -343,7 +343,7 @@ library Parsing {{
 
         parseAssignment() -> ref Ast.Expression {
             local target = self.parseBinary(1)
-            if !self.accept("EQUAL") { return target }
+            if !self.accept(Compiler.TokenKind.EQUAL) { return target }
             local expression = new Ast.Expression("Assignment", self.span(target.span, self.peek(0).span))
             expression.left = target
             expression.right = self.parseAssignment()
@@ -366,7 +366,7 @@ library Parsing {{
         }
 
         parseUnary() -> ref Ast.Expression {
-            if self.accept("BANG") || self.accept("MINUS") || self.accept("COPY") || self.accept("DELETE") {
+            if self.accept(Compiler.TokenKind.BANG) || self.accept(Compiler.TokenKind.MINUS) || self.accept(Compiler.TokenKind.COPY) || self.accept(Compiler.TokenKind.DELETE) {
                 local operator = self.previous()
                 local operand = self.parseUnary()
                 local expression = new Ast.Expression("Unary", self.span(operator.span, operand.span))
@@ -374,9 +374,9 @@ library Parsing {{
                 expression.left = operand
                 return expression
             }
-            if self.accept("NEW") { return self.parseNew(self.previous()) }
+            if self.accept(Compiler.TokenKind.NEW) { return self.parseNew(self.previous()) }
             local expression = self.parsePostfix()
-            while self.accept("AS") {
+            while self.accept(Compiler.TokenKind.AS) {
                 local converted = new Ast.Expression("Conversion", self.span(expression.span, self.peek(0).span))
                 converted.left = expression
                 converted.typeArguments.append(self.parseTypeReference())
@@ -389,22 +389,22 @@ library Parsing {{
         parseNew(start:Compiler.Token) -> Ast.Expression {
             local expression = new Ast.Expression("New", start.span)
             expression.left = self.parsePrimary()
-            while self.accept("DOT") {
-                local memberToken = self.consume("IDENTIFIER", "Expected a member name")
+            while self.accept(Compiler.TokenKind.DOT) {
+                local memberToken = self.consume(Compiler.TokenKind.IDENTIFIER, "Expected a member name")
                 local access = new Ast.Expression("Member", self.span(expression.left!.span, memberToken.span))
                 access.left = expression.left
                 access.name = memberToken.lexeme
                 expression.left = access
             }
-            if self.accept("LESS") {
+            if self.accept(Compiler.TokenKind.LESS) {
                 local more:bool = true
                 while more {
                     expression.typeArguments.append(self.parseTypeReference())
-                    more = self.accept("COMMA")
+                    more = self.accept(Compiler.TokenKind.COMMA)
                 }
-                self.consume("GREATER", "Expected '>' after constructed type")
+                self.consume(Compiler.TokenKind.GREATER, "Expected '>' after constructed type")
             }
-            self.consume("LEFT_PAREN", "Expected '(' after constructed type")
+            self.consume(Compiler.TokenKind.LEFT_PAREN, "Expected '(' after constructed type")
             self.parseArguments(expression.arguments)
             expression.span = self.span(start.span, self.previous().span)
             return expression
@@ -414,34 +414,34 @@ library Parsing {{
             local expression = self.parsePrimary()
             local scanning:bool = true
             while scanning {
-                if self.accept("LEFT_PAREN") {
+                if self.accept(Compiler.TokenKind.LEFT_PAREN) {
                     local call = new Ast.Expression("Call", expression.span)
                     call.left = expression
                     self.parseArguments(call.arguments)
                     call.span = self.span(expression.span, self.previous().span)
                     expression = call
                 } else {
-                    if self.accept("DOT") {
-                        local memberToken = self.consume("IDENTIFIER", "Expected a member name")
+                    if self.accept(Compiler.TokenKind.DOT) {
+                        local memberToken = self.consume(Compiler.TokenKind.IDENTIFIER, "Expected a member name")
                         local access = new Ast.Expression("Member", self.span(expression.span, memberToken.span))
                         access.left = expression
                         access.name = memberToken.lexeme
                         expression = access
                     } else {
-                        if self.accept("LEFT_BRACKET") {
+                        if self.accept(Compiler.TokenKind.LEFT_BRACKET) {
                             local access = new Ast.Expression("Index", expression.span)
                             access.left = expression
                             access.right = self.parseExpression()
-                            local end = self.consume("RIGHT_BRACKET", "Expected ']' after index")
+                            local end = self.consume(Compiler.TokenKind.RIGHT_BRACKET, "Expected ']' after index")
                             access.span = self.span(expression.span, end.span)
                             expression = access
                         } else {
-                            if self.accept("BANG") {
+                            if self.accept(Compiler.TokenKind.BANG) {
                                 local unwrap = new Ast.Expression("Unwrap", self.span(expression.span, self.previous().span))
                                 unwrap.left = expression
                                 expression = unwrap
                             } else {
-                                if self.accept("QUESTION") {
+                                if self.accept(Compiler.TokenKind.QUESTION) {
                                     local propagate = new Ast.Expression("Propagate", self.span(expression.span, self.previous().span))
                                     propagate.left = expression
                                     expression = propagate
@@ -456,50 +456,50 @@ library Parsing {{
 
         parseArguments(arguments:Array<Ast.Expression>) -> void {
             self.skipNewlines()
-            if !self.check("RIGHT_PAREN") {
+            if !self.check(Compiler.TokenKind.RIGHT_PAREN) {
                 local more:bool = true
                 while more {
                     self.skipNewlines()
                     arguments.append(self.parseExpression())
                     self.skipNewlines()
-                    more = self.accept("COMMA")
+                    more = self.accept(Compiler.TokenKind.COMMA)
                 }
             }
-            self.consume("RIGHT_PAREN", "Expected ')' after arguments")
+            self.consume(Compiler.TokenKind.RIGHT_PAREN, "Expected ')' after arguments")
         }
 
         parsePrimary() -> ref Ast.Expression {
             local token = self.advanceToken()
-            if token.kind == "IF" { return self.parseIfExpression(token) }
-            if token.kind == "LEFT_BRACKET" {
+            if token.kind == Compiler.TokenKind.IF { return self.parseIfExpression(token) }
+            if token.kind == Compiler.TokenKind.LEFT_BRACKET {
                 local literal = new Ast.Expression("ArrayLiteral", token.span)
                 self.skipNewlines()
-                if !self.check("RIGHT_BRACKET") {
+                if !self.check(Compiler.TokenKind.RIGHT_BRACKET) {
                     local more:bool = true
                     while more {
                         self.skipNewlines()
                         literal.arguments.append(self.parseExpression())
                         self.skipNewlines()
-                        more = self.accept("COMMA")
+                        more = self.accept(Compiler.TokenKind.COMMA)
                     }
                 }
-                local end = self.consume("RIGHT_BRACKET", "Expected ']' after array literal")
+                local end = self.consume(Compiler.TokenKind.RIGHT_BRACKET, "Expected ']' after array literal")
                 literal.span = self.span(token.span, end.span)
                 return literal
             }
             local kind:string? = null
-            if token.kind == "NULL" { kind = "Null" }
-            if token.kind == "TRUE" || token.kind == "FALSE" { kind = "Boolean" }
-            if token.kind == "INTEGER_LITERAL" { kind = "Integer" }
-            if token.kind == "FLOAT_LITERAL" { kind = "Float" }
-            if token.kind == "STRING_LITERAL" {
+            if token.kind == Compiler.TokenKind.NULL { kind = "Null" }
+            if token.kind == Compiler.TokenKind.TRUE || token.kind == Compiler.TokenKind.FALSE { kind = "Boolean" }
+            if token.kind == Compiler.TokenKind.INTEGER_LITERAL { kind = "Integer" }
+            if token.kind == Compiler.TokenKind.FLOAT_LITERAL { kind = "Float" }
+            if token.kind == Compiler.TokenKind.STRING_LITERAL {
                 if token.lexeme[0] == 34 && self.hasInterpolation(token.lexeme) { return self.parseInterpolatedString(token) }
                 kind = "String"
             }
-            if token.kind == "IDENTIFIER" { kind = "Identifier" }
-            if token.kind == "LEFT_PAREN" {
+            if token.kind == Compiler.TokenKind.IDENTIFIER { kind = "Identifier" }
+            if token.kind == Compiler.TokenKind.LEFT_PAREN {
                 local expression = self.parseExpression()
-                self.consume("RIGHT_PAREN", "Expected ')' after expression")
+                self.consume(Compiler.TokenKind.RIGHT_PAREN, "Expected ')' after expression")
                 return expression
             }
             if kind == null {
@@ -507,8 +507,8 @@ library Parsing {{
                 return new Ast.Expression("Error", token.span)
             }
             local expression = new Ast.Expression(kind!, token.span)
-            if token.kind == "IDENTIFIER" { expression.name = token.lexeme }
-            if token.kind == "STRING_LITERAL" { expression.text = self.decodeString(token.lexeme) } else { expression.text = token.lexeme }
+            if token.kind == Compiler.TokenKind.IDENTIFIER { expression.name = token.lexeme }
+            if token.kind == Compiler.TokenKind.STRING_LITERAL { expression.text = self.decodeString(token.lexeme) } else { expression.text = token.lexeme }
             return expression
         }
 
@@ -517,8 +517,8 @@ library Parsing {{
             expression.left = self.parseExpression()
             expression.body = self.parseBlock()
             self.skipNewlines()
-            self.consume("ELSE", "Expression-valued 'if' requires an 'else' branch")
-            if self.accept("IF") {
+            self.consume(Compiler.TokenKind.ELSE, "Expression-valued 'if' requires an 'else' branch")
+            if self.accept(Compiler.TokenKind.IF) {
                 local nested = self.parseIfExpression(self.previous())
                 local statement = new Ast.Statement("Expression", nested.span)
                 statement.expression = nested
@@ -594,7 +594,7 @@ library Parsing {{
                         local expression = parser.parseExpression()
                         parser.skipNewlines()
                         if parser.error != null { self.fail(parser.error!); return copy result }
-                        if !parser.check("EOF") { self.fail("Expected '}' after interpolation expression"); return copy result }
+                        if !parser.check(Compiler.TokenKind.EOF) { self.fail("Expected '}' after interpolation expression"); return copy result }
                         result.arguments.append(copy expression)
                         index = end + 1
                     } else {
@@ -633,40 +633,40 @@ library Parsing {{
             return -1
         }
 
-        precedence(kind:string) -> i64 {
-            if kind == "OR" { return 1 }
-            if kind == "AND" { return 2 }
-            if kind == "BIT_OR" { return 3 }
-            if kind == "BIT_XOR" { return 4 }
-            if kind == "BIT_AND" { return 5 }
-            if kind == "EQUAL_EQUAL" || kind == "BANG_EQUAL" || kind == "EQUAL_EQUAL_EQUAL" || kind == "BANG_EQUAL_EQUAL" || kind == "IS" { return 6 }
-            if kind == "LESS" || kind == "LESS_EQUAL" || kind == "GREATER" || kind == "GREATER_EQUAL" { return 7 }
-            if kind == "SHIFT_LEFT" || kind == "SHIFT_RIGHT" { return 8 }
-            if kind == "PLUS" || kind == "MINUS" { return 9 }
-            if kind == "STAR" || kind == "SLASH" { return 10 }
+        precedence(kind:Compiler.TokenKind) -> i64 {
+            if kind == Compiler.TokenKind.OR { return 1 }
+            if kind == Compiler.TokenKind.AND { return 2 }
+            if kind == Compiler.TokenKind.BIT_OR { return 3 }
+            if kind == Compiler.TokenKind.BIT_XOR { return 4 }
+            if kind == Compiler.TokenKind.BIT_AND { return 5 }
+            if kind == Compiler.TokenKind.EQUAL_EQUAL || kind == Compiler.TokenKind.BANG_EQUAL || kind == Compiler.TokenKind.EQUAL_EQUAL_EQUAL || kind == Compiler.TokenKind.BANG_EQUAL_EQUAL || kind == Compiler.TokenKind.IS { return 6 }
+            if kind == Compiler.TokenKind.LESS || kind == Compiler.TokenKind.LESS_EQUAL || kind == Compiler.TokenKind.GREATER || kind == Compiler.TokenKind.GREATER_EQUAL { return 7 }
+            if kind == Compiler.TokenKind.SHIFT_LEFT || kind == Compiler.TokenKind.SHIFT_RIGHT { return 8 }
+            if kind == Compiler.TokenKind.PLUS || kind == Compiler.TokenKind.MINUS { return 9 }
+            if kind == Compiler.TokenKind.STAR || kind == Compiler.TokenKind.SLASH { return 10 }
             return 0
         }
 
         atDeclarationEnd() -> bool {
-            return self.check("RIGHT_BRACE") && self.peek(1).kind == "RIGHT_BRACE"
+            return self.check(Compiler.TokenKind.RIGHT_BRACE) && self.peek(1).kind == Compiler.TokenKind.RIGHT_BRACE
         }
-        atSeparator() -> bool { return self.check("NEWLINE") || self.check("SEMICOLON") }
-        skipSeparators() -> void { while self.accept("NEWLINE") || self.accept("SEMICOLON") {} }
-        skipNewlines() -> void { while self.accept("NEWLINE") {} }
-        accept(kind:string) -> bool {
+        atSeparator() -> bool { return self.check(Compiler.TokenKind.NEWLINE) || self.check(Compiler.TokenKind.SEMICOLON) }
+        skipSeparators() -> void { while self.accept(Compiler.TokenKind.NEWLINE) || self.accept(Compiler.TokenKind.SEMICOLON) {} }
+        skipNewlines() -> void { while self.accept(Compiler.TokenKind.NEWLINE) {} }
+        accept(kind:Compiler.TokenKind) -> bool {
             if !self.check(kind) { return false }
             self.current = self.current + 1
             return true
         }
-        check(kind:string) -> bool { return self.peek(0).kind == kind }
-        consume(kind:string, message:string) -> ref Compiler.Token {
+        check(kind:Compiler.TokenKind) -> bool { return self.peek(0).kind == kind }
+        consume(kind:Compiler.TokenKind, message:string) -> ref Compiler.Token {
             if self.check(kind) { return self.advanceToken() }
             self.fail(message)
             return self.peek(0)
         }
         advanceToken() -> ref Compiler.Token {
             local token = self.peek(0)
-            if token.kind != "EOF" { self.current = self.current + 1 }
+            if token.kind != Compiler.TokenKind.EOF { self.current = self.current + 1 }
             return token
         }
         peek(distance:i64) -> ref Compiler.Token {

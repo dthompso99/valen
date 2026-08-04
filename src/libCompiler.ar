@@ -56,12 +56,25 @@ library Compiler {{
         }
     }}
 
+    enum TokenKind {{
+        EOF, NEWLINE, IDENTIFIER, INTEGER_LITERAL, FLOAT_LITERAL, STRING_LITERAL
+        RETURN, NEW, COPY, OWN, REF, WEAK, DELETE
+        IMPORT, FROM, MEMBER, LOCAL, LIBRARY, ENUM, TEST, NATIVE, UNSAFE, PUBLIC, PRIVATE
+        INHERITS, IMPLEMENTS, IF, MATCH, CASE, ELSE, WHILE, FOR, IN, BREAK, CONTINUE
+        TRUE, FALSE, AS, IS, NULL
+        EQUAL, EQUAL_EQUAL, EQUAL_EQUAL_EQUAL, BANG, BANG_EQUAL, BANG_EQUAL_EQUAL
+        MINUS, ARROW, LESS, SHIFT_LEFT, LESS_EQUAL, GREATER, SHIFT_RIGHT, GREATER_EQUAL
+        BIT_AND, AND, BIT_OR, OR, BIT_XOR, PLUS, STAR, SLASH
+        LEFT_PAREN, RIGHT_PAREN, LEFT_BRACE, RIGHT_BRACE, LEFT_BRACKET, RIGHT_BRACKET
+        COMMA, DOT, COLON, QUESTION, SEMICOLON
+    }}
+
     Token {{
-        member kind:string
+        member kind:TokenKind
         member lexeme:string
         member span:SourceSpan
 
-        __(kind:string, lexeme:string, span:SourceSpan) -> void {
+        __(kind:TokenKind, lexeme:string, span:SourceSpan) -> void {
             self.kind = kind
             self.lexeme = lexeme
             self.span = span
@@ -120,7 +133,7 @@ library Compiler {{
                 }
             }
             self.tokens.append(new Token(
-                "EOF",
+                Compiler.TokenKind.EOF,
                 "",
                 new SourceSpan(self.source, self.offset, self.offset, self.line, self.column)
             ))
@@ -132,7 +145,7 @@ library Compiler {{
             local tokenLine = self.line
             local tokenColumn = self.column
             self.advance()
-            self.addToken("NEWLINE", start, tokenLine, tokenColumn)
+            self.addToken(Compiler.TokenKind.NEWLINE, start, tokenLine, tokenColumn)
         }
 
         scanComment() -> void {
@@ -201,7 +214,7 @@ library Compiler {{
                 self.fail("Unclosed string", tokenLine, tokenColumn)
                 return
             }
-            self.addToken("STRING_LITERAL", start, tokenLine, tokenColumn)
+            self.addToken(Compiler.TokenKind.STRING_LITERAL, start, tokenLine, tokenColumn)
         }
 
         scanIdentifier() -> void {
@@ -228,9 +241,9 @@ library Compiler {{
             while self.isDigit(self.peek(0)) {
                 self.advance()
             }
-            local kind = "INTEGER_LITERAL"
+            local kind = Compiler.TokenKind.INTEGER_LITERAL
             if self.peek(0) == 46 && self.isDigit(self.peek(1)) {
-                kind = "FLOAT_LITERAL"
+                kind = Compiler.TokenKind.FLOAT_LITERAL
                 self.advance()
                 while self.isDigit(self.peek(0)) { self.advance() }
             }
@@ -238,7 +251,7 @@ library Compiler {{
                 local next = self.peek(1)
                 local signedDigit = (next == 43 || next == 45) && self.isDigit(self.peek(2))
                 if self.isDigit(next) || signedDigit {
-                    kind = "FLOAT_LITERAL"
+                    kind = Compiler.TokenKind.FLOAT_LITERAL
                     self.advance()
                     if self.peek(0) == 43 || self.peek(0) == 45 { self.advance() }
                     while self.isDigit(self.peek(0)) { self.advance() }
@@ -252,65 +265,65 @@ library Compiler {{
             local tokenLine = self.line
             local tokenColumn = self.column
             local character = self.advance()
-            local kind:string? = null
+            local kind:TokenKind? = null
 
             if character == 61 {
-                kind = "EQUAL"
+                kind = Compiler.TokenKind.EQUAL
                 if self.matchByte(61) {
-                    kind = "EQUAL_EQUAL"
+                    kind = Compiler.TokenKind.EQUAL_EQUAL
                     if self.matchByte(61) {
-                        kind = "EQUAL_EQUAL_EQUAL"
+                        kind = Compiler.TokenKind.EQUAL_EQUAL_EQUAL
                     }
                 }
             }
             if character == 33 {
-                kind = "BANG"
+                kind = Compiler.TokenKind.BANG
                 if self.matchByte(61) {
-                    kind = "BANG_EQUAL"
+                    kind = Compiler.TokenKind.BANG_EQUAL
                     if self.matchByte(61) {
-                        kind = "BANG_EQUAL_EQUAL"
+                        kind = Compiler.TokenKind.BANG_EQUAL_EQUAL
                     }
                 }
             }
             if character == 45 {
-                kind = "MINUS"
+                kind = Compiler.TokenKind.MINUS
                 if self.matchByte(62) {
-                    kind = "ARROW"
+                    kind = Compiler.TokenKind.ARROW
                 }
             }
             if character == 60 {
-                kind = "LESS"
-                if self.matchByte(60) { kind = "SHIFT_LEFT" }
-                else if self.matchByte(61) { kind = "LESS_EQUAL" }
+                kind = Compiler.TokenKind.LESS
+                if self.matchByte(60) { kind = Compiler.TokenKind.SHIFT_LEFT }
+                else if self.matchByte(61) { kind = Compiler.TokenKind.LESS_EQUAL }
             }
             if character == 62 {
-                kind = "GREATER"
-                if self.matchByte(62) { kind = "SHIFT_RIGHT" }
-                else if self.matchByte(61) { kind = "GREATER_EQUAL" }
+                kind = Compiler.TokenKind.GREATER
+                if self.matchByte(62) { kind = Compiler.TokenKind.SHIFT_RIGHT }
+                else if self.matchByte(61) { kind = Compiler.TokenKind.GREATER_EQUAL }
             }
             if character == 38 {
-                kind = "BIT_AND"
-                if self.matchByte(38) { kind = "AND" }
+                kind = Compiler.TokenKind.BIT_AND
+                if self.matchByte(38) { kind = Compiler.TokenKind.AND }
             }
             if character == 124 {
-                kind = "BIT_OR"
-                if self.matchByte(124) { kind = "OR" }
+                kind = Compiler.TokenKind.BIT_OR
+                if self.matchByte(124) { kind = Compiler.TokenKind.OR }
             }
-            if character == 94 { kind = "BIT_XOR" }
-            if character == 43 { kind = "PLUS" }
-            if character == 42 { kind = "STAR" }
-            if character == 47 { kind = "SLASH" }
-            if character == 40 { kind = "LEFT_PAREN" }
-            if character == 41 { kind = "RIGHT_PAREN" }
-            if character == 123 { kind = "LEFT_BRACE" }
-            if character == 125 { kind = "RIGHT_BRACE" }
-            if character == 91 { kind = "LEFT_BRACKET" }
-            if character == 93 { kind = "RIGHT_BRACKET" }
-            if character == 44 { kind = "COMMA" }
-            if character == 46 { kind = "DOT" }
-            if character == 58 { kind = "COLON" }
-            if character == 63 { kind = "QUESTION" }
-            if character == 59 { kind = "SEMICOLON" }
+            if character == 94 { kind = Compiler.TokenKind.BIT_XOR }
+            if character == 43 { kind = Compiler.TokenKind.PLUS }
+            if character == 42 { kind = Compiler.TokenKind.STAR }
+            if character == 47 { kind = Compiler.TokenKind.SLASH }
+            if character == 40 { kind = Compiler.TokenKind.LEFT_PAREN }
+            if character == 41 { kind = Compiler.TokenKind.RIGHT_PAREN }
+            if character == 123 { kind = Compiler.TokenKind.LEFT_BRACE }
+            if character == 125 { kind = Compiler.TokenKind.RIGHT_BRACE }
+            if character == 91 { kind = Compiler.TokenKind.LEFT_BRACKET }
+            if character == 93 { kind = Compiler.TokenKind.RIGHT_BRACKET }
+            if character == 44 { kind = Compiler.TokenKind.COMMA }
+            if character == 46 { kind = Compiler.TokenKind.DOT }
+            if character == 58 { kind = Compiler.TokenKind.COLON }
+            if character == 63 { kind = Compiler.TokenKind.QUESTION }
+            if character == 59 { kind = Compiler.TokenKind.SEMICOLON }
 
             if kind == null {
                 self.fail("Unexpected byte " + character.toString(), tokenLine, tokenColumn)
@@ -319,45 +332,45 @@ library Compiler {{
             self.addToken(kind!, start, tokenLine, tokenColumn)
         }
 
-        keywordKind(value:string) -> string {
-            if value == "return" { return "RETURN" }
-            if value == "new" { return "NEW" }
-            if value == "copy" { return "COPY" }
-            if value == "own" { return "OWN" }
-            if value == "ref" { return "REF" }
-            if value == "weak" { return "WEAK" }
-            if value == "delete" { return "DELETE" }
-            if value == "import" { return "IMPORT" }
-            if value == "from" { return "FROM" }
-            if value == "member" { return "MEMBER" }
-            if value == "local" { return "LOCAL" }
-            if value == "library" { return "LIBRARY" }
-            if value == "enum" { return "ENUM" }
-            if value == "test" { return "TEST" }
-            if value == "native" { return "NATIVE" }
-            if value == "unsafe" { return "UNSAFE" }
-            if value == "public" { return "PUBLIC" }
-            if value == "private" { return "PRIVATE" }
-            if value == "inherits" { return "INHERITS" }
-            if value == "implements" { return "IMPLEMENTS" }
-            if value == "if" { return "IF" }
-            if value == "match" { return "MATCH" }
-            if value == "case" { return "CASE" }
-            if value == "else" { return "ELSE" }
-            if value == "while" { return "WHILE" }
-            if value == "for" { return "FOR" }
-            if value == "in" { return "IN" }
-            if value == "break" { return "BREAK" }
-            if value == "continue" { return "CONTINUE" }
-            if value == "true" { return "TRUE" }
-            if value == "false" { return "FALSE" }
-            if value == "as" { return "AS" }
-            if value == "is" { return "IS" }
-            if value == "null" { return "NULL" }
-            return "IDENTIFIER"
+        keywordKind(value:string) -> TokenKind {
+            if value == "return" { return Compiler.TokenKind.RETURN }
+            if value == "new" { return Compiler.TokenKind.NEW }
+            if value == "copy" { return Compiler.TokenKind.COPY }
+            if value == "own" { return Compiler.TokenKind.OWN }
+            if value == "ref" { return Compiler.TokenKind.REF }
+            if value == "weak" { return Compiler.TokenKind.WEAK }
+            if value == "delete" { return Compiler.TokenKind.DELETE }
+            if value == "import" { return Compiler.TokenKind.IMPORT }
+            if value == "from" { return Compiler.TokenKind.FROM }
+            if value == "member" { return Compiler.TokenKind.MEMBER }
+            if value == "local" { return Compiler.TokenKind.LOCAL }
+            if value == "library" { return Compiler.TokenKind.LIBRARY }
+            if value == "enum" { return Compiler.TokenKind.ENUM }
+            if value == "test" { return Compiler.TokenKind.TEST }
+            if value == "native" { return Compiler.TokenKind.NATIVE }
+            if value == "unsafe" { return Compiler.TokenKind.UNSAFE }
+            if value == "public" { return Compiler.TokenKind.PUBLIC }
+            if value == "private" { return Compiler.TokenKind.PRIVATE }
+            if value == "inherits" { return Compiler.TokenKind.INHERITS }
+            if value == "implements" { return Compiler.TokenKind.IMPLEMENTS }
+            if value == "if" { return Compiler.TokenKind.IF }
+            if value == "match" { return Compiler.TokenKind.MATCH }
+            if value == "case" { return Compiler.TokenKind.CASE }
+            if value == "else" { return Compiler.TokenKind.ELSE }
+            if value == "while" { return Compiler.TokenKind.WHILE }
+            if value == "for" { return Compiler.TokenKind.FOR }
+            if value == "in" { return Compiler.TokenKind.IN }
+            if value == "break" { return Compiler.TokenKind.BREAK }
+            if value == "continue" { return Compiler.TokenKind.CONTINUE }
+            if value == "true" { return Compiler.TokenKind.TRUE }
+            if value == "false" { return Compiler.TokenKind.FALSE }
+            if value == "as" { return Compiler.TokenKind.AS }
+            if value == "is" { return Compiler.TokenKind.IS }
+            if value == "null" { return Compiler.TokenKind.NULL }
+            return Compiler.TokenKind.IDENTIFIER
         }
 
-        addToken(kind:string, start:i64, tokenLine:i64, tokenColumn:i64) -> void {
+        addToken(kind:TokenKind, start:i64, tokenLine:i64, tokenColumn:i64) -> void {
             self.tokens.append(new Token(
                 kind,
                 self.source.content.slice(start, self.offset - start),
