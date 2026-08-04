@@ -732,7 +732,7 @@ test('operation state has stable success, failure, cancellation, and waiting sem
     assert.match(reusedWork.diagnostics[0].message, /Cannot pass borrowed reference 'work'/);
 });
 
-test('native synchronization and single-worker execution lower through the portable operation contracts', () => {
+test('native synchronization and pooled execution coordinate with tracing collection', () => {
     const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/threading.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
@@ -740,6 +740,11 @@ test('native synchronization and single-worker execution lower through the porta
     const assembly = new X86_64Backend().generate(ir);
     assert.match(assembly, /valen_Operations_threadStart:/);
     assert.match(assembly, /call pthread_create/);
+    assert.match(assembly, /lock inc QWORD PTR \[rip\+valen_gc_workers\]/);
+    assert.match(assembly, /lock dec QWORD PTR \[rip\+valen_gc_workers\]/);
+    assert.match(assembly, /valen_gc_root_push:/);
+    assert.match(assembly, /valen_gc_root_pop:/);
+    assert.match(assembly, /valen_gc_collect:[\s\S]*cmp QWORD PTR \[rip\+valen_gc_workers\], 0/);
     assert.match(assembly, /lock cmpxchg DWORD PTR/);
     assert.match(assembly, /lock xadd QWORD PTR/);
 });

@@ -377,8 +377,9 @@ interest, and is submitted with `submitReady()`.
 The pool queues work in submission order. `shutdown()` drains the queue and joins its workers; later
 submissions execute inline. Targets without native threads, and pools constructed with a non-positive
 size, use inline execution automatically. Cancellation succeeds only before a worker claims an operation.
-Native pools currently select the locked process-lifetime arena because tracing roots are not thread-aware;
-their managed allocations are reclaimed at process exit. Inline fallback retains ordinary tracing collection.
+Native workers register their active frames in a synchronized tracing-root registry. Collection defers while
+workers are active, then resumes when the last worker is joined and immediately reclaims unreachable worker
+allocations. Calling `System.collectGarbage()` while work is active is safe and defers collection to that join.
 
 ## Native and unsafe code
 

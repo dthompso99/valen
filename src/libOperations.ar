@@ -1,5 +1,4 @@
 import EventLoop from './libEventLoop.ar'
-import System from './libSystem.ar'
 
 library Operations {{
     native threadAvailable() -> bool
@@ -369,7 +368,6 @@ library Operations {{
             self.stopping = false
             self.inline = size <= 0 || !Operations.threadAvailable()
             if self.inline { return }
-            System.enableProcessArena()
             local index:i64 = 0
             while index < size {
                 local worker = new ThreadOperation(new PoolWorker(self))

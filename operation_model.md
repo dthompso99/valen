@@ -43,10 +43,11 @@ thread support selects the same inline behavior from construction. Callers must 
 work from every pool worker simultaneously; cross-operation dependency scheduling remains the caller's
 responsibility until worker-aware cooperative waiting is introduced.
 
-The tracing collector and its root chain are not yet thread-aware. Before native workers start, the pool
-therefore enables Valen's locked process-lifetime arena. This makes concurrent allocation safe and disables
-collection while workers may hold roots. Inline fallback does not enable the arena. Thread-aware tracing GC
-is required before pooled processes can reclaim managed allocations before process exit.
+Native worker lifetimes coordinate with the tracing collector. Active frames from every thread are kept in
+a synchronized root registry, concurrent allocations are published to the heap atomically, and collection is
+suspended while a joinable worker may mutate its roots. Joining the last worker resumes collection and runs
+an immediate trace, so temporary worker allocations are reclaimable without serializing the work itself.
+Explicit collection requests made while workers are active safely defer to that join boundary.
 
 
 ## Readiness event loops

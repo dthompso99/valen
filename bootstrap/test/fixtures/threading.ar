@@ -1,7 +1,12 @@
 import Operations from '../../../src/libOperations.ar'
+import System from '../../../src/libSystem.ar'
 
 BackgroundWork implements Operations.Work {{
     run() -> Operations.OperationResult { return new Operations.Failed(42, "worker complete") }
+}}
+
+WorkerValue {{
+    member value:i64
 }}
 
 BlockingWork implements Operations.Work {{
@@ -16,6 +21,15 @@ BlockingWork implements Operations.Work {{
     }
 
     run() -> Operations.OperationResult {
+        local values = new Array<WorkerValue>(0)
+        local index:i64 = 0
+        while index < 256 {
+            local value = new WorkerValue()
+            value.value = self.codeValue + index
+            values.append(value)
+            index = index + 1
+        }
+        if values[255].value != self.codeValue + 255 { return new Operations.Failed(99, "allocation failure") }
         self.ready.add(1)
         while self.gate.load() == 0 {}
         return new Operations.Failed(self.codeValue, "pool complete")
@@ -55,6 +69,7 @@ entry {{
         local second = pool.submit(new BlockingWork(ready, gate, 52))
         local cancelled = pool.submit(new BlockingWork(ready, gate, 53))
         while ready.load() < 2 {}
+        System.collectGarbage()
         if !cancelled.cancel() { return 11 }
         gate.store(1)
         if first.wait().code() != 51 { return 12 }

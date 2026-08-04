@@ -18,6 +18,7 @@
 - source-level tests and native test execution
 - native/C FFI boundaries
 - inline operations, single-worker and fixed-size pooled native execution, mutexes, conditions, and atomics
+- synchronized cross-thread GC roots and reclamation at native worker join boundaries
 
 ## WIP: language ergonomics
 
