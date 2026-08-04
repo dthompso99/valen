@@ -642,6 +642,7 @@ export class IrGenerator {
 
     lowerMember(expression) {
         const symbol = expression.semanticSymbol;
+        if (symbol?.kind === 'EnumCase') return this.result('constant', symbol.type, {value: symbol.value});
         if (symbol?.kind === 'ArrayLength' || symbol?.kind === 'ArrayCapacity') {
             const array = this.lowerExpression(expression.object);
             return this.result(expression.semanticSymbol.kind === 'ArrayCapacity' ? 'array_capacity' : 'array_length', 'i64', {array});
@@ -793,6 +794,10 @@ export class IrGenerator {
         if (method.kind === 'StructuralHash') {
             const value = this.lowerExpression(expression.callee.object);
             return this.result('structural_hash', 'i64', {value, valueType: method.valueType});
+        }
+        if (method.kind === 'EnumHash') {
+            const value = this.lowerExpression(expression.callee.object);
+            return {...value, type: 'i64'};
         }
 
         if (method.owner.kind === 'Object') {

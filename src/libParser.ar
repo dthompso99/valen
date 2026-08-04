@@ -27,7 +27,9 @@ library Parsing {{
                     if self.check("LIBRARY") {
                         declarations.append(self.parseDeclaration("Library"))
                     } else {
-                        if self.check("TEST") { declarations.append(self.parseDeclaration("Test")) } else { declarations.append(self.parseDeclaration("Object")) }
+                        if self.check("TEST") { declarations.append(self.parseDeclaration("Test")) } else {
+                            if self.check("ENUM") { declarations.append(self.parseDeclaration("Enum")) } else { declarations.append(self.parseDeclaration("Object")) }
+                        }
                     }
                 }
                 self.skipSeparators()
@@ -47,6 +49,7 @@ library Parsing {{
             local start = self.peek(0)
             if kind == "Library" { start = self.consume("LIBRARY", "Expected 'library'") }
             if kind == "Test" { start = self.consume("TEST", "Expected 'test'") }
+            if kind == "Enum" { start = self.consume("ENUM", "Expected 'enum'") }
             local name = self.consume("IDENTIFIER", "Expected a declaration name")
             local typeParameters = new Array<string>(0)
             local typeConstraints = new Array<Ast.TypeReference?>(0)
@@ -76,7 +79,14 @@ library Parsing {{
             self.skipSeparators()
             while !self.atDeclarationEnd() {
                 if self.error != null { break }
-                members.append(self.parseMember(kind == "Library" || kind == "Test"))
+                if kind == "Enum" {
+                    local enumCase = self.consume("IDENTIFIER", "Expected an enum case")
+                    local caseNode = new Ast.MemberDeclaration("EnumCase", enumCase.lexeme, enumCase.span)
+                    members.append(caseNode)
+                    if self.match("COMMA") {} else {
+                        if !self.atSeparator() && !self.atDeclarationEnd() { self.fail("Expected a newline, ',' or ';' after enum case") }
+                    }
+                } else { members.append(self.parseMember(kind == "Library" || kind == "Test")) }
                 self.skipSeparators()
             }
             self.consume("RIGHT_BRACE", "Expected '}}' after declaration")
@@ -93,6 +103,13 @@ library Parsing {{
             local visibility = "public"
             if self.match("PRIVATE") { visibility = "private" } else { if self.match("PUBLIC") { visibility = "public" } }
             local nestedObject:bool = false
+            if self.check("ENUM") {
+                local declaration = self.parseDeclaration("Enum")
+                local nested = new Ast.MemberDeclaration("Enum", declaration.name, declaration.span)
+                nested.members = declaration.members
+                nested.visibility = visibility
+                return nested
+            }
             if self.check("IDENTIFIER") {
                 if self.peek(1).kind == "INHERITS" || self.peek(1).kind == "IMPLEMENTS" { nestedObject = true }
                 if self.peek(1).kind == "LEFT_BRACE" {

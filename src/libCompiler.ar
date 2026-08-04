@@ -332,6 +332,7 @@ library Compiler {{
             if value == "member" { return "MEMBER" }
             if value == "local" { return "LOCAL" }
             if value == "library" { return "LIBRARY" }
+            if value == "enum" { return "ENUM" }
             if value == "test" { return "TEST" }
             if value == "native" { return "NATIVE" }
             if value == "unsafe" { return "UNSAFE" }

@@ -1128,6 +1128,9 @@ library Ir {{
         }
 
         lowerMember(expression:Ast.Expression) -> ref Value {
+            if expression.symbol != null {
+                if expression.symbol!.kind == "EnumCase" { return self.constant(expression.symbol!.enumValue.toString(), expression.symbol!.typeName!) }
+            }
             if expression.name! == "length" {
                 local owner = self.lowerExpression(expression.left!)
                 local op = "array_length"
@@ -1302,6 +1305,9 @@ library Ir {{
             }
             if name == "hash" {
                 local hashValue = self.lowerExpression(callee.left!)
+                if callee.symbol != null {
+                    if callee.symbol!.kind == "EnumHash" { hashValue.typeName = "i64"; return hashValue }
+                }
                 local hashed = self.temporary("structural_hash", "i64")
                 hashed.first = hashValue
                 hashed.ownerType = receiverType

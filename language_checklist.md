@@ -44,7 +44,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 
 - [x] Add general-purpose generic objects beyond `Array<T>` using invariant monomorphized specializations
 - [x] Define generic constraints using contracts
-- [ ] Add first-class enum and sum-type declarations
+- [x] Add first-class payload-free enum declarations with value equality and hashing; associated-value sum types remain WIP
 - [x] Add optional value types for stack primitives
 - [x] Add flow-sensitive optional narrowing
 - [x] Generalize safe `Result` propagation

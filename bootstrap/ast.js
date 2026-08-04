@@ -44,6 +44,24 @@ export class ObjectDeclaration extends AstNode {
     }
 }
 
+export class EnumDeclaration extends AstNode {
+    constructor(name, cases, span) {
+        super('EnumDeclaration', span);
+        this.name = name;
+        this.cases = cases;
+        this.members = [];
+        this.visibility = 'public';
+    }
+}
+
+export class EnumCaseDeclaration extends AstNode {
+    constructor(name, value, span) {
+        super('EnumCaseDeclaration', span);
+        this.name = name;
+        this.value = value;
+    }
+}
+
 export class MethodDeclaration extends AstNode {
     constructor(name, parameters, returnType, body, isNative, span) {
         super('MethodDeclaration', span);

@@ -245,6 +245,27 @@ Box<T:Printable> {{
 Every concrete type argument must implement the named contract. Multiple parameters carry their
 own constraints, for example `Map<K:Hashable, V>`. Generic methods remain **WIP**.
 
+## Enums
+
+Enums define a closed set of payload-free named values. Cases use `Type.Case`, carry an allocation-free
+64-bit tag in declaration order starting at zero, and support `==`, `!=`, and `hash()` as value operations.
+
+```valen
+enum Direction {{
+    North
+    East
+    South
+    West
+}}
+
+local direction:Direction = Direction.North
+if direction != Direction.South { local tag:i64 = direction.hash() }
+```
+
+Cases may be comma-, semicolon-, or newline-separated. Enums may be top-level declarations or public/private
+nested declarations inside objects and libraries. Different enum types are not assignable even when their tags
+match. Associated-value cases and exhaustive matching remain **WIP**.
+
 Strings support byte indexing, length, equality, concatenation, slicing, integer conversion, interpolation, and `StringBuilder`. `text.toBytes()` creates an independent `Array<u8>`, while `bytes.toString()` converts an `Array<u8>` back to an immutable string. `StringBuilder.appendBytes(bytes)` and ordinary string appends reserve once and bulk-copy their input.
 
 String storage and the existing `length`, indexing, and `slice` APIs remain explicitly UTF-8 byte-oriented. Unicode-aware code uses `codePointLength` and `codePointAt(index)` for scalar values, or `graphemeLength` and `graphemeAt(index)` for user-perceived characters. `codePointAt` returns the scalar as an `i64`; malformed UTF-8 consumes one byte and returns U+FFFD. Both indexed Unicode APIs use the ordinary bounds-error status (70).

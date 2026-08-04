@@ -25,6 +25,7 @@ library Symbols {{
         member contracts:Array<ref Symbol>
         member externalResource:bool
         member initializerCycleState:i64
+        member enumValue:i64
 
         __(kind:string, name:string, qualifiedName:string, span:Compiler.SourceSpan) -> void {
             self.kind = kind
@@ -50,6 +51,7 @@ library Symbols {{
             self.contracts = new Array<ref Symbol>(0)
             self.externalResource = false
             self.initializerCycleState = 0
+            self.enumValue = 0
         }
     }}
 

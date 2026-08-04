@@ -205,6 +205,7 @@ export class SemanticAnalyzer {
     }
 
     declareObject(declaration, parent, scope, kind = 'Object') {
+        if (declaration.kind === 'EnumDeclaration') return this.declareEnum(declaration, parent, scope);
         const qualifiedName = parent ? `${parent.qualifiedName}.${declaration.name}` : declaration.name;
         const type = parent
             ? `${parent.type}.${declaration.name}`
@@ -235,20 +236,45 @@ export class SemanticAnalyzer {
         this.annotate(declaration, qualifiedName, symbol);
 
         for (const member of declaration.members) {
-            if (member.kind === 'ObjectDeclaration') this.declareObject(member, symbol, new ObjectScope(symbol, symbol.moduleScope));
+            if (member.kind === 'ObjectDeclaration' || member.kind === 'EnumDeclaration') this.declareObject(member, symbol, new ObjectScope(symbol, symbol.moduleScope));
+        }
+    }
+
+    declareEnum(declaration, parent, scope) {
+        const qualifiedName = parent ? `${parent.qualifiedName}.${declaration.name}` : declaration.name;
+        const type = parent ? `${parent.type}.${declaration.name}` : scope.moduleId ? `${scope.moduleId}::${declaration.name}` : declaration.name;
+        const symbol = {
+            kind: 'Enum', name: declaration.name, qualifiedName, type, declaration, parent,
+            fields: new Map(), methods: new Map(), methodOverloads: new Map(), objects: new Map(),
+            base: null, contracts: [], visibility: declaration.visibility ?? 'public', moduleScope: parent?.moduleScope ?? scope
+        };
+        if (parent?.objects.has(declaration.name)) {
+            this.report(declaration.span, `Duplicate member '${declaration.name}' in ${parent.qualifiedName}`);
+            return;
+        }
+        if (!scope.define(declaration.name, symbol, declaration.span, this.diagnostics)) return;
+        if (parent) parent.objects.set(declaration.name, symbol);
+        this.objectSymbols.set(declaration, symbol);
+        this.annotate(declaration, type, symbol);
+        for (const item of declaration.cases) {
+            const caseSymbol = {kind: 'EnumCase', name: item.name, qualifiedName: `${qualifiedName}.${item.name}`, type, value: item.value, owner: symbol, visibility: 'public'};
+            if (symbol.fields.has(item.name)) this.report(item.span, `Duplicate member '${item.name}'`);
+            else symbol.fields.set(item.name, caseSymbol);
+            this.annotate(item, type, caseSymbol);
         }
     }
 
     declareMembers(declaration) {
         const object = this.objectSymbols.get(declaration);
         if (!object) return;
+        if (object.kind === 'Enum') return;
 
         for (const member of declaration.members) {
             if (member.kind === 'FieldDeclaration') {
                 this.defineMember(object, object.fields, member, 'Field');
             } else if (member.kind === 'MethodDeclaration') {
                 this.defineMember(object, object.methods, member, 'Method');
-            } else if (member.kind === 'ObjectDeclaration') {
+            } else if (member.kind === 'ObjectDeclaration' || member.kind === 'EnumDeclaration') {
                 this.declareMembers(member);
             }
         }
@@ -329,6 +355,7 @@ export class SemanticAnalyzer {
     bindRelationships(declaration) {
         const object = this.objectSymbols.get(declaration);
         if (!object) return;
+        if (object.kind === 'Enum') return;
 
         if (object.kind === 'Object' && declaration.inheritedType) {
             const type = this.resolveTypeReference(declaration.inheritedType, object);
@@ -358,6 +385,7 @@ export class SemanticAnalyzer {
     validateRelationships(declaration) {
         const object = this.objectSymbols.get(declaration);
         if (!object) return;
+        if (object.kind === 'Enum') return;
 
         if (object.kind === 'Object' && object.base && this.inheritanceContains(object.base, object)) {
             this.report(declaration.inheritedType.span, `Inheritance cycle involving '${object.qualifiedName}'`);
@@ -1014,7 +1042,10 @@ export class SemanticAnalyzer {
                             if (privateMethod) this.report(expression.span, `Private method '${privateMethod.qualifiedName}' is not visible here`);
                         }
                     }
-                    if (!symbol && expression.member === 'hash') symbol = {kind: 'StructuralHash', name: 'hash', type: I64, valueType: ownerType};
+                    if (!symbol && expression.member === 'hash') symbol = {
+                        kind: owner.kind === 'Enum' ? 'EnumHash' : 'StructuralHash',
+                        name: 'hash', type: I64, valueType: ownerType
+                    };
                     if (symbol?.kind === 'Field' && this.contractTypes.has(owner.type)) {
                         const selfAccess = expression.object.semanticSymbol?.kind === 'Self' && this.currentMethod?.owner === owner;
                         if (!selfAccess) {
@@ -1238,6 +1269,8 @@ export class SemanticAnalyzer {
                     const compatible = left === right || this.conformsTo(left, right) || this.conformsTo(right, left);
                     if (!compatible) this.report(expression.span, `Structural equality requires compatible references, got '${left}' and '${right}'`);
                     type = BOOL;
+                } else if (left === right && this.findObjectType(left)?.kind === 'Enum' && ['==', '!='].includes(expression.operator)) {
+                    type = BOOL;
                 } else if (left === BOOL && right === BOOL && ['==', '!=', '===', '!=='].includes(expression.operator)) {
                     type = BOOL;
                 } else if ((!integerTypes.has(left) && !this.isFloat(left)) || (!integerTypes.has(right) && !this.isFloat(right))) {
@@ -1411,7 +1444,7 @@ export class SemanticAnalyzer {
                 } else if (callee?.kind === 'StringBuilderBuild') {
                     if (argumentTypes.length !== 0) this.report(expression.span, 'StringBuilder.build expects no arguments');
                     type = STRING;
-                } else if (callee?.kind === 'StructuralHash') {
+                } else if (callee?.kind === 'StructuralHash' || callee?.kind === 'EnumHash') {
                     if (argumentTypes.length !== 0) this.report(expression.span, 'hash expects no arguments');
                     type = I64;
                 } else {
@@ -1552,7 +1585,7 @@ export class SemanticAnalyzer {
                 for (let index = 1; qualified && index < parts.length; index++) {
                     qualified = qualified.objects?.get(parts[index]) ?? null;
                 }
-                if (qualified?.kind === 'Object') {
+                if (qualified?.kind === 'Object' || qualified?.kind === 'Enum') {
                     type = qualified.type;
                     resolvedSymbol = qualified;
                 }
@@ -1574,7 +1607,7 @@ export class SemanticAnalyzer {
             }
             if (!type) {
                 const global = (currentObject.moduleScope ?? this.globals).lookup(reference.name);
-                if (global?.kind === 'BuiltinType' || global?.kind === 'Object') {
+                if (global?.kind === 'BuiltinType' || global?.kind === 'Object' || global?.kind === 'Enum') {
                     type = global.type;
                     resolvedSymbol = global;
                 }
@@ -1640,7 +1673,8 @@ export class SemanticAnalyzer {
 
     isReferenceType(type) {
         const base = this.isOptionalType(type) ? this.optionalBaseType(type) : type;
-        return base === STRING || base === STRING_BUILDER || this.arrayElementType(base) !== null || this.findObjectType(base) !== null;
+        const declared = this.findObjectType(base);
+        return base === STRING || base === STRING_BUILDER || this.arrayElementType(base) !== null || declared !== null && declared.kind !== 'Enum';
     }
 
     isOwningExpression(expression) {
@@ -1676,7 +1710,8 @@ export class SemanticAnalyzer {
 
     isOwnedReferenceType(type) {
         const base = this.isOptionalType(type) ? this.optionalBaseType(type) : type;
-        return base === STRING_BUILDER || this.arrayElementType(base) !== null || this.findObjectType(base) !== null;
+        const declared = this.findObjectType(base);
+        return base === STRING_BUILDER || this.arrayElementType(base) !== null || declared !== null && declared.kind !== 'Enum';
     }
 
     transferOwnership(expression) {

@@ -1,0 +1,31 @@
+enum Direction {{
+    North
+    East
+    South
+    West
+}}
+
+enum Status {{ Ready, Failed }}
+
+library Protocol {{
+    enum State {{
+        Idle
+        Running
+        Stopped
+    }}
+}}
+
+entry {{
+    __() -> i64 {
+        local direction:Direction = Direction.East
+        if direction == Direction.North { return 1 }
+        if direction != Direction.East { return 2 }
+        if direction.hash() != 1 { return 3 }
+        local state:Protocol.State = Protocol.State.Running
+        if state.hash() != 1 { return 4 }
+        local selected = if true { Direction.South } else { Direction.West }
+        if selected != Direction.South { return 5 }
+        if Status.Ready == Status.Failed { return 6 }
+        return 0
+    }
+}}

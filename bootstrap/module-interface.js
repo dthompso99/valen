@@ -51,14 +51,16 @@ const member = declaration => {
 };
 
 const container = declaration => ({
-    kind: declaration.kind === 'LibraryDeclaration' ? 'library' : 'object',
+    kind: declaration.kind === 'LibraryDeclaration' ? 'library' : declaration.kind === 'EnumDeclaration' ? 'enum' : 'object',
     name: declaration.name,
     visibility: declaration.visibility ?? 'public',
     typeParameters: declaration.typeParameters ?? [],
     typeConstraints: (declaration.typeConstraints ?? []).map(type),
     inherits: type(declaration.inheritedType),
     implements: (declaration.implementedTypes ?? []).map(type),
-    members: declaration.members.filter(item => item.visibility !== 'private').map(member)
+    members: declaration.kind === 'EnumDeclaration'
+        ? declaration.cases.map(item => ({kind: 'enum-case', name: item.name, value: item.value}))
+        : declaration.members.filter(item => item.visibility !== 'private').map(member)
 });
 
 export class ModuleInterface {

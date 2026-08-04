@@ -40,7 +40,7 @@ library ModuleInterfaces {{
             while index < declaration.members.length {
                 local item = declaration.members[index]
                 if item.visibility != "private" {
-                    if item.kind == "Object" {
+                    if item.kind == "Object" || item.kind == "Enum" {
                         self.memberDeclaration(output, item, prefix + declaration.name + ".")
                     } else {
                         output.append(prefix); output.append(declaration.name); output.append("."); output.append(item.kind); output.append("|"); output.append(item.name); output.append("|"); output.append(item.visibility); output.append("|")
@@ -78,7 +78,7 @@ library ModuleInterfaces {{
             while index < item.members.length {
                 local child = item.members[index]
                 if child.visibility != "private" {
-                    if child.kind == "Object" { self.memberDeclaration(output, child, prefix + item.name + ".") }
+                    if child.kind == "Object" || child.kind == "Enum" { self.memberDeclaration(output, child, prefix + item.name + ".") }
                     else {
                         output.append(prefix); output.append(item.name); output.append("."); output.append(child.kind); output.append("|"); output.append(child.name); output.append("|"); output.append(child.visibility); output.append("|")
                         if child.kind == "Field" { if child.reference { output.append("ref ") }; if child.weakReference { output.append("weak ") }; self.type(output, child.declaredType) }

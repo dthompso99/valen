@@ -57,7 +57,7 @@ library ModuleLoading {{
             while index < members.length {
                 members[index].body = null
                 if members[index].kind == "Field" { members[index].initializer = null }
-                if members[index].kind == "Object" { self.releaseMembers(members[index].members) }
+                if members[index].kind == "Object" || members[index].kind == "Enum" { self.releaseMembers(members[index].members) }
                 index = index + 1
             }
         }

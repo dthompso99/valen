@@ -6,6 +6,8 @@ import {
     ImportDeclaration,
     LibraryDeclaration,
     ObjectDeclaration,
+    EnumDeclaration,
+    EnumCaseDeclaration,
     FieldDeclaration,
     MethodDeclaration,
     ParameterDeclaration,
@@ -54,6 +56,7 @@ export class Parser {
             if (this.check('IMPORT')) imports.push(this.parseImport());
             else if (this.check('LIBRARY')) libraries.push(this.parseLibrary());
             else if (this.check('TEST')) libraries.push(this.parseTest());
+            else if (this.check('ENUM')) objects.push(this.parseEnum());
             else objects.push(this.parseObject());
             this.skipSeparators();
         }
@@ -85,7 +88,9 @@ export class Parser {
         this.skipSeparators();
         while (!(this.check('RIGHT_BRACE') && this.peek(1).type === 'RIGHT_BRACE') && !this.check('EOF')) {
             const visibility = this.parseVisibility();
-            if (this.isObjectDeclarationStart()) {
+            if (this.check('ENUM')) {
+                members.push(this.parseEnum(visibility));
+            } else if (this.isObjectDeclarationStart()) {
                 members.push(this.parseObject(visibility));
             } else if (this.check('MEMBER')) {
                 this.error(this.peek(), 'Libraries cannot declare instance members');
@@ -148,7 +153,9 @@ export class Parser {
         this.skipSeparators();
         while (!(this.check('RIGHT_BRACE') && this.peek(1).type === 'RIGHT_BRACE') && !this.check('EOF')) {
             const memberVisibility = this.parseVisibility();
-            if (this.isObjectDeclarationStart()) {
+            if (this.check('ENUM')) {
+                members.push(this.parseEnum(memberVisibility));
+            } else if (this.isObjectDeclarationStart()) {
                 members.push(this.parseObject(memberVisibility));
             } else if (this.check('MEMBER')) {
                 members.push(this.parseField(memberVisibility));
@@ -172,6 +179,29 @@ export class Parser {
         if (this.match('PRIVATE')) return 'private';
         if (this.match('PUBLIC')) return 'public';
         return 'public';
+    }
+
+    parseEnum(visibility = 'public') {
+        const start = this.consume('ENUM', "Expected 'enum'");
+        const name = this.consume('IDENTIFIER', 'Expected an enum name');
+        this.consume('LEFT_BRACE', `Expected '{{' after enum name ${name.value}`);
+        this.consume('LEFT_BRACE', `Expected '{{' after enum name ${name.value}`);
+        const cases = [];
+        this.skipSeparators();
+        while (!(this.check('RIGHT_BRACE') && this.peek(1).type === 'RIGHT_BRACE') && !this.check('EOF')) {
+            const item = this.consume('IDENTIFIER', `Expected an enum case in ${name.value}`);
+            if (this.check('LEFT_PAREN')) this.error(this.peek(), 'Associated-value enum cases are not supported yet');
+            cases.push(new EnumCaseDeclaration(item.value, cases.length, this.span(item, item)));
+            if (!this.match('COMMA') && !this.atSeparator() && !(this.check('RIGHT_BRACE') && this.peek(1).type === 'RIGHT_BRACE')) {
+                this.error(this.peek(), `Expected a newline, ',' or ';' after enum case ${item.value}`);
+            }
+            this.skipSeparators();
+        }
+        this.consume('RIGHT_BRACE', `Expected '}}' after enum ${name.value}`);
+        const end = this.consume('RIGHT_BRACE', `Expected '}}' after enum ${name.value}`);
+        const declaration = new EnumDeclaration(name.value, cases, this.span(start, end));
+        declaration.visibility = visibility;
+        return declaration;
     }
 
     isObjectDeclarationStart() {
