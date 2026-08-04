@@ -1105,6 +1105,14 @@ library Ir {{
                 instruction.first = owner
                 return instruction.result!
             }
+            if expression.name! == "codePointLength" || expression.name! == "graphemeLength" {
+                local owner = self.lowerExpression(expression.left!)
+                local op = "string_codepoint_length"
+                if expression.name! == "graphemeLength" { op = "string_grapheme_length" }
+                local instruction = self.temporary(op, "i64")
+                instruction.first = owner
+                return instruction.result!
+            }
             if expression.symbol != null {
                 if expression.symbol!.kind == "Field" {
                     local owner = self.lowerExpression(expression.left!)
@@ -1311,6 +1319,17 @@ library Ir {{
                 instruction.elementType = self.arrayElementType(receiverType)
                 self.emit(instruction)
                 return new Value("void", "", "void")
+            }
+            if (name == "codePointAt" || name == "graphemeAt") && receiverType == "string" {
+                local owner = self.lowerExpression(callee.left!)
+                local indexValue = self.lowerExpression(expression.arguments[0])
+                local op = "string_codepoint_at"
+                local resultType = "i64"
+                if name == "graphemeAt" { op = "string_grapheme_at"; resultType = "string" }
+                local instruction = self.temporary(op, resultType)
+                instruction.first = owner
+                instruction.second = indexValue
+                return instruction.result!
             }
             if (name == "slice" && receiverType == "string") || (name == "toString" && self.isInteger(receiverType)) || (name == "build" && receiverType == "StringBuilder") || (name == "toBytes" && receiverType == "string") || (name == "toString" && receiverType == "Array<u8>") {
                 local op = "string_slice"

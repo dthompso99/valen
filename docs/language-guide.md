@@ -141,7 +141,7 @@ local decimal = wide as f64
 
 Mixed-width operators first convert both operands to a common type. Equal signedness keeps that signedness and uses the wider width. Mixed signed/unsigned integers use a wider signed type capable of representing both inputs; combinations such as `u64` and `i64` that have no lossless built-in common type require an explicit conversion. Floating point dominates integers, mixed integer/float operations use `f64`, and `f32` is retained only when both operands are `f32`. Shift results retain the left operand's type.
 
-These rules apply to arithmetic, comparisons, and bitwise operations. Assignment and method arguments remain explicit conversion boundaries. Strings currently expose UTF-8 bytes; Unicode code-point and grapheme operations are **WIP**.
+These rules apply to arithmetic, comparisons, and bitwise operations. Assignment and method arguments remain explicit conversion boundaries.
 
 ## Locals and control flow
 
@@ -221,6 +221,10 @@ Every concrete type argument must implement the named contract. Multiple paramet
 own constraints, for example `Map<K:Hashable, V>`. Generic methods remain **WIP**.
 
 Strings support byte indexing, length, equality, concatenation, slicing, integer conversion, interpolation, and `StringBuilder`. `text.toBytes()` creates an independent `Array<u8>`, while `bytes.toString()` converts an `Array<u8>` back to an immutable string. `StringBuilder.appendBytes(bytes)` and ordinary string appends reserve once and bulk-copy their input.
+
+String storage and the existing `length`, indexing, and `slice` APIs remain explicitly UTF-8 byte-oriented. Unicode-aware code uses `codePointLength` and `codePointAt(index)` for scalar values, or `graphemeLength` and `graphemeAt(index)` for user-perceived characters. `codePointAt` returns the scalar as an `i64`; malformed UTF-8 consumes one byte and returns U+FFFD. Both indexed Unicode APIs use the ordinary bounds-error status (70).
+
+The compact native grapheme segmenter keeps CRLF, combining-mark sequences, variation selectors, emoji modifiers, emoji ZWJ sequences, and regional-indicator flag pairs together. This deliberately provides predictable common-case behavior without embedding the full Unicode property database; scripts requiring the complete evolving UAX #29 tables can layer that policy over `codePointAt`.
 
 Double-quoted strings interpolate string and integer expressions with `${expression}`. Interpolation accepts full expressions and lowers through `StringBuilder`, so a string with several substitutions is built in linear time. Escape the dollar sign as `\${` to emit a literal interpolation marker. Single-quoted strings do not interpolate.
 

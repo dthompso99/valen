@@ -1,0 +1,7 @@
+entry {{
+    __() -> i64 {
+        local text = "🙂"
+        text.graphemeAt(1)
+        return 1
+    }
+}}

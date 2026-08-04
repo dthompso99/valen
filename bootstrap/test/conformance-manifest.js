@@ -15,6 +15,7 @@ export const validPrograms = [
     {name: 'generic constraints', source: 'bootstrap/test/fixtures/generic-constraints.ar'},
     {name: 'byte conversions and bulk builder append', source: 'bootstrap/test/fixtures/byte-conversions.ar'},
     {name: 'string interpolation', source: 'bootstrap/test/fixtures/string-interpolation.ar'},
+    {name: 'Unicode string operations', source: 'bootstrap/test/fixtures/unicode-strings.ar'},
     {name: 'instruction selection', source: 'bootstrap/test/fixtures/instruction-selection.ar'},
     {name: 'default arguments', source: 'bootstrap/test/fixtures/default-arguments.ar'},
     {name: 'collection ownership', source: 'bootstrap/test/fixtures/collection-ownership.ar'},
@@ -40,6 +41,7 @@ export const validPrograms = [
 export const expectedFailures = [
     {name: 'array removal bounds status', source: 'bootstrap/test/fixtures/array-remove-bounds.ar', status: 70, stderr: /^$/},
     {name: 'negative array reservation', source: 'bootstrap/test/fixtures/array-reserve-negative.ar', status: 70, stderr: /^$/},
+    {name: 'Unicode string index bounds', source: 'bootstrap/test/fixtures/unicode-index-bounds.ar', status: 70, stderr: /^$/},
     {name: 'native test failure status', source: 'bootstrap/test/fixtures/native-tests-failing.ar', status: 1, stderr: /test failed/},
     {name: 'invalid float conversion status', source: 'bootstrap/test/fixtures/float-conversion-failing.ar', status: 76, stderr: /^$/}
 ];

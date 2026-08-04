@@ -889,6 +889,16 @@ export class SemanticAnalyzer {
                     if (expression.member === 'length') {
                         symbol = {kind: 'StringLength', name: 'length', type: I64};
                         type = I64;
+                    } else if (expression.member === 'codePointLength') {
+                        symbol = {kind: 'StringCodePointLength', name: 'codePointLength', type: I64};
+                        type = I64;
+                    } else if (expression.member === 'graphemeLength') {
+                        symbol = {kind: 'StringGraphemeLength', name: 'graphemeLength', type: I64};
+                        type = I64;
+                    } else if (expression.member === 'codePointAt') {
+                        symbol = {kind: 'StringCodePointAt', name: 'codePointAt', type: I64};
+                    } else if (expression.member === 'graphemeAt') {
+                        symbol = {kind: 'StringGraphemeAt', name: 'graphemeAt', type: STRING};
                     } else if (expression.member === 'slice') {
                         symbol = {kind: 'StringSlice', name: 'slice', type: STRING};
                     } else if (expression.member === 'toBytes') {
@@ -1316,6 +1326,10 @@ export class SemanticAnalyzer {
                         }
                     }
                     type = STRING;
+                } else if (callee?.kind === 'StringCodePointAt' || callee?.kind === 'StringGraphemeAt') {
+                    if (argumentTypes.length !== 1) this.report(expression.span, `String.${callee.name} expects 1 argument, got ${argumentTypes.length}`);
+                    else this.requireAssignable(argumentTypes[0], I64, expression.arguments[0].span, expression.arguments[0]);
+                    type = callee.type;
                 } else if (callee?.kind === 'StringToBytes') {
                     if (argumentTypes.length !== 0) this.report(expression.span, 'String.toBytes expects no arguments');
                     type = 'Array<u8>';

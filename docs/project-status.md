@@ -23,7 +23,7 @@
 
 - Array literals infer homogeneous owned element types, including numeric promotion and nested arrays.
 - Array insertion/removal and explicit capacity controls are implemented; slices remain **WIP**.
-- **WIP:** Unicode code-point and grapheme-aware strings
+- Strings provide explicit UTF-8 byte, Unicode code-point, and practical grapheme-cluster operations.
 - String and integer expression interpolation is implemented; float, boolean, alignment, precision, and radix formatting remain **WIP**.
 - flow-sensitive optional narrowing for stable locals and parameters
 - **WIP:** generic methods

@@ -5,7 +5,7 @@ const supportedOperations = new Set([
     'builder_append_byte', 'builder_append_bytes', 'builder_append_string', 'builder_build', 'builder_length', 'builder_new', 'bytes_to_string', 'call',
     'checked_cast', 'constant', 'float_constant', 'contract_call', 'convert', 'declare_local', 'destroy_array', 'destroy_object',
     'integer_to_string', 'jump', 'load_field', 'load_local', 'optional_box', 'return', 'store_field', 'store_local', 'string_concat',
-    'string_constant', 'string_equal', 'string_length', 'string_load', 'string_slice', 'string_to_bytes', 'structural_copy',
+    'string_codepoint_at', 'string_codepoint_length', 'string_constant', 'string_equal', 'string_grapheme_at', 'string_grapheme_length', 'string_length', 'string_load', 'string_slice', 'string_to_bytes', 'structural_copy',
     'structural_equal', 'structural_hash', 'test_expect', 'test_failures', 'type_test', 'unary', 'unwrap', 'virtual_call'
 ]);
 

@@ -1305,6 +1305,11 @@ library Semantics {{
                         if expression.arguments.length != 0 { self.error(expression.span, "String.toBytes expects no arguments") }
                         return self.typed(expression, "Array<u8>")
                     }
+                    if (expression.left!.name! == "codePointAt" || expression.left!.name! == "graphemeAt") && receiverType == "string" {
+                        if expression.arguments.length != 1 { self.error(expression.span, "String." + expression.left!.name! + " expects 1 argument") } else { self.requireCompatible("i64", argumentTypes[0], expression.arguments[0].span) }
+                        if expression.left!.name! == "codePointAt" { return self.typed(expression, "i64") }
+                        return self.typed(expression, "string")
+                    }
                     if expression.left!.name! == "toString" && receiverType == "Array<u8>" {
                         if expression.arguments.length != 0 { self.error(expression.span, "Array<u8>.toString expects no arguments") }
                         return self.typed(expression, "string")
@@ -1684,6 +1689,9 @@ library Semantics {{
             if name == "length" {
                 if ownerType == "string" || self.isArray(ownerType) || ownerType == "StringBuilder" { return self.typed(expression, "i64") }
             }
+            if (name == "codePointLength" || name == "graphemeLength") && ownerType == "string" { return self.typed(expression, "i64") }
+            if name == "codePointAt" && ownerType == "string" { return self.typed(expression, "i64") }
+            if name == "graphemeAt" && ownerType == "string" { return self.typed(expression, "string") }
             if name == "capacity" && self.isArray(ownerType) { return self.typed(expression, "i64") }
             if name == "append" { return self.typed(expression, "void") }
             if name == "insert" && self.isArray(ownerType) { return self.typed(expression, "void") }

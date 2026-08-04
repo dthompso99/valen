@@ -606,6 +606,10 @@ export class IrGenerator {
             const string = this.lowerExpression(expression.object);
             return this.result('string_length', 'i64', {string});
         }
+        if (symbol?.kind === 'StringCodePointLength' || symbol?.kind === 'StringGraphemeLength') {
+            const string = this.lowerExpression(expression.object);
+            return this.result(symbol.kind === 'StringCodePointLength' ? 'string_codepoint_length' : 'string_grapheme_length', 'i64', {string});
+        }
         if (symbol?.kind === 'StringBuilderLength') {
             const builder = this.lowerExpression(expression.object);
             return this.result('builder_length', 'i64', {builder});
@@ -700,6 +704,10 @@ export class IrGenerator {
                 start: args[0],
                 length: args[1]
             });
+        }
+        if (method.kind === 'StringCodePointAt' || method.kind === 'StringGraphemeAt') {
+            const string = this.lowerExpression(expression.callee.object);
+            return this.result(method.kind === 'StringCodePointAt' ? 'string_codepoint_at' : 'string_grapheme_at', method.type, {string, index: args[0]});
         }
         if (method.kind === 'StringToBytes') {
             return this.result('string_to_bytes', 'Array<u8>', {value: this.lowerExpression(expression.callee.object)});

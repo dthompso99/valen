@@ -1,0 +1,32 @@
+entry {{
+    __() -> i64 {
+        local text = "hé🙂"
+        if text.length != 7 { return 1 }
+        if text.codePointLength != 3 { return 2 }
+        if text.codePointAt(1) != 233 || text.codePointAt(2) != 128578 { return 3 }
+        if text.graphemeLength != 3 || text.graphemeAt(2) != "🙂" { return 4 }
+
+        local combining = "é"
+        if combining.codePointLength != 2 || combining.graphemeLength != 1 { return 5 }
+        if combining.graphemeAt(0) != combining { return 6 }
+
+        local joined = "👩‍💻"
+        if joined.codePointLength != 3 || joined.graphemeLength != 1 { return 7 }
+        if joined.graphemeAt(0) != joined { return 8 }
+
+        local flag = "🇺🇸"
+        if flag.codePointLength != 2 || flag.graphemeLength != 1 { return 9 }
+
+        local toned = "👍🏽"
+        if toned.codePointLength != 2 || toned.graphemeLength != 1 { return 10 }
+
+        local lines = "\r\n"
+        if lines.codePointLength != 2 || lines.graphemeLength != 1 { return 11 }
+
+        local invalid = new Array<u8>(0)
+        invalid.append(255)
+        local replacement = invalid.toString()
+        if replacement.codePointLength != 1 || replacement.codePointAt(0) != 65533 { return 12 }
+        return 0
+    }
+}}
