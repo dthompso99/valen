@@ -69,6 +69,7 @@ and embedded targets.
 - Diagnostics use a first-class `DiagnosticSeverity` enum with exhaustive rendering, primary and secondary source labels, explanatory notes, and precise replacement hints with generation parity.
 - The self-hosted tokenizer and parser exchange first-class `TokenKind` values while preserving source lexemes as strings.
 - Compiled libraries are emitted as relocatable objects with SemVer `.vmeta` manifests containing compiler-interface, target, ABI, dependency-interface, and integrity fingerprints. Registry resolution and lockfiles remain **WIP** package tooling.
+- The standard-library boundary is defined as capability-oriented modules distributed through a compiler-relative sysroot. Modular static linking is the initial and permanent option; compiled import consumption, cross-module generic specialization, packaging, and an optional future shared ABI remain **WIP**.
 - Primitive SSA temporaries use conservative linear-scan allocation across `r12`-`r15`, with stack spills and GC-visible managed references.
 - IR canonicalization folds integer/boolean constants, simplifies constant branches, removes unreachable blocks, and eliminates unused pure SSA values without suppressing runtime traps or state changes.
 - Integer instruction selection uses signed 32-bit immediates for arithmetic, bitwise, shift, and comparison operations; generated-function peepholes remove redundant moves and neutral operations.

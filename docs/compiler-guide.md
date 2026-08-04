@@ -53,6 +53,11 @@ program. The whole-program cache remains the faster path for an exact warm build
 The interface and chunk formats are internal, versioned compiler artifacts, not a stable Valen ABI.
 Deleting the cache directory is always safe.
 
+The installed standard library will use the same modular static-object direction through a
+compiler-relative sysroot. Static linking remains permanently supported; optional shared-library
+distribution waits for a versioned Valen ABI. Generic packages additionally retain a template
+representation for cross-module specialization. See the [standard library architecture](standard-library.md).
+
 Published compiled libraries use a separate boundary: `--emit-library` writes an ELF64 relocatable
 object and a deterministic `.vmeta` sidecar. `--library-version` requires SemVer syntax. Metadata
 format 1 identifies `valen-interface-1`, `x86_64-linux`, and `valen-native-1`, fingerprints the
