@@ -697,6 +697,10 @@ export class IrGenerator {
             this.emit('array_shrink', {array, elementType: method.elementType});
             return {kind: 'void', type: 'void'};
         }
+        if (method.kind === 'ArraySlice') {
+            const array = this.lowerExpression(expression.callee.object);
+            return this.result('array_slice', method.type, {array, start: args[0], length: args[1], elementType: method.elementType, elementOwnership: method.elementOwnership});
+        }
         if (method.kind === 'StringSlice') {
             const string = this.lowerExpression(expression.callee.object);
             return this.result('string_slice', 'string', {

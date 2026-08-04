@@ -198,6 +198,13 @@ without changing `length` or moving ownership out of the array, and does nothing
 already exists. `shrinkToFit()` releases unused storage so `capacity == length`; later appends grow the
 array normally. Reserving a negative capacity terminates through the array runtime error path.
 
+`slice(start, length)` returns an independent array and accepts an empty slice at the end. Primitive,
+`ref`, and `weak` elements are copied directly; ordinary owned reference elements are structurally
+copied so both arrays retain valid independent ownership. Invalid ranges use runtime status 70.
+Valen models multidimensional collections as nested arrays: slicing an outer array copies its rows,
+and slicing an individual row copies its cells. There is intentionally no separate matrix or borrowed
+array-view type with a second lifetime model.
+
 Generic objects are monomorphized:
 
 ```valen

@@ -705,6 +705,9 @@ library X86_64 {{
             if op == "array_shrink" {
                 self.load(instruction.first!, "rdi"); self.writer.line("    mov rsi, " + self.sizeOf(instruction.elementType!).toString()); self.writer.line("    call valen_array_shrink_to_fit"); return
             }
+            if op == "array_slice" {
+                self.load(instruction.first!, "rdi"); self.load(instruction.second!, "rsi"); self.load(instruction.arguments[0], "rdx"); self.writer.line("    call " + self.arraySliceLabel(instruction.typeName!)); self.storeResult(instruction, "rax"); return
+            }
             if op == "string_length" || op == "builder_length" {
                 self.load(instruction.first!, "rax")
                 if op == "string_length" { self.writer.line("    mov rax, QWORD PTR [rax+8]") } else { self.writer.line("    mov rax, QWORD PTR [rax]") }
@@ -2664,6 +2667,7 @@ library X86_64 {{
         arrayEqualityLabel(typeName:string) -> string { return ".Lvalen_array_equal_" + self.mangle(typeName) }
         arrayHashLabel(typeName:string) -> string { return ".Lvalen_array_hash_" + self.mangle(typeName) }
         arrayCopyLabel(typeName:string) -> string { return ".Lvalen_array_copy_" + self.mangle(typeName) }
+        arraySliceLabel(typeName:string) -> string { return ".Lvalen_array_slice_" + self.mangle(typeName) }
         arrayDestroyLabel(typeName:string) -> string { return ".Lvalen_array_destroy_" + self.mangle(typeName) }
         gcTraceLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_gc_trace" }
         gcWeakLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_gc_weak" }
@@ -2723,6 +2727,7 @@ library X86_64 {{
                 self.arrayEqualityFunction(arrays[index])
                 self.arrayHashFunction(arrays[index])
                 self.arrayCopyFunction(arrays[index])
+                self.arraySliceFunction(arrays[index])
                 index = index + 1
             }
         }
@@ -2949,6 +2954,20 @@ library X86_64 {{
             self.writer.line("    mov edi, " + self.sizeOf(element).toString()); self.writer.line("    mov rsi, QWORD PTR [r12]"); self.writer.line("    call valen_array_new"); self.writer.line("    mov r13, rax"); self.writer.line("    mov edi, 24"); self.writer.line("    call valen_alloc"); self.writer.line("    mov QWORD PTR [rax], r12"); self.writer.line("    mov QWORD PTR [rax+8], r13"); self.writer.line("    mov rcx, QWORD PTR [r14]"); self.writer.line("    mov QWORD PTR [rax+16], rcx"); self.writer.line("    mov QWORD PTR [r14], rax"); self.writer.line("    xor r15d, r15d")
             self.writer.line(loop + ":"); self.writer.line("    cmp r15, QWORD PTR [r12]"); self.writer.line("    jae " + done); self.writer.line("    imul rax, r15, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]"); self.copyAddress("rax", element); self.writer.line("    mov rdx, rax"); self.writer.line("    imul rax, r15, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r13+16]"); self.writer.line("    mov " + self.memorySize(element) + " PTR [rax], " + self.registerForSize("rdx", element)); self.writer.line("    inc r15"); self.writer.line("    jmp " + loop)
             self.writer.line(done + ":"); self.writer.line("    mov rax, r13"); self.writer.line("    add rsp, 16"); self.writer.line("    pop r15"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    leave"); self.writer.line("    ret"); self.writer.line(done + "_null:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
+        }
+
+        arraySliceFunction(typeName:string) -> void {
+            local spec = typeName.slice(6, typeName.length - 7)
+            local ownership = "owned"
+            local element = spec
+            if spec.length > 4 { if spec.slice(0, 4) == "ref " { ownership = "ref"; element = spec.slice(4, spec.length - 4) } }
+            if spec.length > 5 { if spec.slice(0, 5) == "weak " { ownership = "weak"; element = spec.slice(5, spec.length - 5) } }
+            local label = self.arraySliceLabel(typeName); local loop = label + "_loop"; local done = label + "_done"; local size = self.sizeOf(element)
+            self.writer.line(label + ":"); self.writer.line("    test rsi, rsi"); self.writer.line("    js .Larray_bounds_error"); self.writer.line("    test rdx, rdx"); self.writer.line("    js .Larray_bounds_error"); self.writer.line("    mov rax, rsi"); self.writer.line("    add rax, rdx"); self.writer.line("    jc .Larray_bounds_error"); self.writer.line("    cmp rax, QWORD PTR [rdi]"); self.writer.line("    ja .Larray_bounds_error")
+            self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15"); self.writer.line("    sub rsp, 8"); self.writer.line("    mov rbx, rdi"); self.writer.line("    mov r12, rsi"); self.writer.line("    mov r13, rdx")
+            self.writer.line("    mov rdi, " + size.toString()); self.writer.line("    mov rsi, r13"); self.writer.line("    lea rdx, [rip+" + self.gcArrayTraceLabel(typeName) + "]"); self.writer.line("    lea rcx, [rip+" + self.gcArrayWeakLabel(typeName) + "]"); self.writer.line("    call valen_gc_array_new"); self.writer.line("    mov r14, rax"); self.writer.line("    xor r15d, r15d"); self.writer.line(loop + ":"); self.writer.line("    cmp r15, r13"); self.writer.line("    jae " + done); self.writer.line("    mov rax, r12"); self.writer.line("    add rax, r15"); self.writer.line("    imul rax, " + size.toString()); self.writer.line("    add rax, QWORD PTR [rbx+16]")
+            if ownership == "owned" && self.isManagedReferenceType(element) { self.writer.line("    mov rdi, QWORD PTR [rax]"); self.writer.line("    xor esi, esi"); self.writer.line("    call " + self.copyFunction(element)) } else { self.loadMemory("[rax]", element, "rax") }
+            self.writer.line("    mov rcx, r15"); self.writer.line("    imul rcx, " + size.toString()); self.writer.line("    add rcx, QWORD PTR [r14+16]"); self.writer.line("    mov " + self.memorySize(element) + " PTR [rcx], " + self.registerForSize("rax", element)); self.writer.line("    inc r15"); self.writer.line("    jmp " + loop); self.writer.line(done + ":"); self.writer.line("    mov rax, r14"); self.writer.line("    add rsp, 8"); self.writer.line("    pop r15"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    leave"); self.writer.line("    ret")
         }
 
         arrayDestroyFunction(typeName:string) -> void {

@@ -943,6 +943,8 @@ export class SemanticAnalyzer {
                         symbol = {kind: 'ArrayReserve', name: 'reserve', type: VOID, elementType};
                     } else if (expression.member === 'shrinkToFit') {
                         symbol = {kind: 'ArrayShrink', name: 'shrinkToFit', type: VOID, elementType};
+                    } else if (expression.member === 'slice') {
+                        symbol = {kind: 'ArraySlice', name: 'slice', type: ownerType, elementType, elementOwnership};
                     } else if (expression.member === 'toString' && ownerType === 'Array<u8>') {
                         symbol = {kind: 'BytesToString', name: 'toString', type: STRING};
                     } else if (expression.member === 'hash') {
@@ -1317,6 +1319,10 @@ export class SemanticAnalyzer {
                 } else if (callee?.kind === 'ArrayShrink') {
                     if (argumentTypes.length !== 0) this.report(expression.span, `Array.shrinkToFit expects 0 arguments, got ${argumentTypes.length}`);
                     type = VOID;
+                } else if (callee?.kind === 'ArraySlice') {
+                    if (argumentTypes.length !== 2) this.report(expression.span, `Array.slice expects 2 arguments, got ${argumentTypes.length}`);
+                    else for (let i = 0; i < 2; i++) this.requireAssignable(argumentTypes[i], I64, expression.arguments[i].span, expression.arguments[i]);
+                    type = callee.type;
                 } else if (callee?.kind === 'StringSlice') {
                     if (argumentTypes.length !== 2) {
                         this.report(expression.span, `String.slice expects 2 arguments, got ${argumentTypes.length}`);

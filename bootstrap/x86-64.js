@@ -621,6 +621,10 @@ export class X86_64Backend {
             case 'array_shrink':
                 lines.push(...this.load(instruction.array, 'rdi'), `    mov rsi, ${this.sizeOf(instruction.elementType)}`, '    call valen_array_shrink_to_fit');
                 break;
+            case 'array_slice':
+                lines.push(...this.load(instruction.array, 'rdi'), ...this.load(instruction.start, 'rsi'), ...this.load(instruction.length, 'rdx'),
+                    `    call ${this.arraySliceLabel(instruction.type)}`, `    mov ${this.temp(instruction.result)}, rax`);
+                break;
             case 'string_length':
                 lines.push(...this.load(instruction.string, 'rax'));
                 lines.push('    mov rax, QWORD PTR [rax+8]', `    mov ${this.temp(instruction.result)}, rax`);
@@ -1020,6 +1024,7 @@ export class X86_64Backend {
     arrayEqualityLabel(typeName) { return `.Lvalen_array_equal_${this.mangle(typeName)}`; }
     arrayHashLabel(typeName) { return `.Lvalen_array_hash_${this.mangle(typeName)}`; }
     arrayCopyLabel(typeName) { return `.Lvalen_array_copy_${this.mangle(typeName)}`; }
+    arraySliceLabel(typeName) { return `.Lvalen_array_slice_${this.mangle(typeName)}`; }
     arrayDestroyLabel(typeName) { return `.Lvalen_array_destroy_${this.mangle(typeName)}`; }
 
     equalityFunction(typeName) {
@@ -1049,7 +1054,7 @@ export class X86_64Backend {
             lines.push(...this.objectEqualityFunction(type), ...this.objectHashFunction(type), ...this.objectCopyFunction(type));
         }
         for (const type of this.structuralArrayTypes()) {
-            lines.push(...this.arrayEqualityFunction(type), ...this.arrayHashFunction(type), ...this.arrayCopyFunction(type));
+            lines.push(...this.arrayEqualityFunction(type), ...this.arrayHashFunction(type), ...this.arrayCopyFunction(type), ...this.arraySliceFunction(type));
         }
         return lines;
     }
@@ -1248,6 +1253,27 @@ export class X86_64Backend {
             '    add rax, QWORD PTR [r13+16]', `    mov ${this.memorySize(element)} PTR [rax], ${this.registerForSize('rdx', element)}`,
             '    inc r15', `    jmp ${loop}`, `${done}:`, '    mov rax, r13', '    add rsp, 16', '    pop r15', '    pop r14',
             '    pop r13', '    pop r12', '    leave', '    ret', `${done}_null:`, '    xor eax, eax', '    ret', '');
+        return lines;
+    }
+
+    arraySliceFunction(type) {
+        const spec = type.slice(6, -1);
+        const ownership = spec.startsWith('ref ') ? 'ref' : spec.startsWith('weak ') ? 'weak' : 'owned';
+        const element = ownership === 'ref' ? spec.slice(4) : ownership === 'weak' ? spec.slice(5) : spec;
+        const label = this.arraySliceLabel(type), loop = `${label}_loop`, done = `${label}_done`;
+        const size = this.sizeOf(element), managed = ownership === 'owned' && this.isManagedReferenceType(element);
+        const lines = [label + ':', '    test rsi, rsi', '    js .Larray_bounds_error', '    test rdx, rdx', '    js .Larray_bounds_error',
+            '    mov rax, rsi', '    add rax, rdx', '    jc .Larray_bounds_error', '    cmp rax, QWORD PTR [rdi]', '    ja .Larray_bounds_error',
+            '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    push r13', '    push r14', '    push r15', '    sub rsp, 8',
+            '    mov rbx, rdi', '    mov r12, rsi', '    mov r13, rdx', `    mov rdi, ${size}`, '    mov rsi, r13',
+            `    lea rdx, [rip+${this.gcArrayTraceLabel(type)}]`, `    lea rcx, [rip+${this.gcArrayWeakLabel(type)}]`, '    call valen_gc_array_new',
+            '    mov r14, rax', '    xor r15d, r15d', loop + ':', '    cmp r15, r13', `    jae ${done}`,
+            '    mov rax, r12', '    add rax, r15', `    imul rax, ${size}`, '    add rax, QWORD PTR [rbx+16]'];
+        if (managed) lines.push('    mov rdi, QWORD PTR [rax]', '    xor esi, esi', `    call ${this.copyFunction(element)}`);
+        else lines.push(...this.loadMemory('[rax]', element, 'rax'));
+        lines.push('    mov rcx, r15', `    imul rcx, ${size}`, '    add rcx, QWORD PTR [r14+16]',
+            `    mov ${this.memorySize(element)} PTR [rcx], ${this.registerForSize('rax', element)}`, '    inc r15', `    jmp ${loop}`, done + ':',
+            '    mov rax, r14', '    add rsp, 8', '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    pop rbx', '    leave', '    ret', '');
         return lines;
     }
 

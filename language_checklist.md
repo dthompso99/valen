@@ -73,7 +73,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 - [x] Add array literals
 - [x] Add array removal and insertion
 - [x] Add explicit capacity reservation and shrinking
-- [ ] Add array slices/views and multidimensional conveniences
+- [x] Add ownership-safe array slices and nested-array multidimensional conveniences
 - [x] Add Unicode code-point and grapheme-aware string operations
 - [x] Add string interpolation and richer formatting
 - [x] Add bulk-copy builder optimizations and `Array<u8>` conversion APIs

@@ -22,6 +22,7 @@ export const validPrograms = [
     {name: 'array literals', source: 'bootstrap/test/fixtures/array-literals.ar'},
     {name: 'array insertion and removal', source: 'bootstrap/test/fixtures/array-insert-remove.ar'},
     {name: 'array capacity management', source: 'bootstrap/test/fixtures/array-capacity.ar'},
+    {name: 'array slices and nested arrays', source: 'bootstrap/test/fixtures/array-slices.ar'},
     {name: 'garbage collection', source: 'bootstrap/test/fixtures/garbage-collection.ar'},
     {name: 'repeated garbage collection', source: 'bootstrap/test/fixtures/garbage-collection-repeated.ar'},
     {name: 'optional diagnostics', source: 'bootstrap/test/fixtures/diagnostics.ar'},
@@ -42,6 +43,7 @@ export const expectedFailures = [
     {name: 'array removal bounds status', source: 'bootstrap/test/fixtures/array-remove-bounds.ar', status: 70, stderr: /^$/},
     {name: 'negative array reservation', source: 'bootstrap/test/fixtures/array-reserve-negative.ar', status: 70, stderr: /^$/},
     {name: 'Unicode string index bounds', source: 'bootstrap/test/fixtures/unicode-index-bounds.ar', status: 70, stderr: /^$/},
+    {name: 'array slice bounds status', source: 'bootstrap/test/fixtures/array-slice-bounds.ar', status: 70, stderr: /^$/},
     {name: 'native test failure status', source: 'bootstrap/test/fixtures/native-tests-failing.ar', status: 1, stderr: /test failed/},
     {name: 'invalid float conversion status', source: 'bootstrap/test/fixtures/float-conversion-failing.ar', status: 76, stderr: /^$/}
 ];

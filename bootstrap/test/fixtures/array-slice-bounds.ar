@@ -1,0 +1,7 @@
+entry {{
+    __() -> i64 {
+        local values = [1, 2]
+        values.slice(1, 2)
+        return 1
+    }
+}}

@@ -1320,6 +1320,15 @@ library Ir {{
                 self.emit(instruction)
                 return new Value("void", "", "void")
             }
+            if name == "slice" && self.isArray(receiverType) {
+                local array = self.lowerExpression(callee.left!)
+                local start = self.lowerExpression(expression.arguments[0])
+                local count = self.lowerExpression(expression.arguments[1])
+                local instruction = self.temporary("array_slice", receiverType)
+                instruction.first = array; instruction.second = start; instruction.arguments.append(count)
+                instruction.elementType = self.arrayElementType(receiverType); instruction.elementOwnership = self.arrayElementOwnership(receiverType)
+                return instruction.result!
+            }
             if (name == "codePointAt" || name == "graphemeAt") && receiverType == "string" {
                 local owner = self.lowerExpression(callee.left!)
                 local indexValue = self.lowerExpression(expression.arguments[0])

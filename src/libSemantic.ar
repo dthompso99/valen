@@ -1301,6 +1301,10 @@ library Semantics {{
                         if expression.arguments.length != 0 { self.error(expression.span, "Array.shrinkToFit expects no arguments") }
                         return self.typed(expression, "void")
                     }
+                    if expression.left!.name! == "slice" && self.isArray(receiverType) {
+                        if expression.arguments.length != 2 { self.error(expression.span, "Array.slice expects 2 arguments") } else { self.requireCompatible("i64", argumentTypes[0], expression.arguments[0].span); self.requireCompatible("i64", argumentTypes[1], expression.arguments[1].span) }
+                        return self.typed(expression, receiverType)
+                    }
                     if expression.left!.name! == "toBytes" && receiverType == "string" {
                         if expression.arguments.length != 0 { self.error(expression.span, "String.toBytes expects no arguments") }
                         return self.typed(expression, "Array<u8>")
@@ -1698,6 +1702,7 @@ library Semantics {{
             if name == "remove" && self.isArray(ownerType) { return self.typed(expression, self.arrayElementType(ownerType)) }
             if name == "reserve" && self.isArray(ownerType) { return self.typed(expression, "void") }
             if name == "shrinkToFit" && self.isArray(ownerType) { return self.typed(expression, "void") }
+            if name == "slice" && self.isArray(ownerType) { return self.typed(expression, ownerType) }
             if name == "appendByte" { return self.typed(expression, "void") }
             if name == "appendBytes" && ownerType == "StringBuilder" { return self.typed(expression, "void") }
             if name == "build" { return self.typed(expression, "string") }
