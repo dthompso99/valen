@@ -57,6 +57,7 @@ export class X86_64Backend {
             'valen_System_close',
             'valen_System_replaceFile',
             'valen_System_removeFile',
+            'valen_System_makeExecutable',
             'valen_System_lastError',
             'valen_System_currentDirectory',
             'valen_System_environmentVariable',
@@ -92,7 +93,7 @@ export class X86_64Backend {
         this.needsFilesystemState = [
             'valen_System_openRead', 'valen_System_openWrite', 'valen_System_read',
             'valen_System_writeFile', 'valen_System_writeBytes', 'valen_System_sync', 'valen_System_close',
-            'valen_System_replaceFile', 'valen_System_removeFile', 'valen_System_lastError',
+            'valen_System_replaceFile', 'valen_System_removeFile', 'valen_System_makeExecutable', 'valen_System_lastError',
             'valen_System_currentDirectory'
         ].some(symbol => runtimeSymbols.has(symbol));
 
@@ -121,7 +122,7 @@ export class X86_64Backend {
         if (runtimeSymbols.has('valen_System_writeBytes')) lines.push(...this.fileWriteBytesRuntime());
         if (runtimeSymbols.has('valen_System_sync')) lines.push(...this.fileSyncRuntime());
         if (runtimeSymbols.has('valen_System_close')) lines.push(...this.fileCloseRuntime());
-        if (runtimeSymbols.has('valen_System_replaceFile') || runtimeSymbols.has('valen_System_removeFile')) {
+        if (runtimeSymbols.has('valen_System_replaceFile') || runtimeSymbols.has('valen_System_removeFile') || runtimeSymbols.has('valen_System_makeExecutable')) {
             lines.push(...this.pathMutationRuntime(runtimeSymbols));
         }
         if (runtimeSymbols.has('valen_System_lastError')) lines.push(...this.lastErrorRuntime());
@@ -1736,6 +1737,15 @@ export class X86_64Backend {
             '    test rax, rax', '    js .Lremove_file_error',
             '    mov QWORD PTR [rip+valen_filesystem_error], 0', '    ret',
             '.Lremove_file_error:', '    mov r10, rax', '    neg r10',
+            '    mov QWORD PTR [rip+valen_filesystem_error], r10', '    ret', ''
+        );
+        if (runtimeSymbols.has('valen_System_makeExecutable')) lines.push(
+            '.globl valen_System_makeExecutable', 'valen_System_makeExecutable:',
+            '    sub rsp, 8', '    call .Lvalen_path_cstring', '    add rsp, 8',
+            '    mov rdi, rax', '    mov esi, 493', '    mov eax, 90', '    syscall',
+            '    test rax, rax', '    js .Lmake_executable_error',
+            '    mov QWORD PTR [rip+valen_filesystem_error], 0', '    ret',
+            '.Lmake_executable_error:', '    mov r10, rax', '    neg r10',
             '    mov QWORD PTR [rip+valen_filesystem_error], r10', '    ret', ''
         );
         return lines;

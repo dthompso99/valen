@@ -16,6 +16,7 @@ library System {{
     native close(own file:File) -> i64
     native replaceFile(source:string, destination:string) -> i64
     native removeFile(path:string) -> i64
+    native makeExecutable(path:string) -> i64
     native lastError() -> i64
     native currentDirectory() -> string?
     native environmentVariable(name:string) -> string?

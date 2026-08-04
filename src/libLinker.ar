@@ -1,0 +1,144 @@
+import Elf from './libElf.ar'
+
+library Linking {{
+    Layout {{
+        member name:string
+        member fileOffset:i64
+        member address:i64
+        member sectionIndex:i64
+
+        __(name:string, sectionIndex:i64, fileOffset:i64, address:i64) -> void {
+            self.name = name
+            self.fileOffset = fileOffset
+            self.address = address
+            self.sectionIndex = sectionIndex
+        }
+    }}
+
+    Linker {{
+        member error:string
+        member layouts:Array<Layout>
+
+        __() -> void { self.error = ""; self.layouts = new Array<Layout>(0) }
+
+        link(object:Elf.Object) -> Array<u8>? {
+            local base:i64 = 4194304
+            local page:i64 = 4096
+            local fileOffset:i64 = page
+            local index:i64 = 0
+            while index < object.sections.length {
+                local section = object.sections[index]
+                if (section.flags & 2) != 0 && (section.flags & 1) == 0 {
+                    fileOffset = self.aligned(fileOffset, section.alignment)
+                    self.layouts.append(new Layout(section.name, index, fileOffset, base + fileOffset))
+                    if section.type != 8 { fileOffset = fileOffset + section.data.length }
+                }
+                index = index + 1
+            }
+            local readOnlyEnd = fileOffset
+            local writableStart = self.aligned(fileOffset, page)
+            fileOffset = writableStart
+            local memoryEnd = writableStart
+            index = 0
+            while index < object.sections.length {
+                local section = object.sections[index]
+                if (section.flags & 2) != 0 && (section.flags & 1) != 0 {
+                    fileOffset = self.aligned(fileOffset, section.alignment)
+                    memoryEnd = self.aligned(memoryEnd, section.alignment)
+                    local offset = memoryEnd
+                    self.layouts.append(new Layout(section.name, index, offset, base + offset))
+                    memoryEnd = offset + section.size
+                    if section.type != 8 { fileOffset = offset + section.data.length }
+                }
+                index = index + 1
+            }
+
+            local entry = self.symbolAddress(object, "_start")
+            if entry < 0 { self.error = "Missing entry symbol '_start'"; return null }
+            index = 0
+            while index < object.symbols.length {
+                local symbol = object.symbols[index]
+                if symbol.sectionName == null && symbol.binding != 0 {
+                    self.error = "Undefined symbol '" + symbol.name + "'"
+                    return null
+                }
+                index = index + 1
+            }
+
+            local output = new Elf.Bytes()
+            output.zeros(fileOffset)
+            index = 0
+            while index < self.layouts.length {
+                local layout = self.layouts[index]
+                local section = object.sections[layout.sectionIndex]
+                if section.type != 8 {
+                    local byteIndex:i64 = 0
+                    while byteIndex < section.data.length {
+                        output.values[layout.fileOffset + byteIndex] = section.data[byteIndex]
+                        byteIndex = byteIndex + 1
+                    }
+                }
+                index = index + 1
+            }
+
+            index = 0
+            while index < object.relocations.length {
+                local relocation = object.relocations[index]
+                local layout = self.layout(relocation.sectionName)
+                local symbol = self.symbolAddress(object, relocation.symbolName)
+                if layout == null { self.error = "Relocation targets non-allocated section '" + relocation.sectionName + "'"; return null }
+                if symbol < 0 { self.error = "Undefined symbol '" + relocation.symbolName + "'"; return null }
+                local location = layout!.fileOffset + relocation.offset
+                local value = symbol + relocation.addend
+                if relocation.type == 2 || relocation.type == 4 { value = value - (layout!.address + relocation.offset) }
+                if relocation.type == 1 { output.patch64(location, value) }
+                else {
+                    if relocation.type == 2 || relocation.type == 4 || relocation.type == 10 || relocation.type == 11 { output.patch32(location, value) }
+                    else { self.error = "Unsupported x86-64 relocation " + relocation.type.toString(); return null }
+                }
+                index = index + 1
+            }
+
+            output.patch(0, 1179403647, 4)
+            output.values[4] = 2; output.values[5] = 1; output.values[6] = 1
+            output.patch16(16, 2); output.patch16(18, 62); output.patch32(20, 1)
+            output.patch64(24, entry); output.patch64(32, 64)
+            output.patch16(52, 64); output.patch16(54, 56); output.patch16(56, 2)
+            self.programHeader(output, 64, 5, 0, base, readOnlyEnd, readOnlyEnd, page)
+            self.programHeader(output, 120, 6, writableStart, base + writableStart, fileOffset - writableStart, memoryEnd - writableStart, page)
+            return copy output.values
+        }
+
+        programHeader(output:Elf.Bytes, offset:i64, flags:i64, fileOffset:i64, address:i64, fileSize:i64, memorySize:i64, alignment:i64) -> void {
+            output.patch32(offset, 1); output.patch32(offset + 4, flags)
+            output.patch64(offset + 8, fileOffset); output.patch64(offset + 16, address); output.patch64(offset + 24, address)
+            output.patch64(offset + 32, fileSize); output.patch64(offset + 40, memorySize); output.patch64(offset + 48, alignment)
+        }
+
+        aligned(value:i64, alignment:i64) -> i64 {
+            if alignment <= 1 { return value }
+            local remainder = value - (value / alignment) * alignment
+            if remainder == 0 { return value }
+            return value + alignment - remainder
+        }
+
+        layout(name:string) -> ref Layout? {
+            local index:i64 = 0
+            while index < self.layouts.length { if self.layouts[index].name == name { return self.layouts[index] }; index = index + 1 }
+            return null
+        }
+
+        symbolAddress(object:Elf.Object, name:string) -> i64 {
+            local index:i64 = 0
+            while index < object.symbols.length {
+                local symbol = object.symbols[index]
+                if symbol.name == name && symbol.sectionName != null {
+                    local layout = self.layout(symbol.sectionName!)
+                    if layout != null { return layout!.address + symbol.value }
+                }
+                index = index + 1
+            }
+            return -1
+        }
+    }}
+}}

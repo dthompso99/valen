@@ -194,7 +194,7 @@ library X86_64 {{
         supportsRuntime(name:string) -> bool {
             if name == "valen_System_print" || name == "valen_System_arguments" || name == "valen_System_exit" || name == "valen_System_write" || name == "valen_System_writeError" { return true }
             if name == "valen_System_openRead" || name == "valen_System_openWrite" || name == "valen_System_read" || name == "valen_System_writeFile" || name == "valen_System_writeBytes" || name == "valen_System_sync" { return true }
-            if name == "valen_System_close" || name == "valen_System_replaceFile" || name == "valen_System_removeFile" { return true }
+            if name == "valen_System_close" || name == "valen_System_replaceFile" || name == "valen_System_removeFile" || name == "valen_System_makeExecutable" { return true }
             if name == "valen_System_lastError" || name == "valen_System_currentDirectory" || name == "valen_System_environmentVariable" || name == "valen_System_collectGarbage" { return true }
             if name == "valen_System_enableProcessArena" || name == "valen_System_enableShutdownSignals" || name == "valen_System_shutdownRequested" { return true }
             if name == "valen_System_link" || name == "valen_System_memoryCopy" || name == "valen_System_memoryCompare" { return true }
@@ -2316,6 +2316,25 @@ library X86_64 {{
             self.writer.line("    mov QWORD PTR [rip+valen_filesystem_error], 0")
             self.writer.line("    ret")
             self.writer.line(".Lremove_file_error:")
+            self.writer.line("    mov r10, rax")
+            self.writer.line("    neg r10")
+            self.writer.line("    mov QWORD PTR [rip+valen_filesystem_error], r10")
+            self.writer.line("    ret")
+            self.writer.line("")
+            self.writer.line(".globl valen_System_makeExecutable")
+            self.writer.line("valen_System_makeExecutable:")
+            self.writer.line("    sub rsp, 8")
+            self.writer.line("    call .Lvalen_path_cstring")
+            self.writer.line("    add rsp, 8")
+            self.writer.line("    mov rdi, rax")
+            self.writer.line("    mov esi, 493")
+            self.writer.line("    mov eax, 90")
+            self.writer.line("    syscall")
+            self.writer.line("    test rax, rax")
+            self.writer.line("    js .Lmake_executable_error")
+            self.writer.line("    mov QWORD PTR [rip+valen_filesystem_error], 0")
+            self.writer.line("    ret")
+            self.writer.line(".Lmake_executable_error:")
             self.writer.line("    mov r10, rax")
             self.writer.line("    neg r10")
             self.writer.line("    mov QWORD PTR [rip+valen_filesystem_error], r10")

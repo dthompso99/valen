@@ -32,8 +32,7 @@ source -> tokens -> AST -> module graph -> semantic symbols
 - Canonicalization folds integer and boolean constants, simplifies constant branches, removes unreachable blocks, and eliminates unused side-effect-free SSA values. Potentially trapping and stateful operations are retained.
 - Validation rejects malformed IR before backend generation.
 - The x86-64 backend emits a controlled Intel-syntax subset. Both generation 0 and the self-hosted
-  compiler encode that subset and write ELF64 relocatable objects directly; the system toolchain is
-  invoked only for linking.
+  compiler encode that subset and write ELF64 relocatable objects directly.
 
 Native executable builds can reuse validated backend artifacts by setting
 `VALEN_CACHE_PATH` to an existing writable directory. Cache keys include every loaded module's
@@ -45,14 +44,15 @@ misses, and writes. Missing, unwritable, or invalid entries fall back to an ordi
 Object emission and linking are separate policy choices. Direct ELF emission does not imply a
 freestanding executable: the emitted object may be linked without foreign libraries for the
 self-contained Linux runtime, or passed to the hosted system linker with the explicit libraries
-collected from `native ... from` declarations. The future integrated linker will be an additional
-provider, not the removal of hosted linking. Generation 0 can stop after object emission with
+collected from `native ... from` declarations. The integrated linker handles freestanding x86-64
+ELF executables, while `--linker system` preserves hosted linking. The default `--linker auto`
+selects the system linker only for programs with foreign libraries. Generation 0 can stop after object emission with
 `node bootstrap/compiler.js --emit-object <source> <output.o>`.
 
 The self-hosted compiler can stop at the same boundary with
 `valen --emit-object <source> -o <output.o>`.
 
-`-O0` retains mandatory IR cleanup and validation while disabling optional optimizations. `-O1` is the default and enables constant folding, dead/unreachable elimination, conservative linear-scan register allocation, immediate selection, and peepholes. Unsupported levels are rejected instead of silently aliasing another mode. An integrated linker remains **WIP**.
+`-O0` retains mandatory IR cleanup and validation while disabling optional optimizations. `-O1` is the default and enables constant folding, dead/unreachable elimination, conservative linear-scan register allocation, immediate selection, and peepholes. Unsupported levels are rejected instead of silently aliasing another mode.
 
 ## Repository map
 

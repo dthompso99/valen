@@ -329,6 +329,10 @@ function encodeInstruction(sink, mnemonic, operands) {
 /** Assembles the strict Intel-syntax subset emitted by Valen's x86-64 backend. */
 export class X86Assembler {
     assemble(source) {
+        return this.assembleObject(source).build();
+    }
+
+    assembleObject(source) {
         const lines = source.split('\n').map(line => line.trim()).filter(Boolean);
         const parsed = this.parse(lines);
         this.layout(parsed);
@@ -466,6 +470,6 @@ export class X86Assembler {
             }
             object.addRelocation(relocation.section, relocation.offset, relocation.symbol, relocation.type, relocation.addend);
         }
-        return object.build();
+        return object;
     }
 }

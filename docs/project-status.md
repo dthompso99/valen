@@ -73,7 +73,7 @@ and embedded targets.
 - Integer instruction selection uses signed 32-bit immediates for arithmetic, bitwise, shift, and comparison operations; generated-function peepholes remove redundant moves and neutral operations.
 - `-O0` performs only mandatory IR cleanup and validation; `-O1` is the default and enables constant folding, dead/unreachable elimination, register allocation, immediate selection, and peepholes. Unsupported levels are rejected.
 - Generation 0 and the self-hosted compiler emit ELF64 relocatable objects without a system assembler.
-- **WIP:** an integrated linker
+- The integrated x86-64 ELF linker handles freestanding executables; `--linker system` remains available for foreign libraries.
 - Repeatable compiler and generated-code benchmarks report compile time, memory, executable size, and runtime speed; expanding the workload corpus remains **WIP**.
 
 ## Maturity

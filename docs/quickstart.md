@@ -5,8 +5,7 @@
 Valen currently targets x86-64 Linux. You need:
 
 - Node.js 20 or newer for the bootstrap compiler
-- a C compiler available as `cc`
-- the system linker normally installed with the C toolchain
+- a C compiler and system linker only when linking foreign libraries
 
 Other architectures and operating systems are **WIP**.
 
@@ -46,6 +45,11 @@ Now compile and run an example:
 ./valen examples/simple/simple.ar -o simple
 ./simple
 ```
+
+Freestanding programs use Valen's integrated linker automatically. `--linker native` requires
+that all symbols come from the generated object, while `--linker system` explicitly selects the
+host toolchain. The default `--linker auto` selects the system linker only when the program names
+foreign libraries.
 
 The compiler also provides a semantic-check-only mode:
 

@@ -7,6 +7,7 @@ import test from 'node:test';
 import {ElfObject} from '../elf.js';
 import {X86Assembler} from '../x86-assembler.js';
 import {Compiler} from '../compiler.js';
+import {ElfLinker, LinkerError} from '../linker.js';
 
 test('ELF writer produces a directly linkable x86-64 relocatable object', t => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-elf-'));
@@ -95,4 +96,46 @@ test('compiler can stop at a relocatable object without selecting a linker', () 
     } finally {
         fs.rmSync(directory, {recursive: true, force: true});
     }
+});
+
+test('integrated linker resolves generated relocations into a runnable static ELF', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-native-linker-'));
+    try {
+        const executablePath = path.join(directory, 'program');
+        const source = `.intel_syntax noprefix
+.text
+.globl _start
+_start:
+    lea rax, [rip+message]
+    mov eax, 60
+    xor edi, edi
+    syscall
+.section .rodata
+message:
+    .quad _start
+`;
+        const object = new X86Assembler().assembleObject(source);
+        fs.writeFileSync(executablePath, new ElfLinker().link(object), {mode: 0o755});
+        const run = spawnSync(executablePath);
+        if (run.error?.code === 'EPERM') {
+            t.skip('process sandbox does not allow generated executables');
+            return;
+        }
+        assert.equal(run.status, 0, run.stderr?.toString());
+        const bytes = fs.readFileSync(executablePath);
+        assert.equal(bytes.readUInt16LE(16), 2);
+        assert.equal(bytes.readUInt16LE(56), 2);
+    } finally {
+        fs.rmSync(directory, {recursive: true, force: true});
+    }
+});
+
+test('integrated linker rejects undefined symbols', () => {
+    const object = new X86Assembler().assembleObject(`.text
+.globl _start
+.extern missing
+_start:
+    call missing
+`);
+    assert.throws(() => new ElfLinker().link(object), LinkerError);
 });

@@ -10,6 +10,7 @@ import IrValidation from './libIrValidation.ar'
 import X86_64 from './libX86_64.ar'
 import X86Object from './libX86Object.ar'
 import CompilerCache from './libCompilerCache.ar'
+import Linking from './libLinker.ar'
 
 entry {{
     __() -> i32 {
@@ -19,10 +20,16 @@ entry {{
         compilerArguments.append(arguments[0])
         local optimizationLevel:i64 = 1
         local configuredSourceRoot:string? = null
+        local linkerMode:string = "auto"
         local argumentIndex:i64 = 1
         while argumentIndex < arguments.length {
             local argument = arguments[argumentIndex]
-            if argument == "--source-root" {
+            if argument == "--linker" {
+                if argumentIndex + 1 >= arguments.length { System.writeError("valen: --linker requires auto, native, or system\n"); return 64 }
+                linkerMode = arguments[argumentIndex + 1]
+                if linkerMode != "auto" && linkerMode != "native" && linkerMode != "system" { System.writeError("valen: unsupported linker '"); System.writeError(linkerMode); System.writeError("'\n"); return 64 }
+                argumentIndex = argumentIndex + 1
+            } else { if argument == "--source-root" {
                 if argumentIndex + 1 >= arguments.length { System.writeError("valen: --source-root requires a directory\n"); return 64 }
                 configuredSourceRoot = arguments[argumentIndex + 1]
                 argumentIndex = argumentIndex + 1
@@ -37,7 +44,7 @@ entry {{
                     }
                     compilerArguments.append(argument)
                 }
-            } }
+            } } }
             argumentIndex = argumentIndex + 1
         }
         if compilerArguments.length == 2 {
@@ -107,7 +114,7 @@ entry {{
             local cached = cache.load(graph)
             if cached != null {
                 if emitObjectOnly { return self.emitObject(cached!.assembly, outputPath!) }
-                local cachedLinkResult = self.link(cached!.assembly, outputPath!, cached!.libraries)
+                local cachedLinkResult = self.link(cached!.assembly, outputPath!, cached!.libraries, linkerMode)
                 if cachedLinkResult != 0 {
                     System.writeError("valen: linker exited with status ")
                     System.writeError(cachedLinkResult.toString())
@@ -159,7 +166,7 @@ entry {{
         if outputPath != null {
             cache.store(graph, assembly, ir.foreignLibraries)
             if emitObjectOnly { return self.emitObject(assembly, outputPath!) }
-            local linkResult = self.link(assembly, outputPath!, ir.foreignLibraries)
+            local linkResult = self.link(assembly, outputPath!, ir.foreignLibraries, linkerMode)
             if linkResult != 0 {
                 System.writeError("valen: linker exited with status ")
                 System.writeError(linkResult.toString())
@@ -183,15 +190,28 @@ entry {{
         return 0
     }
 
-    link(assembly:string, outputPath:string, libraries:Array<string>) -> i64 {
+    link(assembly:string, outputPath:string, libraries:Array<string>, linkerMode:string) -> i64 {
         local assembler = new X86Object.Assembler()
-        local object = assembler.assemble(assembly)
+        local structured = assembler.assembleObject(assembly)
+        if structured == null {
+            System.writeError("valen: native object encoder does not support generated assembly: "); System.writeError(assembler.error); System.writeError("\n")
+            return 69
+        }
+        local object = structured!.build()
         local inputPath = outputPath + ".o"
-        if object != null {
-            if !self.writeObject(inputPath, object!) { return 74 }
-        } else {
-            inputPath = outputPath + ".s"
-            if !self.writeAssembly(inputPath, assembly) { return 74 }
+        if !self.writeObject(inputPath, object) { return 74 }
+        local nativeLink:bool = linkerMode == "native" || (linkerMode == "auto" && libraries.length == 0)
+        if nativeLink {
+            if libraries.length > 0 {
+                System.writeError("valen: native linker cannot resolve foreign libraries; use --linker system\n")
+                return 69
+            }
+            local linker = new Linking.Linker()
+            local executable = linker.link(structured!)
+            if executable == null { System.writeError("valen: native linker: "); System.writeError(linker.error); System.writeError("\n"); return 69 }
+            if !self.writeObject(outputPath, executable!) { return 74 }
+            if System.makeExecutable(outputPath) != 0 { System.writeError("valen: could not make output executable; OS error "); System.writeError(System.lastError().toString()); System.writeError("\n"); return 74 }
+            return 0
         }
         return System.link(inputPath, outputPath, libraries)
     }
@@ -234,6 +254,7 @@ entry {{
         System.write("usage:\n")
         System.write("  optimization: -O0 (no optional optimization), -O1 (default)\n")
         System.write("  source root: --source-root <directory>\n")
+        System.write("  linker: --linker auto (default), native, or system\n")
         System.write("  valen <source-file>\n")
         System.write("  valen <source-file> -o <executable>\n")
         System.write("  valen --check <source-file>\n")

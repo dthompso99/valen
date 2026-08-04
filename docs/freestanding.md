@@ -73,16 +73,16 @@ before trapping.
 ## Toolchain boundary
 
 Freestanding describes the produced program's dependencies, not which linker produced it. Direct
-object emission removes the assembler dependency while leaving link policy selectable. An Valen
+object emission removes the assembler dependency while leaving link policy selectable. A Valen
 object can be linked into a self-contained image, linked by the hosted system toolchain with
-explicit libraries such as libc, or eventually linked by Valen's integrated linker. Supporting
+explicit libraries such as libc, or linked directly by Valen's integrated linker. Supporting
 one route must not remove the others.
 
 ## Current implementation status
 
 - The parser, semantic model, ownership checks, and target-independent IR are reusable.
-- Generation 0 and the self-hosted compiler directly encode ELF64 relocatable objects; executable
-  linking remains a separate selectable policy.
+- Generation 0 and the self-hosted compiler directly encode ELF64 relocatable objects and link
+  freestanding executables; hosted system linking remains a selectable policy.
 - The only implemented executable target is hosted x86-64 Linux.
 - Ordinary x86-64 Linux executables provide `_start`, link with `-nostdlib`, and have no implicit
   shared-library dependency. Target-native symbols are validated before linking.

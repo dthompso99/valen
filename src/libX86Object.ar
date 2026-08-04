@@ -586,6 +586,12 @@ library X86Object {{
         }
 
         assemble(source:string) -> Array<u8>? {
+            local object = self.assembleObject(source)
+            if object == null { return null }
+            return object!.build()
+        }
+
+        assembleObject(source:string) -> Elf.Object? {
             self.section(".text")
             local current = ".text"
             local start:i64 = 0
@@ -603,7 +609,7 @@ library X86Object {{
                 }
                 if end == source.length { break }; start = end + 1
             }
-            return self.build()
+            return self.buildObject()
         }
 
         line(line:string, current:string) -> string {
@@ -659,7 +665,7 @@ library X86Object {{
             return ""
         }
 
-        build() -> Array<u8> {
+        buildObject() -> Elf.Object {
             local object = new Elf.Object()
             local bss = self.findSection(".bss")
             local bssSize:i64 = 0
@@ -705,7 +711,7 @@ library X86Object {{
                 if self.findLabel(name) == null && !self.contains(self.externals, name) { object.addSymbol(name, null, 0, 0, 1, 0); self.externals.append(name) }
                 index = index + 1
             }
-            return object.build()
+            return object
         }
 
         section(name:string) -> ref Section {
