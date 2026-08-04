@@ -139,3 +139,32 @@ _start:
 `);
     assert.throws(() => new ElfLinker().link(object), LinkerError);
 });
+
+test('integrated linker resolves symbols across independent objects', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-multi-object-'));
+    try {
+        const executablePath = path.join(directory, 'program');
+        const assembler = new X86Assembler();
+        const entry = assembler.assembleObject(`.text
+.globl _start
+.extern answer
+_start:
+    call answer
+    mov edi, eax
+    mov eax, 60
+    syscall
+`);
+        const implementation = new X86Assembler().assembleObject(`.text
+.globl answer
+answer:
+    mov eax, 0
+    ret
+`);
+        fs.writeFileSync(executablePath, new ElfLinker().linkObjects([entry, implementation]), {mode: 0o755});
+        const run = spawnSync(executablePath);
+        if (run.error?.code === 'EPERM') { t.skip('process sandbox does not allow generated executables'); return; }
+        assert.equal(run.status, 0, run.stderr?.toString());
+    } finally {
+        fs.rmSync(directory, {recursive: true, force: true});
+    }
+});

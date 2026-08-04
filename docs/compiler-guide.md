@@ -41,6 +41,18 @@ dependency therefore produces a cold build; a matching build skips semantic anal
 lowering and validation, and backend generation. Set `VALEN_CACHE_TRACE=1` to report cache hits,
 misses, and writes. Missing, unwritable, or invalid entries fall back to an ordinary build.
 
+Cold freestanding builds also create versioned `.vmi` module-interface artifacts and linkable
+per-module implementation chunks. Interface and implementation fingerprints are independent:
+changing a method body rebuilds that module, while importers remain reusable until an exported
+signature, type, contract, ownership rule, or native dependency changes. Modules are lowered and
+encoded in dependency order. Once an implementation object is complete, its source text and method
+bodies are released while declaration summaries remain available to later modules. This keeps the
+function IR and implementation AST working set bounded by the active module instead of the entire
+program. The whole-program cache remains the faster path for an exact warm build.
+
+The interface and chunk formats are internal, versioned compiler artifacts, not a stable Valen ABI.
+Deleting the cache directory is always safe.
+
 Object emission and linking are separate policy choices. Direct ELF emission does not imply a
 freestanding executable: the emitted object may be linked without foreign libraries for the
 self-contained Linux runtime, or passed to the hosted system linker with the explicit libraries

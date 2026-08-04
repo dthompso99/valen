@@ -11,6 +11,7 @@ import X86_64 from './libX86_64.ar'
 import X86Object from './libX86Object.ar'
 import CompilerCache from './libCompilerCache.ar'
 import Linking from './libLinker.ar'
+import Elf from './libElf.ar'
 
 entry {{
     __() -> i32 {
@@ -110,6 +111,7 @@ entry {{
             return 65
         }
         local cache = new CompilerCache.Cache(optimizationLevel)
+        if cache.enabled() { cache.prepareInterfaces(graph) }
         if outputPath != null && cache.enabled() {
             local cached = cache.load(graph)
             if cached != null {
@@ -131,8 +133,15 @@ entry {{
             return 65
         }
         if checkOnly { return 0 }
-        local generator = new Ir.Generator(analysis)
+        local emissionModule:string? = null
+        if outputPath != null && !emitObjectOnly && graph.modules.length > 1 && graph.entry != null { emissionModule = graph.entry!.path }
+        local generator = new Ir.Generator(analysis, emissionModule)
         local ir = generator.generate()
+        if emissionModule != null && (linkerMode == "system" || ir.foreignLibraries.length > 0) {
+            emissionModule = null
+            generator = new Ir.Generator(analysis)
+            ir = generator.generate()
+        }
         local irPass = new IrValidation.Pass()
         local irErrors = irPass.prepare(ir, optimizationLevel == 1)
         if irErrors.length > 0 {
@@ -164,9 +173,9 @@ entry {{
         }
         local assembly = backend.generate()
         if outputPath != null {
-            cache.store(graph, assembly, ir.foreignLibraries)
+            if emissionModule == null { cache.store(graph, assembly, ir.foreignLibraries) }
             if emitObjectOnly { return self.emitObject(assembly, outputPath!) }
-            local linkResult = self.link(assembly, outputPath!, ir.foreignLibraries, linkerMode)
+            local linkResult = self.link(assembly, outputPath!, ir.foreignLibraries, linkerMode, ir, graph, optimizationLevel, cache, analysis)
             if linkResult != 0 {
                 System.writeError("valen: linker exited with status ")
                 System.writeError(linkResult.toString())
@@ -190,7 +199,7 @@ entry {{
         return 0
     }
 
-    link(assembly:string, outputPath:string, libraries:Array<string>, linkerMode:string) -> i64 {
+    link(assembly:string, outputPath:string, libraries:Array<string>, linkerMode:string, ir:Ir.Program?=null, graph:ModuleLoading.ModuleGraph?=null, optimizationLevel:i64=1, cache:CompilerCache.Cache?=null, analysis:Semantics.Analysis?=null) -> i64 {
         local assembler = new X86Object.Assembler()
         local structured = assembler.assembleObject(assembly)
         if structured == null {
@@ -207,7 +216,39 @@ entry {{
                 return 69
             }
             local linker = new Linking.Linker()
-            local executable = linker.link(structured!)
+            local executable:Array<u8>? = null
+            if ir != null && graph != null && graph!.modules.length > 1 {
+                local objects = new Array<ref Elf.Object>(0)
+                local moduleIndex:i64 = 0
+                while moduleIndex < graph!.modules.length {
+                    local module = graph!.modules[graph!.modules.length - moduleIndex - 1]
+                    local includeRuntime = graph!.entry != null && module.path == graph!.entry!.path
+                    local moduleAssembly:string? = null
+                    if includeRuntime { moduleAssembly = assembly }
+                    else { if cache != null { moduleAssembly = cache!.loadModuleAssembly(module, false) } }
+                    if moduleAssembly == null {
+                        local moduleIr = ir!
+                        if analysis != null { local moduleGenerator = new Ir.Generator(analysis!, module.path); moduleIr = moduleGenerator.generate() }
+                        local modulePass = new IrValidation.Pass()
+                        local moduleErrors = modulePass.prepare(moduleIr, optimizationLevel == 1, includeRuntime)
+                        if moduleErrors.length > 0 {
+                            local moduleErrorIndex:i64 = 0
+                            while moduleErrorIndex < moduleErrors.length { System.writeError("valen: invalid module IR: "); System.writeError(moduleErrors[moduleErrorIndex]); System.writeError("\n"); moduleErrorIndex = moduleErrorIndex + 1 }
+                            return 70
+                        }
+                        local moduleBackend = new X86_64.Backend(moduleIr, optimizationLevel, module.path, includeRuntime)
+                        moduleAssembly = moduleBackend.generate()
+                        if cache != null { cache!.storeModuleAssembly(module, false, moduleAssembly!) }
+                    }
+                    local moduleAssembler = new X86Object.Assembler()
+                    local moduleObject = moduleAssembler.assembleObject(moduleAssembly!)
+                    if moduleObject == null { System.writeError("valen: native module object encoder failed: "); System.writeError(moduleAssembler.error); System.writeError("\n"); return 69 }
+                    objects.append(moduleObject!)
+                    module.releaseImplementation()
+                    moduleIndex = moduleIndex + 1
+                }
+                executable = linker.linkObjects(objects)
+            } else { executable = linker.link(structured!) }
             if executable == null { System.writeError("valen: native linker: "); System.writeError(linker.error); System.writeError("\n"); return 69 }
             if !self.writeObject(outputPath, executable!) { return 74 }
             if System.makeExecutable(outputPath) != 0 { System.writeError("valen: could not make output executable; OS error "); System.writeError(System.lastError().toString()); System.writeError("\n"); return 74 }

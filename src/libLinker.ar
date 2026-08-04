@@ -21,6 +21,76 @@ library Linking {{
 
         __() -> void { self.error = ""; self.layouts = new Array<Layout>(0) }
 
+        linkObjects(objects:Array<ref Elf.Object>) -> Array<u8>? {
+            if objects.length == 0 { self.error = "No input objects"; return null }
+            if objects.length == 1 { return self.link(objects[0]) }
+            local required = new Array<string>(0)
+            local objectIndex:i64 = 0
+            while objectIndex < objects.length {
+                local symbolIndex:i64 = 0
+                while symbolIndex < objects[objectIndex].symbols.length {
+                    local symbol = objects[objectIndex].symbols[symbolIndex]
+                    if symbol.sectionName == null && symbol.binding != 0 { self.addUnique(required, symbol.name) }
+                    symbolIndex = symbolIndex + 1
+                }
+                objectIndex = objectIndex + 1
+            }
+            local merged = new Elf.Object()
+            objectIndex = 0
+            while objectIndex < objects.length {
+                local object = objects[objectIndex]
+                local suffix = ".m" + objectIndex.toString()
+                local sectionIndex:i64 = 0
+                while sectionIndex < object.sections.length {
+                    local section = object.sections[sectionIndex]
+                    local data = new Array<u8>(0)
+                    local byteIndex:i64 = 0
+                    while byteIndex < section.data.length { data.append(section.data[byteIndex]); byteIndex = byteIndex + 1 }
+                    merged.addSection(section.name + suffix, data, section.type, section.flags, section.alignment)
+                    merged.sections[merged.sections.length - 1].size = section.size
+                    sectionIndex = sectionIndex + 1
+                }
+                local localNames = new Array<string>(0)
+                local renamed = new Array<string>(0)
+                local symbolIndex:i64 = 0
+                while symbolIndex < object.symbols.length {
+                    local symbol = object.symbols[symbolIndex]
+                    if symbol.binding == 0 && !self.contains(required, symbol.name) { localNames.append(symbol.name); renamed.append("$m" + objectIndex.toString() + "." + symbol.name) }
+                    symbolIndex = symbolIndex + 1
+                }
+                symbolIndex = 0
+                while symbolIndex < object.symbols.length {
+                    local symbol = object.symbols[symbolIndex]
+                    local name = self.renamed(localNames, renamed, symbol.name)
+                    local sectionName:string? = null
+                    if symbol.sectionName != null { sectionName = symbol.sectionName! + suffix }
+                    local existing = self.symbol(merged, name)
+                    if existing != null {
+                        if existing!.sectionName != null && sectionName != null { self.error = "Duplicate symbol '" + name + "'"; return null }
+                        if existing!.sectionName == null && sectionName != null { existing!.sectionName = sectionName; existing!.value = symbol.value; existing!.size = symbol.size; existing!.binding = 1; existing!.type = symbol.type }
+                    } else {
+                        local binding = symbol.binding
+                        if self.contains(required, name) { binding = 1 }
+                        merged.addSymbol(name, sectionName, symbol.value, symbol.size, binding, symbol.type)
+                    }
+                    symbolIndex = symbolIndex + 1
+                }
+                local relocationIndex:i64 = 0
+                while relocationIndex < object.relocations.length {
+                    local relocation = object.relocations[relocationIndex]
+                    merged.addRelocation(relocation.sectionName + suffix, relocation.offset, self.renamed(localNames, renamed, relocation.symbolName), relocation.type, relocation.addend)
+                    relocationIndex = relocationIndex + 1
+                }
+                objectIndex = objectIndex + 1
+            }
+            return self.link(merged)
+        }
+
+        contains(values:Array<string>, value:string) -> bool { local index:i64 = 0; while index < values.length { if values[index] == value { return true }; index = index + 1 }; return false }
+        addUnique(values:Array<string>, value:string) -> void { if !self.contains(values, value) { values.append(value) } }
+        renamed(names:Array<string>, values:Array<string>, name:string) -> string { local index:i64 = 0; while index < names.length { if names[index] == name { return values[index] }; index = index + 1 }; return name }
+        symbol(object:Elf.Object, name:string) -> ref Elf.Symbol? { local index:i64 = 0; while index < object.symbols.length { if object.symbols[index].name == name { return object.symbols[index] }; index = index + 1 }; return null }
+
         link(object:Elf.Object) -> Array<u8>? {
             local base:i64 = 4194304
             local page:i64 = 4096

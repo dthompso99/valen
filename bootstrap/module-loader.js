@@ -41,6 +41,7 @@ export class ModuleLoader {
         const module = {
             path: canonicalPath,
             id: this.moduleId(canonicalPath),
+            source,
             program: new Parser().parse(source, canonicalPath),
             imports: new Map(),
             owningRoot

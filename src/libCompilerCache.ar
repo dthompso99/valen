@@ -1,6 +1,7 @@
 import System from './libSystem.ar'
 import Compiler from './libCompiler.ar'
 import ModuleLoading from './libModuleLoader.ar'
+import ModuleInterfaces from './libModuleInterface.ar'
 
 library CompilerCache {{
     Artifact {{
@@ -31,9 +32,104 @@ library CompilerCache {{
             return self.directory != null
         }
 
+        prepareInterfaces(graph:ModuleLoading.ModuleGraph) -> void {
+            if self.directory == null { return }
+            local builder = new ModuleInterfaces.Builder()
+            local artifacts = new Array<ModuleInterfaces.Artifact>(0)
+            local index:i64 = 0
+            while index < graph.modules.length { artifacts.append(builder.create(graph.modules[index])); index = index + 1 }
+            index = 0
+            while index < graph.modules.length {
+                local module = graph.modules[index]
+                local artifact = artifacts[index]
+                local interfacePath = self.interfacePath(module.path)
+                local expected = self.interfaceContent(module, artifact, artifacts)
+                local existing = Compiler.loadSource(interfacePath)
+                if existing != null {
+                    if existing!.content == expected { self.log("interface hit", interfacePath) } else { self.log("interface changed", interfacePath); self.writeInterface(interfacePath, expected) }
+                } else { self.log("interface miss", interfacePath); self.writeInterface(interfacePath, expected) }
+                index = index + 1
+            }
+        }
+
+        interfacePath(modulePath:string) -> string {
+            return self.directory! + "/module-" + self.pathFingerprint(modulePath).toString() + ".vmi"
+        }
+
+        interfaceContent(module:ModuleLoading.Module, artifact:ModuleInterfaces.Artifact, artifacts:Array<ModuleInterfaces.Artifact>) -> string {
+            local output = new StringBuilder()
+            output.append("VALEN-MODULE-INTERFACE-1\n")
+            output.append(artifact.implementationFingerprint); output.append("\n")
+            output.append(artifact.interfaceFingerprint); output.append("\n")
+            local importIndex:i64 = 0
+            while importIndex < module.imports.length {
+                local imported = module.imports[importIndex]
+                output.append(imported.name); output.append("|"); output.append(imported.loadedModule.path); output.append("|")
+                local artifactIndex:i64 = 0
+                while artifactIndex < artifacts.length { if artifacts[artifactIndex].modulePath == imported.loadedModule.path { output.append(artifacts[artifactIndex].interfaceFingerprint); break }; artifactIndex = artifactIndex + 1 }
+                output.append("\n"); importIndex = importIndex + 1
+            }
+            output.append("---\n"); output.append(artifact.summary); output.append("VALEN-MODULE-INTERFACE-END\n")
+            return output.build()
+        }
+
+        writeInterface(path:string, content:string) -> void {
+            local output = System.openWrite(path)
+            if output == null { self.log("interface write skipped", path); return }
+            local written = System.writeFile(output!, content)
+            local closed = System.close(output!)
+            if written == content.length && closed == 0 { self.log("interface stored", path) } else { self.log("interface write failed", path) }
+        }
+
+        pathFingerprint(path:string) -> i64 { return self.mix(1469598103934665603, path) }
+
         path(graph:ModuleLoading.ModuleGraph) -> string? {
             if self.directory == null { return null }
             return self.directory! + "/x86_64-linux-" + self.fingerprint(graph).toString() + ".cache"
+        }
+
+        modulePath(module:ModuleLoading.Module, includeRuntime:bool) -> string? {
+            if self.directory == null { return null }
+            return self.directory! + "/x86_64-linux-module-" + self.moduleFingerprint(module, includeRuntime).toString() + ".chunk"
+        }
+
+        loadModuleAssembly(module:ModuleLoading.Module, includeRuntime:bool) -> string? {
+            local artifactPath = self.modulePath(module, includeRuntime)
+            if artifactPath == null { return null }
+            local source = Compiler.loadSource(artifactPath!)
+            local header = "VALEN-MODULE-OBJECT-1\n"
+            local footer = "\nVALEN-MODULE-OBJECT-END\n"
+            if source == null { self.log("module miss", artifactPath!); return null }
+            local content = source!.content
+            if content.length < header.length + footer.length || content.slice(0, header.length) != header || content.slice(content.length - footer.length, footer.length) != footer { self.log("module invalid", artifactPath!); return null }
+            self.log("module hit", artifactPath!)
+            return content.slice(header.length, content.length - header.length - footer.length)
+        }
+
+        storeModuleAssembly(module:ModuleLoading.Module, includeRuntime:bool, assembly:string) -> void {
+            local artifactPath = self.modulePath(module, includeRuntime)
+            if artifactPath == null { return }
+            local output = System.openWrite(artifactPath!)
+            if output == null { self.log("module write skipped", artifactPath!); return }
+            local content = "VALEN-MODULE-OBJECT-1\n" + assembly + "\nVALEN-MODULE-OBJECT-END\n"
+            local written = System.writeFile(output!, content)
+            local closed = System.close(output!)
+            if written == content.length && closed == 0 { self.log("module stored", artifactPath!) } else { self.log("module write failed", artifactPath!) }
+        }
+
+        moduleFingerprint(module:ModuleLoading.Module, includeRuntime:bool) -> i64 {
+            local interfaceBuilder = new ModuleInterfaces.Builder()
+            local ownArtifact = interfaceBuilder.create(module)
+            local value = self.mix(1469598103934665603, "valen-module-object-v1:x86_64-linux:O" + self.optimizationLevel.toString())
+            if includeRuntime { value = self.mix(value, "runtime") } else { value = self.mix(value, "module") }
+            value = self.mix(value, module.path); value = self.mix(value, ownArtifact.implementationFingerprint.toString())
+            local index:i64 = 0
+            while index < module.imports.length {
+                local imported = interfaceBuilder.create(module.imports[index].loadedModule)
+                value = self.mix(value, module.imports[index].name); value = self.mix(value, imported.interfaceFingerprint.toString())
+                index = index + 1
+            }
+            return value
         }
 
         load(graph:ModuleLoading.ModuleGraph) -> Artifact? {

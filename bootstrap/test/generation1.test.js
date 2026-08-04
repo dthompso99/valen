@@ -185,7 +185,10 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             assert.match(warm.stderr, /valen: cache hit/);
             assert.equal(spawnSync(path.join(directory, 'cache-warm')).status, 0);
 
-            const [cacheEntry] = fs.readdirSync(cachePath);
+            const interfaceEntries = fs.readdirSync(cachePath).filter(name => name.endsWith('.vmi'));
+            assert.ok(interfaceEntries.length > 0, 'native compiler did not emit module interface artifacts');
+            const cacheEntry = fs.readdirSync(cachePath).find(name => name.endsWith('.cache'));
+            assert.ok(cacheEntry, 'native compiler did not emit a backend cache artifact');
             fs.writeFileSync(path.join(cachePath, cacheEntry), 'not a Valen cache artifact');
             const recovered = compile(sourcePath, 'cache-recovered');
             assert.equal(recovered.status, 0, recovered.stderr);
@@ -206,6 +209,46 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             assert.equal(foreignWarm.status, 0, foreignWarm.stderr);
             assert.match(foreignWarm.stderr, /valen: cache hit/);
             assert.equal(spawnSync(path.join(directory, 'cache-foreign-warm')).status, 0);
+
+            const chunkRoot = path.join(directory, 'chunked');
+            fs.mkdirSync(chunkRoot);
+            const librarySource = path.join(chunkRoot, 'math.ar');
+            const stableSource = path.join(chunkRoot, 'stable.ar');
+            const entrySource = path.join(chunkRoot, 'main.ar');
+            fs.writeFileSync(entrySource, "import Math from './math.ar'\nimport Stable from './stable.ar'\nentry {{ __() -> i64 { return Math.value() + Stable.zero() } }}\n");
+            fs.writeFileSync(librarySource, 'library Math {{ value() -> i64 { return 1 } }}\n');
+            fs.writeFileSync(stableSource, 'library Stable {{ zero() -> i64 { return 0 } }}\n');
+            const compileChunk = name => spawnSync(compilerPath,
+                ['--source-root', chunkRoot, entrySource, '-o', path.join(directory, name)],
+                {encoding: 'utf8', env: cacheEnvironment, cwd: projectRoot});
+            const chunkCold = compileChunk('chunk-cold');
+            assert.equal(chunkCold.status, 0, chunkCold.stderr);
+            assert.match(chunkCold.stderr, /cache module miss/);
+            fs.writeFileSync(librarySource, 'library Math {{ value() -> i64 { return 2 } }}\n');
+            const chunkChanged = compileChunk('chunk-changed');
+            assert.equal(chunkChanged.status, 0, chunkChanged.stderr);
+            assert.match(chunkChanged.stderr, /cache interface changed/);
+            assert.match(chunkChanged.stderr, /cache module hit/);
+            assert.match(chunkChanged.stderr, /cache module miss/);
+            assert.equal(spawnSync(path.join(directory, 'chunk-changed')).status, 2);
+
+            const largeRoot = path.join(directory, 'large-modules');
+            fs.mkdirSync(largeRoot);
+            const moduleCount = 48;
+            for (let index = 0; index < moduleCount; index += 1) {
+                const imported = index === 0 ? '' : `import Module${index - 1} from './module-${index - 1}.ar'\n`;
+                const value = index === 0 ? '1' : `Module${index - 1}.value() + 1`;
+                fs.writeFileSync(path.join(largeRoot, `module-${index}.ar`),
+                    `${imported}library Module${index} {{ value() -> i64 { return ${value} } }}\n`);
+            }
+            const largeEntry = path.join(largeRoot, 'main.ar');
+            fs.writeFileSync(largeEntry,
+                `import Module${moduleCount - 1} from './module-${moduleCount - 1}.ar'\nentry {{ __() -> i64 { return Module${moduleCount - 1}.value() } }}\n`);
+            const largeOutput = path.join(directory, 'large-module-program');
+            const bounded = spawnSync('bash', ['-c', 'ulimit -v 786432; exec "$@"', 'valen-bounded', compilerPath,
+                '--source-root', largeRoot, largeEntry, '-o', largeOutput], {encoding: 'utf8', env: cacheEnvironment, cwd: projectRoot});
+            assert.equal(bounded.status, 0, bounded.stderr || bounded.stdout);
+            assert.equal(spawnSync(largeOutput).status, moduleCount);
         });
 
         await t.test('native optimization flags preserve behavior and reject unsupported levels', () => {

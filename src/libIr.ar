@@ -74,6 +74,7 @@ library Ir {{
     }}
 
     Function {{
+        member modulePath:string
         member name:string
         member displayName:string
         member ownerType:string
@@ -82,6 +83,7 @@ library Ir {{
         member blocks:Array<ref Block>
 
         __(name:string, displayName:string, ownerType:string, returnType:string) -> void {
+            self.modulePath = ""
             self.name = name
             self.displayName = displayName
             self.ownerType = ownerType
@@ -92,6 +94,7 @@ library Ir {{
     }}
 
     ExternalFunction {{
+        member modulePath:string
         member name:string
         member displayName:string
         member runtimeName:string
@@ -100,6 +103,7 @@ library Ir {{
         member foreignLibrary:string?
 
         __(name:string, displayName:string, runtimeName:string, returnType:string) -> void {
+            self.modulePath = ""
             self.name = name
             self.displayName = displayName
             self.runtimeName = runtimeName
@@ -148,6 +152,7 @@ library Ir {{
     }}
 
     Type {{
+        member modulePath:string
         member name:string
         member displayName:string
         member initializer:string?
@@ -157,6 +162,7 @@ library Ir {{
         member contracts:Array<ref ContractEntry>
 
         __(name:string, displayName:string) -> void {
+            self.modulePath = ""
             self.name = name
             self.displayName = displayName
             self.initializer = null
@@ -170,6 +176,8 @@ library Ir {{
     Program {{
         member types:Array<ref Type>
         member functions:Array<ref Function>
+        member functionDeclarations:Array<ref Function>
+        member referencedTypes:Array<string>
         member externals:Array<ref ExternalFunction>
         member foreignLibraries:Array<string>
         member entry:string?
@@ -177,6 +185,8 @@ library Ir {{
         __() -> void {
             self.types = new Array<ref Type>(0)
             self.functions = new Array<ref Function>(0)
+            self.functionDeclarations = new Array<ref Function>(0)
+            self.referencedTypes = new Array<string>(0)
             self.externals = new Array<ref ExternalFunction>(0)
             self.foreignLibraries = new Array<string>(0)
             self.entry = null
@@ -335,8 +345,10 @@ library Ir {{
         member nextLocal:i64
         member nextTemporary:i64
         member nextBlock:i64
+        member currentModulePath:string
+        member emissionModule:string?
 
-        __(analysis:Semantics.Analysis) -> void {
+        __(analysis:Semantics.Analysis, emissionModule:string?=null) -> void {
             self.analysis = analysis
             self.program = new Program()
             self.currentFunction = null
@@ -348,11 +360,14 @@ library Ir {{
             self.nextLocal = 0
             self.nextTemporary = 0
             self.nextBlock = 0
+            self.currentModulePath = ""
+            self.emissionModule = emissionModule
         }
 
         generate() -> ref Program {
             local moduleIndex:i64 = 0
             while moduleIndex < self.analysis.graph.modules.length {
+                self.currentModulePath = self.analysis.graph.modules[moduleIndex].path
                 local declarations = self.analysis.graph.modules[moduleIndex].program.declarations
                 local index:i64 = 0
                 while index < declarations.length {
@@ -363,15 +378,19 @@ library Ir {{
             }
             moduleIndex = 0
             while moduleIndex < self.analysis.graph.modules.length {
+                self.currentModulePath = self.analysis.graph.modules[moduleIndex].path
                 local declarations = self.analysis.graph.modules[moduleIndex].program.declarations
                 local index:i64 = 0
-                while index < declarations.length {
-                    if declarations[index].typeParameters.length == 0 { self.lowerContainer(declarations[index]) }
-                    index = index + 1
+                if self.emissionModule == null || self.currentModulePath == self.emissionModule! {
+                    while index < declarations.length {
+                        if declarations[index].typeParameters.length == 0 { self.lowerContainer(declarations[index]) }
+                        index = index + 1
+                    }
                 }
                 moduleIndex = moduleIndex + 1
             }
-            self.lowerTestRunner()
+            if self.analysis.graph.entry != null { self.currentModulePath = self.analysis.graph.entry!.path }
+            if self.emissionModule == null || self.analysis.graph.entry != null && self.emissionModule! == self.analysis.graph.entry!.path { self.lowerTestRunner() }
             return self.program
         }
 
@@ -421,10 +440,69 @@ library Ir {{
 
         declareContainer(declaration:Ast.Declaration) -> void {
             if declaration.kind == "Object" { self.declareObject(declaration.name, declaration.members, declaration.symbol!) }
+            self.declareFunctionSignatures(declaration.members, declaration.symbol!)
+            self.collectMemberTypes(declaration.members)
             local index:i64 = 0
             while index < declaration.members.length {
                 local memberNode = declaration.members[index]
                 if memberNode.kind == "Object" { self.declareNestedObject(memberNode) }
+                index = index + 1
+            }
+        }
+
+        collectMemberTypes(members:Array<Ast.MemberDeclaration>) -> void {
+            local index:i64 = 0
+            while index < members.length {
+                if members[index].initializer != null { self.collectExpressionType(members[index].initializer!) }
+                local parameterIndex:i64 = 0
+                while parameterIndex < members[index].parameters.length { if members[index].parameters[parameterIndex].defaultValue != null { self.collectExpressionType(members[index].parameters[parameterIndex].defaultValue!) }; parameterIndex = parameterIndex + 1 }
+                if members[index].body != null { self.collectBlockTypes(members[index].body!) }
+                if members[index].kind == "Object" { self.collectMemberTypes(members[index].members) }
+                index = index + 1
+            }
+        }
+
+        collectBlockTypes(block:Ast.Block) -> void {
+            local index:i64 = 0
+            while index < block.statements.length {
+                local statement = block.statements[index]
+                if statement.expression != null { self.collectExpressionType(statement.expression!) }
+                if statement.condition != null { self.collectExpressionType(statement.condition!) }
+                if statement.body != null { self.collectBlockTypes(statement.body!) }
+                if statement.alternate != null { self.collectBlockTypes(statement.alternate!) }
+                index = index + 1
+            }
+        }
+
+        collectExpressionType(expression:Ast.Expression) -> void {
+            if expression.inferredType != null { self.addReferencedType(expression.inferredType!) }
+            if expression.left != null { self.collectExpressionType(expression.left!) }
+            if expression.right != null { self.collectExpressionType(expression.right!) }
+            local index:i64 = 0
+            while index < expression.arguments.length { self.collectExpressionType(expression.arguments[index]); index = index + 1 }
+        }
+
+        addReferencedType(typeName:string) -> void {
+            local index:i64 = 0
+            while index < self.program.referencedTypes.length { if self.program.referencedTypes[index] == typeName { return }; index = index + 1 }
+            self.program.referencedTypes.append(typeName)
+        }
+
+        declareFunctionSignatures(members:Array<Ast.MemberDeclaration>, owner:Symbols.Symbol) -> void {
+            local index:i64 = 0
+            while index < members.length {
+                local memberNode = members[index]
+                if memberNode.kind == "Method" {
+                    if memberNode.isNative { self.lowerMethod(memberNode, owner) }
+                    else {
+                        local symbol = memberNode.symbol!
+                        local declaration = new Function(symbol.qualifiedName, symbol.qualifiedName, owner.qualifiedName, symbol.returnType!)
+                        if owner.kind == "Object" { declaration.parameters.append(new Parameter("self", owner.qualifiedName)) }
+                        local parameterIndex:i64 = 0
+                        while parameterIndex < symbol.parameters.length { declaration.parameters.append(new Parameter(symbol.parameters[parameterIndex].name, symbol.parameters[parameterIndex].typeName!)); parameterIndex = parameterIndex + 1 }
+                        self.program.functionDeclarations.append(declaration)
+                    }
+                } else { if memberNode.kind == "Object" { self.declareFunctionSignatures(memberNode.members, memberNode.symbol!) } }
                 index = index + 1
             }
         }
@@ -440,18 +518,25 @@ library Ir {{
 
         declareObject(name:string, members:Array<Ast.MemberDeclaration>, symbol:Symbols.Symbol) -> void {
             local typeNode = new Type(symbol.qualifiedName, symbol.qualifiedName)
+            typeNode.modulePath = self.currentModulePath
             if symbol.base != null { typeNode.baseName = symbol.base!.qualifiedName }
             self.appendFields(typeNode, symbol)
             self.appendVirtualMethods(typeNode, symbol)
             self.appendContractEntry(typeNode, symbol, symbol, true)
             self.appendImplementedContracts(typeNode, symbol, symbol)
             local index:i64 = 0
+            local declaresInitializer:bool = false
             while index < members.length {
                 local memberNode = members[index]
                 if memberNode.kind == "Field" {
-                    if memberNode.initializer != null { typeNode.initializer = symbol.qualifiedName + ".$initialize" }
+                    if memberNode.initializer != null { typeNode.initializer = symbol.qualifiedName + ".$initialize"; declaresInitializer = true }
                 }
                 index = index + 1
+            }
+            if declaresInitializer {
+                local initializer = new Function(typeNode.initializer!, typeNode.initializer!, symbol.qualifiedName, "void")
+                initializer.parameters.append(new Parameter("self", symbol.qualifiedName))
+                self.program.functionDeclarations.append(initializer)
             }
             self.program.types.append(typeNode)
         }
@@ -595,9 +680,12 @@ library Ir {{
         lowerMethod(method:Ast.MemberDeclaration, owner:Symbols.Symbol) -> void {
             local symbol = method.symbol!
             if method.isNative {
+                local existingIndex:i64 = 0
+                while existingIndex < self.program.externals.length { if self.program.externals[existingIndex].name == symbol.qualifiedName { return }; existingIndex = existingIndex + 1 }
                 local runtimeName = self.runtimeName(symbol)
                 if method.foreignLibrary != null { runtimeName = method.foreignSymbol! }
                 local external = new ExternalFunction(symbol.qualifiedName, symbol.qualifiedName, runtimeName, symbol.returnType!)
+                external.modulePath = self.currentModulePath
                 external.foreignLibrary = method.foreignLibrary
                 if runtimeName == "valen_Operations_threadStart" {
                     self.addForeignLibrary("pthread")
@@ -649,6 +737,7 @@ library Ir {{
 
         beginFunction(name:string, displayName:string, ownerType:string, returnType:string) -> void {
             self.currentFunction = new Function(name, displayName, ownerType, returnType)
+            self.currentFunction!.modulePath = self.currentModulePath
             self.currentBlock = new Block("entry")
             self.currentFunction!.blocks.append(self.currentBlock!)
             self.bindings = new Array<ref Binding>(0)

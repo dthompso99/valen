@@ -5,10 +5,16 @@ import {IrGenerator} from './ir.js';
 import {X86_64Backend} from './x86-64.js';
 import {X86Assembler} from './x86-assembler.js';
 import {ElfLinker} from './linker.js';
+import {ModuleLoader} from './module-loader.js';
+import {SemanticAnalyzer} from './semantic.js';
+import {ModuleInterfaceCache} from './module-interface.js';
 
 export class Compiler {
     emitObject(sourcePath, objectPath, {assemblyPath = `${objectPath}.s`, sourceRoot, optimizationLevel = 1} = {}) {
-        const ir = new IrGenerator().generateFile(sourcePath, sourceRoot ? {sourceRoot} : {});
+        const graph = new ModuleLoader(sourceRoot ? {sourceRoot} : {}).load(sourcePath);
+        new ModuleInterfaceCache(process.env.VALEN_CACHE_PATH ?? process.env.ARGON_CACHE_PATH,
+            process.env.VALEN_CACHE_TRACE != null || process.env.ARGON_CACHE_TRACE != null).prepare(graph);
+        const ir = new IrGenerator().generate(new SemanticAnalyzer().analyzeModules(graph));
         const assembly = new X86_64Backend().generate(ir, {optimizationLevel});
         fs.writeFileSync(assemblyPath, assembly);
         fs.writeFileSync(objectPath, new X86Assembler().assemble(assembly));
@@ -21,8 +27,15 @@ export class Compiler {
         const {ir} = emitted;
         if (linker === 'native' || linker === 'auto' && ir.foreignLibraries.length === 0) {
             if (ir.foreignLibraries.length) throw new Error('Native linker cannot resolve foreign libraries; use --linker system');
-            const object = new X86Assembler().assembleObject(emitted.assembly);
-            fs.writeFileSync(outputPath, new ElfLinker().link(object));
+            const moduleIds = [...new Set(ir.functions.map(fn => fn.moduleId).filter(Boolean))];
+            const entryModule = ir.functions.find(fn => fn.name === ir.entry)?.moduleId;
+            const objects = moduleIds.length > 1 ? moduleIds.map(moduleId => {
+                const assembly = new X86_64Backend().generate(structuredClone(ir), {
+                    optimizationLevel, moduleId, includeRuntime: moduleId === entryModule
+                });
+                return new X86Assembler().assembleObject(assembly);
+            }) : [new X86Assembler().assembleObject(emitted.assembly)];
+            fs.writeFileSync(outputPath, new ElfLinker().linkObjects(objects));
             fs.chmodSync(outputPath, 0o755);
             return {...emitted, outputPath, linker: 'native'};
         }

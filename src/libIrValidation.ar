@@ -10,9 +10,9 @@ library IrValidation {{
     }}
 
     Pass {{
-        prepare(program:Ir.Program, optimize:bool=true) -> Array<string> {
+        prepare(program:Ir.Program, optimize:bool=true, requireEntry:bool=true) -> Array<string> {
             self.canonicalize(program, optimize)
-            return self.validate(program)
+            return self.validate(program, requireEntry)
         }
 
         canonicalize(program:Ir.Program, optimize:bool=true) -> void {
@@ -239,7 +239,7 @@ library IrValidation {{
             functionNode.blocks = blocks
         }
 
-        validate(program:Ir.Program) -> Array<string> {
+        validate(program:Ir.Program, requireEntry:bool=true) -> Array<string> {
             local errors = new Array<string>(0)
             local index:i64 = 0
             while index < program.types.length {
@@ -268,7 +268,7 @@ library IrValidation {{
                 self.validateFunction(program, program.functions[index], errors)
                 index = index + 1
             }
-            if program.entry == null { errors.append("program has no entry function") }
+            if program.entry == null { if requireEntry { errors.append("program has no entry function") } }
             else { if self.findDefinedFunction(program, program.entry!) == null { errors.append("entry is not a defined function") } }
             return errors
         }
@@ -315,6 +315,7 @@ library IrValidation {{
                 local target:Ir.Function? = null
                 local external:Ir.ExternalFunction? = null
                 if instruction.target != null { target = self.findDefinedFunction(program, instruction.target!); external = self.findExternal(program, instruction.target!) }
+                if target == null && instruction.target != null { target = self.findDeclaredFunction(program, instruction.target!) }
                 if target == null && external == null { errors.append(prefix + " calls an unknown function") }
                 else {
                     local expected:i64 = 0
@@ -346,7 +347,13 @@ library IrValidation {{
             return null
         }
 
-        findFunction(program:Ir.Program, name:string) -> bool { return self.findDefinedFunction(program, name) != null || self.findExternal(program, name) != null }
+        findDeclaredFunction(program:Ir.Program, name:string) -> ref Ir.Function? {
+            local index:i64 = 0
+            while index < program.functionDeclarations.length { if program.functionDeclarations[index].name == name { return program.functionDeclarations[index] }; index = index + 1 }
+            return null
+        }
+
+        findFunction(program:Ir.Program, name:string) -> bool { return self.findDefinedFunction(program, name) != null || self.findDeclaredFunction(program, name) != null || self.findExternal(program, name) != null }
         hasType(program:Ir.Program, name:string) -> bool {
             local index:i64 = 0
             while index < program.types.length { if program.types[index].name == name { return true }; index = index + 1 }

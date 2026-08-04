@@ -42,6 +42,25 @@ library ModuleLoading {{
             }
             return false
         }
+
+        releaseImplementation() -> void {
+            local declarationIndex:i64 = 0
+            while declarationIndex < self.program.declarations.length {
+                self.releaseMembers(self.program.declarations[declarationIndex].members)
+                declarationIndex = declarationIndex + 1
+            }
+            self.source.content = ""
+        }
+
+        releaseMembers(members:Array<Ast.MemberDeclaration>) -> void {
+            local index:i64 = 0
+            while index < members.length {
+                members[index].body = null
+                if members[index].kind == "Field" { members[index].initializer = null }
+                if members[index].kind == "Object" { self.releaseMembers(members[index].members) }
+                index = index + 1
+            }
+        }
     }}
 
     ResolvedImport {{

@@ -97,8 +97,10 @@ library X86_64 {{
         member usesWrite:bool
         member usesWriteError:bool
         member optimize:bool
+        member emissionModule:string?
+        member includeRuntime:bool
 
-        __(program:Ir.Program, optimizationLevel:i64=1) -> void {
+        __(program:Ir.Program, optimizationLevel:i64=1, emissionModule:string?=null, includeRuntime:bool=true) -> void {
             self.program = program
             self.writer = new Writer()
             self.functionSymbols = new Array<FunctionSymbol>(0)
@@ -115,6 +117,8 @@ library X86_64 {{
             self.usesWrite = false
             self.usesWriteError = false
             self.optimize = optimizationLevel == 1
+            self.emissionModule = emissionModule
+            self.includeRuntime = includeRuntime
         }
 
         generate() -> string {
@@ -132,10 +136,18 @@ library X86_64 {{
             self.writer.optimize = self.optimize
             index = 0
             while index < self.program.functions.length {
-                self.generateFunction(self.program.functions[index])
+                if self.emits(self.program.functions[index]) { self.generateFunction(self.program.functions[index]) }
                 index = index + 1
             }
             self.writer.optimize = false
+            if !self.includeRuntime {
+                self.localTrapRuntime()
+                self.stringData()
+                self.floatData()
+                self.floatConversionData()
+                self.writer.line(".section .note.GNU-stack,\"\",@progbits")
+                return self.writer.build()
+            }
             self.generateMain()
             self.structuralRuntime()
             if self.usesPrint { self.printRuntime() }
@@ -174,6 +186,17 @@ library X86_64 {{
                 index = index + 1
             }
             return false
+        }
+
+        emits(function:Ir.Function) -> bool { return self.emissionModule == null || function.modulePath == self.emissionModule! }
+
+        localTrapRuntime() -> void {
+            self.writer.line(".Ldivision_by_zero_error:"); self.writer.line("    mov edi, 73"); self.writer.line("    jmp .Lmodule_runtime_error")
+            self.writer.line(".Loptional_unwrap_error:"); self.writer.line("    mov edi, 71"); self.writer.line("    jmp .Lmodule_runtime_error")
+            self.writer.line(".Lcontract_dispatch_error:"); self.writer.line("    mov edi, 75"); self.writer.line("    jmp .Lmodule_runtime_error")
+            self.writer.line(".Lfloat_conversion_error:"); self.writer.line("    mov edi, 76"); self.writer.line("    jmp .Lmodule_runtime_error")
+            self.writer.line(".Larray_bounds_error:"); self.writer.line("    mov edi, 70")
+            self.writer.line(".Lmodule_runtime_error:"); self.writer.line("    mov eax, 60"); self.writer.line("    syscall"); self.writer.line("    ud2"); self.writer.line("")
         }
 
         validateRuntime() -> Array<string> {
@@ -347,6 +370,7 @@ library X86_64 {{
         scanProgram() -> void {
             local functionIndex:i64 = 0
             while functionIndex < self.program.functions.length {
+                if !self.emits(self.program.functions[functionIndex]) { functionIndex = functionIndex + 1; continue }
                 local blocks = self.program.functions[functionIndex].blocks
                 local blockIndex:i64 = 0
                 while blockIndex < blocks.length {
@@ -2818,6 +2842,8 @@ library X86_64 {{
 
         structuralArrayTypes() -> Array<string> {
             local result = new Array<string>(0)
+            local referencedIndex:i64 = 0
+            while referencedIndex < self.program.referencedTypes.length { self.addArrayType(result, self.program.referencedTypes[referencedIndex]); referencedIndex = referencedIndex + 1 }
             local typeIndex:i64 = 0
             while typeIndex < self.program.types.length {
                 local fieldIndex:i64 = 0

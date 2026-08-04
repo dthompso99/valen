@@ -1,0 +1,124 @@
+import System from './libSystem.ar'
+import Ast from './libAst.ar'
+import ModuleLoading from './libModuleLoader.ar'
+
+library ModuleInterfaces {{
+    Artifact {{
+        member modulePath:string
+        member implementationFingerprint:i64
+        member interfaceFingerprint:i64
+        member summary:string
+
+        __(modulePath:string, implementationFingerprint:i64, interfaceFingerprint:i64, summary:string) -> void {
+            self.modulePath = modulePath
+            self.implementationFingerprint = implementationFingerprint
+            self.interfaceFingerprint = interfaceFingerprint
+            self.summary = summary
+        }
+    }}
+
+    Builder {{
+        create(module:ModuleLoading.Module) -> Artifact {
+            local output = new StringBuilder()
+            output.append("module|"); output.append(module.path); output.append("\n")
+            local index:i64 = 0
+            while index < module.program.declarations.length {
+                self.declaration(output, module.program.declarations[index], "")
+                index = index + 1
+            }
+            local summary = output.build()
+            return new Artifact(module.path, self.hash(module.source.content), self.hash(summary), summary)
+        }
+
+        declaration(output:StringBuilder, declaration:Ast.Declaration, prefix:string) -> void {
+            output.append(prefix); output.append(declaration.kind); output.append("|"); output.append(declaration.name); output.append("|")
+            self.type(output, declaration.inheritedType); output.append("|")
+            local index:i64 = 0
+            while index < declaration.implementedTypes.length { if index > 0 { output.append(",") }; self.type(output, declaration.implementedTypes[index]); index = index + 1 }
+            output.append("\n")
+            index = 0
+            while index < declaration.members.length {
+                local item = declaration.members[index]
+                if item.visibility != "private" {
+                    if item.kind == "Object" {
+                        self.memberDeclaration(output, item, prefix + declaration.name + ".")
+                    } else {
+                        output.append(prefix); output.append(declaration.name); output.append("."); output.append(item.kind); output.append("|"); output.append(item.name); output.append("|"); output.append(item.visibility); output.append("|")
+                        if item.kind == "Field" {
+                            if item.reference { output.append("ref ") }; if item.weakReference { output.append("weak ") }; self.type(output, item.declaredType)
+                        }
+                        if item.kind == "Method" {
+                            if item.isNative { output.append("native ") }; if item.isUnsafe { output.append("unsafe ") }; if item.returnReference { output.append("ref-return ") }
+                            local parameterIndex:i64 = 0
+                            while parameterIndex < item.parameters.length {
+                                if parameterIndex > 0 { output.append(",") }
+                                local parameter = item.parameters[parameterIndex]
+                                if parameter.owning { output.append("own ") }; output.append(parameter.name); output.append(":"); self.type(output, parameter.parameterType)
+                                if parameter.defaultValue != null { output.append("="); self.expressionSource(output, parameter.defaultValue!) }
+                                parameterIndex = parameterIndex + 1
+                            }
+                            output.append("->"); self.type(output, item.returnType)
+                            if item.foreignLibrary != null { output.append(" from "); output.append(item.foreignLibrary!) }
+                            if item.foreignSymbol != null { output.append(" as "); output.append(item.foreignSymbol!) }
+                        }
+                        output.append("\n")
+                    }
+                }
+                index = index + 1
+            }
+        }
+
+        memberDeclaration(output:StringBuilder, item:Ast.MemberDeclaration, prefix:string) -> void {
+            output.append(prefix); output.append(item.kind); output.append("|"); output.append(item.name); output.append("|")
+            self.type(output, item.inheritedType); output.append("|")
+            local index:i64 = 0
+            while index < item.implementedTypes.length { if index > 0 { output.append(",") }; self.type(output, item.implementedTypes[index]); index = index + 1 }
+            output.append("\n")
+            index = 0
+            while index < item.members.length {
+                local child = item.members[index]
+                if child.visibility != "private" {
+                    if child.kind == "Object" { self.memberDeclaration(output, child, prefix + item.name + ".") }
+                    else {
+                        output.append(prefix); output.append(item.name); output.append("."); output.append(child.kind); output.append("|"); output.append(child.name); output.append("|"); output.append(child.visibility); output.append("|")
+                        if child.kind == "Field" { if child.reference { output.append("ref ") }; if child.weakReference { output.append("weak ") }; self.type(output, child.declaredType) }
+                        if child.kind == "Method" {
+                            if child.isNative { output.append("native ") }; if child.isUnsafe { output.append("unsafe ") }; if child.returnReference { output.append("ref-return ") }
+                            local parameterIndex:i64 = 0
+                            while parameterIndex < child.parameters.length { if parameterIndex > 0 { output.append(",") }; local parameter = child.parameters[parameterIndex]; if parameter.owning { output.append("own ") }; output.append(parameter.name); output.append(":"); self.type(output, parameter.parameterType); if parameter.defaultValue != null { output.append("="); self.expressionSource(output, parameter.defaultValue!) }; parameterIndex = parameterIndex + 1 }
+                            output.append("->"); self.type(output, child.returnType)
+                            if child.foreignLibrary != null { output.append(" from "); output.append(child.foreignLibrary!) }
+                            if child.foreignSymbol != null { output.append(" as "); output.append(child.foreignSymbol!) }
+                        }
+                        output.append("\n")
+                    }
+                }
+                index = index + 1
+            }
+        }
+
+        type(output:StringBuilder, reference:Ast.TypeReference?) -> void {
+            if reference == null { output.append("void"); return }
+            if reference!.ownership != "owned" { output.append(reference!.ownership); output.append(" ") }
+            output.append(reference!.name)
+            if reference!.arguments.length > 0 {
+                output.append("<"); local index:i64 = 0
+                while index < reference!.arguments.length { if index > 0 { output.append(",") }; self.type(output, reference!.arguments[index]); index = index + 1 }
+                output.append(">")
+            }
+            if reference!.optional { output.append("?") }
+        }
+
+        expressionSource(output:StringBuilder, expression:Ast.Expression) -> void {
+            local span = expression.span
+            if span.start >= 0 && span.end >= span.start && span.end <= span.source.content.length { output.append(span.source.content.slice(span.start, span.end - span.start)) }
+        }
+
+        hash(input:string) -> i64 {
+            local value:i64 = 1469598103934665603
+            local index:i64 = 0
+            while index < input.length { value = value * 1099511628211 + (input[index] as i64); index = index + 1 }
+            return value
+        }
+    }}
+}}

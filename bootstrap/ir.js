@@ -17,28 +17,36 @@ export class IrGenerator {
             entry: null
         };
 
-        const programs = semanticResult.modules
-            ? [...semanticResult.modules.values()].map(module => module.program)
-            : [semanticResult.program];
+        const modules = semanticResult.modules
+            ? [...semanticResult.modules.values()]
+            : [{id: '<program>', program: semanticResult.program}];
+        const programs = modules.map(module => module.program);
 
         this.contractTypes = new Set();
         for (const program of programs) {
             for (const declaration of [...program.objects, ...program.libraries]) this.collectContractTypes(declaration);
         }
 
-        for (const program of programs) {
-            for (const declaration of [...program.objects, ...program.libraries]) {
+        for (const module of modules) {
+            this.currentModuleId = module.id;
+            for (const declaration of [...module.program.objects, ...module.program.libraries]) {
                 this.declareContainer(declaration);
             }
         }
-        for (const program of programs) {
-            for (const declaration of [...program.objects, ...program.libraries]) {
+        for (const module of modules) {
+            this.currentModuleId = module.id;
+            for (const declaration of [...module.program.objects, ...module.program.libraries]) {
                 this.lowerContainer(declaration);
             }
         }
 
         const tests = programs.flatMap(program => program.libraries.filter(declaration => declaration.isTest));
-        if (tests.length) this.lowerTestRunner(tests);
+        if (tests.length) {
+            this.currentModuleId = semanticResult.modules && semanticResult.program
+                ? modules.find(module => module.program === semanticResult.program)?.id ?? modules[0].id
+                : modules[0].id;
+            this.lowerTestRunner(tests);
+        }
 
         return this.program;
     }
@@ -53,6 +61,7 @@ export class IrGenerator {
             const fields = this.inheritedFields(symbol);
             this.program.types.push({
                 kind: 'IrType',
+                moduleId: this.currentModuleId,
                 name: symbol.type,
                 displayName: symbol.qualifiedName,
                 base: symbol.base?.type ?? null,
@@ -159,6 +168,7 @@ export class IrGenerator {
         const owner = declaration.semanticSymbol;
         this.function = {
             kind: 'IrFunction',
+            moduleId: this.currentModuleId,
             name: `${owner.type}.$initialize`,
             displayName: `${owner.qualifiedName}.$initialize`,
             owner: owner.type,
@@ -202,6 +212,7 @@ export class IrGenerator {
             }
             this.program.externals.push({
                 kind: 'IrExternalFunction',
+                moduleId: this.currentModuleId,
                 name: this.functionName(symbol),
                 displayName: symbol.qualifiedName,
                 parameters: symbol.parameters.map(parameter => ({
@@ -216,6 +227,7 @@ export class IrGenerator {
         }
         this.function = {
             kind: 'IrFunction',
+            moduleId: this.currentModuleId,
             name: this.functionName(symbol),
             displayName: symbol.qualifiedName,
             owner: owner.type,
@@ -748,7 +760,7 @@ export class IrGenerator {
 
     lowerTestRunner(tests) {
         const owner = '$valen.test.runner';
-        this.program.types.push({kind: 'IrType', name: owner, displayName: owner, base: null, virtualMethods: [], contracts: [], initializer: null, fields: []});
+        this.program.types.push({kind: 'IrType', moduleId: this.currentModuleId, name: owner, displayName: owner, base: null, virtualMethods: [], contracts: [], initializer: null, fields: []});
         const instructions = [];
         for (const suite of tests) {
             for (const method of suite.members.filter(member => member.kind === 'MethodDeclaration')) {
@@ -757,7 +769,7 @@ export class IrGenerator {
         }
         instructions.push({op: 'test_failures', result: '%0', type: 'i64'});
         instructions.push({op: 'return', value: {kind: 'temporary', name: '%0', type: 'i64'}});
-        const runner = {kind: 'IrFunction', name: '$valen.test.run', displayName: '$valen.test.run', owner,
+        const runner = {kind: 'IrFunction', moduleId: this.currentModuleId, name: '$valen.test.run', displayName: '$valen.test.run', owner,
             parameters: [{name: 'self', type: owner}], returnType: 'i64',
             blocks: [{label: 'entry', instructions}], temporaryCount: 1, localCount: 0};
         this.program.functions.push(runner);

@@ -1,3 +1,5 @@
+import {ElfObject} from './elf.js';
+
 const ELF_HEADER_SIZE = 64;
 const PROGRAM_HEADER_SIZE = 56;
 const PAGE_SIZE = 4096;
@@ -9,6 +11,42 @@ export class LinkerError extends Error {}
 
 /** Links the structured relocatable object emitted by Valen into a static ELF64 executable. */
 export class ElfLinker {
+    linkObjects(objects, options = {}) {
+        if (objects.length === 0) throw new LinkerError('No input objects');
+        if (objects.length === 1) return this.link(objects[0], options);
+        const merged = new ElfObject();
+        const requiredGlobals = new Set(objects.flatMap(object => object.symbols
+            .filter(symbol => !symbol.section && symbol.binding !== 'LOCAL').map(symbol => symbol.name)));
+        objects.forEach((object, objectIndex) => {
+            const sectionNames = new Map();
+            for (const section of object.sections) {
+                const name = `${section.name}.m${objectIndex}`;
+                sectionNames.set(section.name, name);
+                if (section.type === 8) {
+                    const added = merged.addSection(name, Buffer.alloc(0), {type: 'NOBITS', flags: section.flags, alignment: section.alignment});
+                    added.size = section.size;
+                } else merged.addSection(name, section.data, {flags: section.flags, alignment: section.alignment});
+            }
+            const localNames = new Map(object.symbols.filter(symbol => symbol.binding === 'LOCAL' && !requiredGlobals.has(symbol.name))
+                .map(symbol => [symbol.name, `$m${objectIndex}.${symbol.name}`]));
+            for (const symbol of object.symbols) {
+                const name = localNames.get(symbol.name) ?? symbol.name;
+                const existing = merged.symbols.find(candidate => candidate.name === name);
+                if (existing && (symbol.binding !== 'LOCAL' || requiredGlobals.has(name))) {
+                    if (existing.section && symbol.section) throw new LinkerError(`Duplicate symbol '${name}'`);
+                    if (!existing.section && symbol.section) Object.assign(existing, {section: sectionNames.get(symbol.section),
+                        value: symbol.value, size: symbol.size, binding: 'GLOBAL', type: symbol.type});
+                    continue;
+                }
+                if (!merged.symbolNames.has(name)) merged.addSymbol(name, {section: symbol.section ? sectionNames.get(symbol.section) : null,
+                    value: symbol.value, size: symbol.size, binding: requiredGlobals.has(name) ? 'GLOBAL' : symbol.binding, type: symbol.type});
+            }
+            for (const relocation of object.relocations) merged.addRelocation(sectionNames.get(relocation.section), relocation.offset,
+                localNames.get(relocation.symbol) ?? relocation.symbol, relocation.type, relocation.addend);
+        });
+        return this.link(merged, options);
+    }
+
     link(object, {entry = '_start'} = {}) {
         const alloc = object.sections.filter(section => (section.flags & 2) !== 0);
         const readOnly = alloc.filter(section => (section.flags & 1) === 0);

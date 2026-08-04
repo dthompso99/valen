@@ -74,6 +74,7 @@ and embedded targets.
 - `-O0` performs only mandatory IR cleanup and validation; `-O1` is the default and enables constant folding, dead/unreachable elimination, register allocation, immediate selection, and peepholes. Unsupported levels are rejected.
 - Generation 0 and the self-hosted compiler emit ELF64 relocatable objects without a system assembler.
 - The integrated x86-64 ELF linker handles freestanding executables; `--linker system` remains available for foreign libraries.
+- Cold freestanding builds emit versioned module interfaces and dependency-fingerprinted module objects, lower implementations in bounded chunks, and retain importers when only a dependency body changes.
 - Repeatable compiler and generated-code benchmarks report compile time, memory, executable size, and runtime speed; expanding the workload corpus remains **WIP**.
 
 ## Maturity

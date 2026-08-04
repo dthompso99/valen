@@ -3,7 +3,7 @@ import {prepareIr} from './ir-validation.js';
 const argumentRegisters = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9'];
 
 export class X86_64Backend {
-    generate(program, {optimizationLevel = 1} = {}) {
+    generate(program, {optimizationLevel = 1, moduleId = null, includeRuntime = true} = {}) {
         if (![0, 1].includes(optimizationLevel)) throw new Error(`Unsupported optimization level '-O${optimizationLevel}'`);
         this.optimize = optimizationLevel === 1;
         prepareIr(program, {optimize: this.optimize});
@@ -14,6 +14,9 @@ export class X86_64Backend {
         this.stringLiterals = new Map();
         this.floatLiterals = new Map();
         this.runtimeLabel = 0;
+        this.moduleId = moduleId;
+        this.includeRuntime = includeRuntime;
+        const emittedFunctions = moduleId === null ? program.functions : program.functions.filter(fn => fn.moduleId === moduleId);
 
         for (const type of program.types) {
             let offset = 16;
@@ -36,7 +39,7 @@ export class X86_64Backend {
             usedAssemblySymbols.set(assemblySymbol, fn.name);
             this.functionSymbols.set(fn.name, assemblySymbol);
         }
-        for (const fn of program.functions) {
+        for (const fn of emittedFunctions) {
             for (const instruction of fn.blocks.flatMap(block => block.instructions)) {
                 if (instruction.op === 'string_constant') this.internString(instruction.value);
                 if (instruction.op === 'float_constant') this.internFloat(instruction.value, instruction.type);
@@ -102,7 +105,11 @@ export class X86_64Backend {
         for (const external of program.externals) {
             if (external.foreignLibrary) lines.push(`.extern ${external.runtimeSymbol}`);
         }
-        for (const fn of program.functions) lines.push(...this.generateFunction(fn));
+        for (const fn of emittedFunctions) lines.push(...this.generateFunction(fn));
+        if (!includeRuntime) {
+            lines.push(...this.moduleTrapRuntime(), ...this.stringData(), ...this.floatData(), ...this.floatConversionData(), '.section .note.GNU-stack,"",@progbits');
+            return `${lines.join('\n')}\n`;
+        }
         lines.push(...this.generateMain());
         lines.push(...this.structuralRuntime());
         lines.push(...this.gcTraceFunctions());
@@ -2022,6 +2029,17 @@ export class X86_64Backend {
             '    syscall',
             '    ud2',
             ''
+        ];
+    }
+
+    moduleTrapRuntime() {
+        return [
+            '.Ldivision_by_zero_error:', '    mov edi, 73', '    jmp .Lmodule_runtime_error',
+            '.Loptional_unwrap_error:', '    mov edi, 71', '    jmp .Lmodule_runtime_error',
+            '.Lcontract_dispatch_error:', '    mov edi, 75', '    jmp .Lmodule_runtime_error',
+            '.Lfloat_conversion_error:', '    mov edi, 76', '    jmp .Lmodule_runtime_error',
+            '.Larray_bounds_error:', '    mov edi, 70',
+            '.Lmodule_runtime_error:', '    mov eax, 60', '    syscall', '    ud2', ''
         ];
     }
 
