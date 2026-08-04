@@ -153,6 +153,7 @@ export class SemanticAnalyzer {
             if (!concrete.has(name)) {
                 const declaration = structuredClone(template);
                 declaration.name = name;
+                declaration.genericParameterNames = [...template.typeParameters];
                 declaration.typeParameters = [];
                 declaration.genericTemplateName = template.name;
                 declaration.genericArguments = argumentsList.map(argument => structuredClone(argument));
@@ -379,9 +380,30 @@ export class SemanticAnalyzer {
             if (inherited) this.report(field.declaration.span, `Field '${field.qualifiedName}' hides inherited field '${inherited.qualifiedName}'`);
         }
         if (object.kind === 'Object') for (const contract of object.contracts) this.validateContract(object, contract);
+        this.validateGenericConstraints(declaration, object);
         for (const member of declaration.members) {
             if (member.kind === 'ObjectDeclaration') this.validateRelationships(member);
         }
+    }
+
+    validateGenericConstraints(declaration, object) {
+        if (!declaration.genericArguments?.length || !declaration.typeConstraints?.length) return;
+        declaration.typeConstraints.forEach((constraintReference, index) => {
+            if (!constraintReference) return;
+            const constraintType = this.resolveTypeReference(constraintReference, object);
+            const constraint = this.findObjectType(constraintType);
+            const argumentReference = declaration.genericArguments[index];
+            const argumentType = this.resolveTypeReference(argumentReference, object);
+            const argument = this.findObjectType(argumentType);
+            if (!constraint || constraint.kind !== 'Object') {
+                this.report(constraintReference.span, `Generic constraint '${constraintType}' is not a contract object`);
+            } else if (!argument || (argument !== constraint && !this.conformsTo(argumentType, constraintType))) {
+                const parameter = declaration.genericTemplateName
+                    ? declaration.genericParameterNames?.[index] ?? index
+                    : index;
+                this.report(argumentReference.span, `Type argument '${argumentType}' does not satisfy constraint '${constraintType}' for '${declaration.genericTemplateName ?? declaration.name}' parameter '${parameter}'`);
+            }
+        });
     }
 
     inheritanceContains(object, target) {

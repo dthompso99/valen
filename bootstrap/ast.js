@@ -36,6 +36,7 @@ export class ObjectDeclaration extends AstNode {
         super('ObjectDeclaration', span);
         this.name = name;
         this.typeParameters = typeParameters;
+        this.typeConstraints = [];
         this.inheritedType = inheritedType;
         this.implementedTypes = implementedTypes;
         this.members = members;

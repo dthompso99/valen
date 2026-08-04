@@ -103,7 +103,7 @@ local printable:Printable = new Report()
 printable.print()
 ```
 
-The compiler verifies compatible method signatures and dispatches through the concrete object. Contract views preserve object identity. Abstract/final classes and a separate interface category are intentionally not planned; generic constraints are **WIP**.
+The compiler verifies compatible method signatures and dispatches through the concrete object. Contract views preserve object identity. Abstract/final classes and a separate interface category are intentionally not planned.
 
 ## Primitive values
 
@@ -180,7 +180,16 @@ Box<T> {{
 local box = new Box<i64>(42)
 ```
 
-Specializations are invariant. Generic methods and constraints are **WIP**.
+Specializations are invariant. Type parameters may require a contract with `:`:
+
+```valen
+Box<T:Printable> {{
+    print(value:T) -> void { value.print() }
+}}
+```
+
+Every concrete type argument must implement the named contract. Multiple parameters carry their
+own constraints, for example `Map<K:Hashable, V>`. Generic methods remain **WIP**.
 
 Strings support byte indexing, length, equality, concatenation, slicing, integer conversion, and `StringBuilder`. Interpolation and richer formatting are **WIP**.
 

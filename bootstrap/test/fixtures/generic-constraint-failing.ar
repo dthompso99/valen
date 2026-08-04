@@ -1,0 +1,13 @@
+Printable {{
+    print() -> i64 { return 0 }
+}}
+
+Engine {{}}
+
+Box<T:Printable> {{}}
+
+entry {{
+    __() -> void {
+        local box = new Box<Engine>()
+    }
+}}

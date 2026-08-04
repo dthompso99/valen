@@ -433,6 +433,26 @@ test('generic objects monomorphize concrete invariant specializations', () => {
     assert.match(wrongArity.diagnostics[0].message, /requires 2 type arguments, got 1/);
 });
 
+test('generic constraints require type arguments to satisfy contracts', () => {
+    const valid = new SemanticAnalyzer().analyze(new Parser().parse(`
+        Printable {{ print() -> i64 { return 0 } }}
+        Report implements Printable {{ print() -> i64 { return 7 } }}
+        Box<T:Printable> {{ read(value:T) -> i64 { return value.print() } }}
+        entry {{ __() -> i64 { local box = new Box<Report>(); local report = new Report(); return box.read(report) - 7 } }}
+    `, 'generic-constraint.ar'));
+    assert.equal(valid.success, true, JSON.stringify(valid.diagnostics));
+    assert.doesNotThrow(() => new X86_64Backend().generate(new IrGenerator().generate(valid)));
+
+    const invalid = new SemanticAnalyzer().analyze(new Parser().parse(`
+        Printable {{ print() -> i64 { return 0 } }}
+        Engine {{}}
+        Box<T:Printable> {{}}
+        entry {{ __() -> void { local box = new Box<Engine>() } }}
+    `, 'invalid-generic-constraint.ar'));
+    assert.equal(invalid.success, false);
+    assert.ok(invalid.diagnostics.some(diagnostic => /Type argument 'Engine' does not satisfy constraint 'Printable'/.test(diagnostic.message)));
+});
+
 test('unconditional field-initializer allocation cycles are rejected', () => {
     const cyclic = new SemanticAnalyzer().analyze(new Parser().parse(`
         First {{ member second:Second = new Second() }}

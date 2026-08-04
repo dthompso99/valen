@@ -1,0 +1,21 @@
+Describable {{
+    describe() -> i64 { return 0 }
+}}
+
+Report implements Describable {{
+    member code:i64 = 42
+    describe() -> i64 { return self.code }
+}}
+
+ConstrainedBox<T:Describable> {{
+    describe(value:T) -> i64 { return value.describe() }
+}}
+
+entry {{
+    __() -> i64 {
+        local box = new ConstrainedBox<Report>()
+        local report = new Report()
+        if box.describe(report) != 42 { return 1 }
+        return 0
+    }
+}}

@@ -10,7 +10,7 @@
 - public-by-default and private members
 - overloads and trailing default arguments
 - fixed-width integers and IEEE `f32`/`f64`
-- arrays, generic objects, byte-oriented strings, and builders
+- arrays, invariant generic objects with contract constraints, byte-oriented strings, and builders
 - optionals for references and primitives, with flow-sensitive narrowing and propagation
 - ownership transfer, borrowed/weak references, `copy`, and `delete`
 - tracing garbage collection and cycle-safe equality/hashing
@@ -26,7 +26,7 @@
 - **WIP:** Unicode code-point and grapheme-aware strings
 - **WIP:** string interpolation and richer formatting
 - flow-sensitive optional narrowing for stable locals and parameters
-- **WIP:** generic constraints and generic methods
+- **WIP:** generic methods
 - lossless mixed-width integer promotion and predictable floating-point promotion
 - **WIP:** `else if`, expression-valued conditionals, and matching
 - safe `?` propagation for optionals and result objects exposing public `valid:bool` and `value` fields

@@ -157,6 +157,7 @@ library Semantics {{
             while index < program.declarations.length { if program.declarations[index].name == name { return name }; index = index + 1 }
             local declaration = copy template
             declaration.name = name
+            declaration.genericArguments = arguments
             declaration.typeParameters = new Array<string>(0)
             self.substituteDeclaration(declaration, template.typeParameters, arguments)
             program.declarations.append(declaration)
@@ -180,6 +181,11 @@ library Semantics {{
             if declaration.inheritedType != null { self.substituteType(declaration.inheritedType!, parameters, arguments) }
             local index:i64 = 0
             while index < declaration.implementedTypes.length { self.substituteType(declaration.implementedTypes[index], parameters, arguments); index = index + 1 }
+            index = 0
+            while index < declaration.typeConstraints.length {
+                if declaration.typeConstraints[index] != null { self.substituteType(declaration.typeConstraints[index]!, parameters, arguments) }
+                index = index + 1
+            }
             index = 0
             while index < declaration.members.length { self.substituteMember(declaration.members[index], parameters, arguments); index = index + 1 }
         }
@@ -494,7 +500,31 @@ library Semantics {{
 
         validateDeclarationRelationships(declaration:Ast.Declaration) -> void {
             if declaration.kind == "Object" { self.validateObjectRelationships(declaration.symbol!) }
+            self.validateGenericConstraints(declaration)
             self.validateNestedRelationships(declaration.members)
+        }
+
+        validateGenericConstraints(declaration:Ast.Declaration) -> void {
+            if declaration.genericArguments.length == 0 || declaration.typeConstraints.length == 0 { return }
+            local index:i64 = 0
+            while index < declaration.typeConstraints.length {
+                local constraintReference = declaration.typeConstraints[index]
+                if constraintReference != null {
+                    local constraintType = self.bindType(constraintReference!, declaration.symbol!.memberScope!)
+                    local argumentReference = declaration.genericArguments[index]
+                    local argumentType = self.bindType(argumentReference, declaration.symbol!.memberScope!)
+                    local constraint = constraintReference!.symbol
+                    local argument = argumentReference.symbol
+                    if constraint == null || constraint!.kind != "Object" {
+                        self.error(constraintReference!.span, "Generic constraint '" + constraintType + "' is not a contract object")
+                    } else {
+                        if argument == null || !self.conformsTo(argument, constraint!) {
+                            self.error(argumentReference.span, "Type argument '" + argumentType + "' does not satisfy constraint '" + constraintType + "' for '" + declaration.name + "'")
+                        }
+                    }
+                }
+                index = index + 1
+            }
         }
 
         validateNestedRelationships(members:Array<Ast.MemberDeclaration>) -> void {

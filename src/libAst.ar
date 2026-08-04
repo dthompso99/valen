@@ -36,6 +36,8 @@ library Ast {{
         member inheritedType:TypeReference?
         member implementedTypes:Array<TypeReference>
         member typeParameters:Array<string>
+        member typeConstraints:Array<TypeReference?>
+        member genericArguments:Array<TypeReference>
         member members:Array<MemberDeclaration>
         member span:Compiler.SourceSpan
         member symbol:Symbols.Symbol?
@@ -46,6 +48,8 @@ library Ast {{
             self.inheritedType = null
             self.implementedTypes = new Array<TypeReference>(0)
             self.typeParameters = new Array<string>(0)
+            self.typeConstraints = new Array<TypeReference?>(0)
+            self.genericArguments = new Array<TypeReference>(0)
             self.members = members
             self.span = span
             self.symbol = null
@@ -71,6 +75,8 @@ library Ast {{
         member inheritedType:TypeReference?
         member implementedTypes:Array<TypeReference>
         member typeParameters:Array<string>
+        member typeConstraints:Array<TypeReference?>
+        member genericArguments:Array<TypeReference>
         member members:Array<MemberDeclaration>
         member span:Compiler.SourceSpan
         member symbol:Symbols.Symbol?
@@ -94,6 +100,8 @@ library Ast {{
             self.inheritedType = null
             self.implementedTypes = new Array<TypeReference>(0)
             self.typeParameters = new Array<string>(0)
+            self.typeConstraints = new Array<TypeReference?>(0)
+            self.genericArguments = new Array<TypeReference>(0)
             self.members = new Array<MemberDeclaration>(0)
             self.span = span
             self.symbol = null

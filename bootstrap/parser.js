@@ -125,9 +125,12 @@ export class Parser {
     parseObject(visibility = 'public') {
         const start = this.consume('IDENTIFIER', 'Expected an object name');
         const typeParameters = [];
+        const typeConstraints = [];
         if (this.match('LESS')) {
-            do typeParameters.push(this.consume('IDENTIFIER', 'Expected a type parameter name').value);
-            while (this.match('COMMA'));
+            do {
+                typeParameters.push(this.consume('IDENTIFIER', 'Expected a type parameter name').value);
+                typeConstraints.push(this.match('COLON') ? this.parseTypeReference() : null);
+            } while (this.match('COMMA'));
             this.consume('GREATER', "Expected '>' after type parameters");
         }
         const inheritedType = this.match('INHERITS') ? this.parseTypeReference() : null;
@@ -158,6 +161,7 @@ export class Parser {
         this.consume('RIGHT_BRACE', `Expected '}}' after object ${start.value}`);
         const end = this.consume('RIGHT_BRACE', `Expected '}}' after object ${start.value}`);
         const declaration = new ObjectDeclaration(start.value, typeParameters, inheritedType, implementedTypes, members, this.span(start, end));
+        declaration.typeConstraints = typeConstraints;
         declaration.visibility = visibility;
         return declaration;
     }

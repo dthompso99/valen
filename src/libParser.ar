@@ -49,10 +49,15 @@ library Parsing {{
             if kind == "Test" { start = self.consume("TEST", "Expected 'test'") }
             local name = self.consume("IDENTIFIER", "Expected a declaration name")
             local typeParameters = new Array<string>(0)
+            local typeConstraints = new Array<Ast.TypeReference?>(0)
             if kind == "Object" {
                 if self.match("LESS") {
                     typeParameters.append(self.consume("IDENTIFIER", "Expected a type parameter name").lexeme)
-                    while self.match("COMMA") { typeParameters.append(self.consume("IDENTIFIER", "Expected a type parameter name").lexeme) }
+                    if self.match("COLON") { typeConstraints.append(self.parseTypeReference()) } else { typeConstraints.append(null) }
+                    while self.match("COMMA") {
+                        typeParameters.append(self.consume("IDENTIFIER", "Expected a type parameter name").lexeme)
+                        if self.match("COLON") { typeConstraints.append(self.parseTypeReference()) } else { typeConstraints.append(null) }
+                    }
                     self.consume("GREATER", "Expected '>' after type parameters")
                 }
             }
@@ -80,6 +85,7 @@ library Parsing {{
             declaration.inheritedType = inheritedType
             declaration.implementedTypes = implementedTypes
             declaration.typeParameters = typeParameters
+            declaration.typeConstraints = typeConstraints
             return declaration
         }
 
@@ -100,6 +106,7 @@ library Parsing {{
                 nested.inheritedType = declaration.inheritedType
                 nested.implementedTypes = declaration.implementedTypes
                 nested.typeParameters = declaration.typeParameters
+                nested.typeConstraints = declaration.typeConstraints
                 nested.visibility = visibility
                 return nested
             }

@@ -12,6 +12,7 @@ export const validPrograms = [
     {name: 'HTTP header parsing', source: 'bootstrap/test/fixtures/http-headers.ar'},
     {name: 'floating point', source: 'bootstrap/test/fixtures/floating-point.ar'},
     {name: 'numeric promotion', source: 'bootstrap/test/fixtures/numeric-promotion.ar'},
+    {name: 'generic constraints', source: 'bootstrap/test/fixtures/generic-constraints.ar'},
     {name: 'instruction selection', source: 'bootstrap/test/fixtures/instruction-selection.ar'},
     {name: 'default arguments', source: 'bootstrap/test/fixtures/default-arguments.ar'},
     {name: 'collection ownership', source: 'bootstrap/test/fixtures/collection-ownership.ar'},
@@ -52,6 +53,7 @@ export const compileOnlyPrograms = [
 ];
 
 export const invalidPrograms = [
+    {name: 'unsatisfied generic constraint', source: 'bootstrap/test/fixtures/generic-constraint-failing.ar', status: 65, stderr: /Type argument 'Engine' does not satisfy constraint 'Printable'/},
     {name: 'invalid token', source: 'bootstrap/test/fixtures/invalid-token.ar', status: 65, stderr: /invalid-token\.ar:2:5: error: Unexpected byte 64/},
     {name: 'missing contract implementation', source: 'bootstrap/test/fixtures/missing-implementation.ar', status: 65, stderr: /missing-implementation\.ar:5:1: error: Object 'Broken' is missing method 'required'/},
     {name: 'invalid ownership transfer', source: 'bootstrap/test/fixtures/invalid-ownership.ar', status: 65, stderr: /invalid-ownership\.ar:12:21: error: Cannot pass borrowed reference 'engine'/},
