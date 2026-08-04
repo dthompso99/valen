@@ -2196,7 +2196,7 @@ library Semantics {{
                 local source = resolvedSource!
                 if source.kind == "Local" || source.kind == "Parameter" {
                     if source.ownership != "owned" {
-                        local diagnostic = new Diagnostics.Diagnostic(Diagnostics.errorSeverity(), "Cannot pass borrowed reference '" + source.name + "' to owning parameter '" + parameter.name + "'; use 'copy " + source.name + "'", expression.span)
+                        local diagnostic = new Diagnostics.Diagnostic(Diagnostics.DiagnosticSeverity.Error, "Cannot pass borrowed reference '" + source.name + "' to owning parameter '" + parameter.name + "'; use 'copy " + source.name + "'", expression.span)
                         diagnostic.addLabel(parameter.span, "parameter '" + parameter.name + "' takes ownership")
                         diagnostic.addNote("ordinary arguments borrow references unless ownership is transferred explicitly")
                         diagnostic.addFix(expression.span, "create an independent owned value for '" + parameter.name + "'", "copy " + source.name)
@@ -2238,7 +2238,7 @@ library Semantics {{
         }
 
         error(span:Compiler.SourceSpan, message:string) -> void {
-            self.diagnostics.add(new Diagnostics.Diagnostic(1, message, span))
+            self.diagnostics.add(new Diagnostics.Diagnostic(Diagnostics.DiagnosticSeverity.Error, message, span))
         }
     }}
 }}

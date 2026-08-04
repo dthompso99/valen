@@ -2,9 +2,7 @@ import System from './libSystem.ar'
 import Compiler from './libCompiler.ar'
 
 library Diagnostics {{
-    errorSeverity() -> u8 { return 1 }
-    warningSeverity() -> u8 { return 2 }
-    noteSeverity() -> u8 { return 3 }
+    enum DiagnosticSeverity {{ Error, Warning, Note }}
 
     DiagnosticLabel {{
         member span:Compiler.SourceSpan
@@ -21,14 +19,14 @@ library Diagnostics {{
     }}
 
     Diagnostic {{
-        member severity:u8
+        member severity:DiagnosticSeverity
         member message:string
         member span:Compiler.SourceSpan
         member labels:Array<DiagnosticLabel>
         member notes:Array<string>
         member fixes:Array<FixHint>
 
-        __(severity:u8, message:string, span:Compiler.SourceSpan) -> void {
+        __(severity:DiagnosticSeverity, message:string, span:Compiler.SourceSpan) -> void {
             self.severity = severity
             self.message = message
             self.span = span
@@ -59,15 +57,19 @@ library Diagnostics {{
         }
 
         hasErrors() -> bool {
-            for diagnostic in self.diagnostics { if diagnostic.severity == 1 { return true } }
+            for diagnostic in self.diagnostics { if diagnostic.severity == Diagnostics.DiagnosticSeverity.Error { return true } }
             return false
         }
     }}
 
-    severityName(severity:u8) -> string {
-        if severity == 1 { return "error" }
-        if severity == 2 { return "warning" }
-        return "note"
+    severityName(severity:DiagnosticSeverity) -> string {
+        local name = "note"
+        match severity {
+            case Diagnostics.DiagnosticSeverity.Error { name = "error" }
+            case Diagnostics.DiagnosticSeverity.Warning { name = "warning" }
+            case Diagnostics.DiagnosticSeverity.Note { name = "note" }
+        }
+        return name
     }
 
     format(diagnostic:Diagnostic) -> string {

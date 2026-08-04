@@ -410,4 +410,4 @@ test arithmetic {{
 }}
 ```
 
-A failing expectation produces a nonzero native process status. Compiler diagnostics distinguish errors, warnings, and notes. A diagnostic may identify related source locations, explain the governing rule, and provide a precise replacement hint. The first line remains `path:line:column: severity: message` for editor and script compatibility.
+A failing expectation produces a nonzero native process status. Compiler diagnostics use the typed `Diagnostics.DiagnosticSeverity` enum (`Error`, `Warning`, or `Note`) instead of numeric severity values. A diagnostic may identify related source locations, explain the governing rule, and provide a precise replacement hint. The first line remains `path:line:column: severity: message` for editor and script compatibility.

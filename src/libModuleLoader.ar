@@ -119,13 +119,13 @@ library ModuleLoading {{
             local tokenizer = new Compiler.Tokenizer(source!)
             local tokens = tokenizer.tokenize()
             if tokenizer.error != null {
-                self.diagnostics.add(new Diagnostics.Diagnostic(1, tokenizer.error!, tokenizer.errorSpan!))
+                self.diagnostics.add(new Diagnostics.Diagnostic(Diagnostics.DiagnosticSeverity.Error, tokenizer.error!, tokenizer.errorSpan!))
                 return null
             }
             local parser = new Parsing.Parser(tokens)
             local program = parser.parse()
             if parser.error != null {
-                self.diagnostics.add(new Diagnostics.Diagnostic(1, parser.error!, parser.errorSpan!))
+                self.diagnostics.add(new Diagnostics.Diagnostic(Diagnostics.DiagnosticSeverity.Error, parser.error!, parser.errorSpan!))
                 return null
             }
             local loaded = new Module(path, owningRoot, source!, program)
@@ -138,7 +138,7 @@ library ModuleLoading {{
                 if resolved != null { imported = self.loadModule(resolved!.path, declaration.span, resolved!.root) }
                 if imported != null {
                     if loaded.hasImport(declaration.name) {
-                        self.diagnostics.add(new Diagnostics.Diagnostic(1, "Duplicate import '" + declaration.name + "'", declaration.span))
+                        self.diagnostics.add(new Diagnostics.Diagnostic(Diagnostics.DiagnosticSeverity.Error, "Duplicate import '" + declaration.name + "'", declaration.span))
                     } else {
                         loaded.imports.append(new ModuleImport(declaration.name, declaration, imported!))
                     }
@@ -151,23 +151,23 @@ library ModuleLoading {{
 
         resolveImport(importer:Module, specifier:string, span:Compiler.SourceSpan) -> ref ResolvedImport? {
             if specifier.length < 3 || specifier.slice(specifier.length - 3, 3) != ".ar" {
-                self.diagnostics.add(new Diagnostics.Diagnostic(1, "Import '" + specifier + "' must include the .ar extension", span)); return null
+                self.diagnostics.add(new Diagnostics.Diagnostic(Diagnostics.DiagnosticSeverity.Error, "Import '" + specifier + "' must include the .ar extension", span)); return null
             }
             if self.starts(specifier, "./") || self.starts(specifier, "../") {
                 local localPath = self.normalizePath(System.resolvePath(self.sourceRoot, importer.path, specifier))
                 if !self.within(importer.owningRoot, localPath) {
-                    self.diagnostics.add(new Diagnostics.Diagnostic(1, "Import '" + specifier + "' escapes its owning root '" + importer.owningRoot + "'", span)); return null
+                    self.diagnostics.add(new Diagnostics.Diagnostic(Diagnostics.DiagnosticSeverity.Error, "Import '" + specifier + "' escapes its owning root '" + importer.owningRoot + "'", span)); return null
                 }
                 if Compiler.loadSource(localPath) != null { return new ResolvedImport(localPath, importer.owningRoot) }
-                self.diagnostics.add(new Diagnostics.Diagnostic(1, "Cannot resolve import '" + specifier + "'; searched: " + localPath, span)); return null
+                self.diagnostics.add(new Diagnostics.Diagnostic(Diagnostics.DiagnosticSeverity.Error, "Cannot resolve import '" + specifier + "'; searched: " + localPath, span)); return null
             }
             if specifier.length > 0 { if specifier[0] == 47 {
                 local projectPath = self.normalizePath(System.resolvePath(self.sourceRoot, importer.path, specifier))
                 if Compiler.loadSource(projectPath) != null { return new ResolvedImport(projectPath, self.sourceRoot) }
-                self.diagnostics.add(new Diagnostics.Diagnostic(1, "Cannot resolve project import '" + specifier + "'; searched: " + projectPath, span)); return null
+                self.diagnostics.add(new Diagnostics.Diagnostic(Diagnostics.DiagnosticSeverity.Error, "Cannot resolve project import '" + specifier + "'; searched: " + projectPath, span)); return null
             } }
             if self.hasParentSegment(specifier) {
-                self.diagnostics.add(new Diagnostics.Diagnostic(1, "Library import '" + specifier + "' cannot contain '..'", span)); return null
+                self.diagnostics.add(new Diagnostics.Diagnostic(Diagnostics.DiagnosticSeverity.Error, "Library import '" + specifier + "' cannot contain '..'", span)); return null
             }
             local searched = ""
             if self.libraryPath != null {
@@ -190,7 +190,7 @@ library ModuleLoading {{
                 }
             }
             if searched.length == 0 { searched = "<no VALEN_LIBRARY_PATH entries>" }
-            self.diagnostics.add(new Diagnostics.Diagnostic(1, "Cannot resolve library import '" + specifier + "' from '" + importer.path + "'; searched: " + searched, span))
+            self.diagnostics.add(new Diagnostics.Diagnostic(Diagnostics.DiagnosticSeverity.Error, "Cannot resolve library import '" + specifier + "' from '" + importer.path + "'; searched: " + searched, span))
             return null
         }
 
@@ -259,7 +259,7 @@ library ModuleLoading {{
 
         report(path:string, message:string, span:Compiler.SourceSpan?) -> void {
             if span != null {
-                self.diagnostics.add(new Diagnostics.Diagnostic(1, message, span!))
+                self.diagnostics.add(new Diagnostics.Diagnostic(Diagnostics.DiagnosticSeverity.Error, message, span!))
                 return
             }
             self.reportPath(path, message)
@@ -268,7 +268,7 @@ library ModuleLoading {{
         reportPath(path:string, message:string) -> void {
             local source = new Compiler.SourceFile(path, "")
             local span = new Compiler.SourceSpan(source, 0, 0, 1, 1)
-            self.diagnostics.add(new Diagnostics.Diagnostic(1, message, span))
+            self.diagnostics.add(new Diagnostics.Diagnostic(Diagnostics.DiagnosticSeverity.Error, message, span))
         }
     }}
 }}
