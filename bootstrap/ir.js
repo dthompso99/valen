@@ -175,7 +175,7 @@ export class IrGenerator {
         this.lifetimeScopes = [];
         const instance = {kind: 'parameter', name: 'self', type: owner.type};
         for (const field of fields) {
-            const value = this.lowerExpression(field.initializer);
+            const value = this.boxOptional(this.lowerExpression(field.initializer), field.semanticSymbol.type);
             this.emit('store_field', {
                 object: instance,
                 field: `${owner.type}.${field.name}`,
@@ -271,13 +271,15 @@ export class IrGenerator {
                 this.lowerBlock(statement.body);
                 break;
             case 'LocalDeclaration': {
-                const value = statement.initializer ? this.lowerExpression(statement.initializer) : null;
+                let value = statement.initializer ? this.lowerExpression(statement.initializer) : null;
                 const local = {
                     kind: 'local',
                     name: `${statement.name}#${this.nextLocal++}`,
                     type: statement.inferredType,
                     value
                 };
+                if (value) value = this.boxOptional(value, local.type);
+                local.value = value;
                 this.locals.set(statement.semanticSymbol, local);
                 this.emit('declare_local', {name: local.name, type: local.type, value});
                 if (statement.semanticSymbol.declaredOwnership === 'owned' && this.isObjectLifetimeType(local.type)) {
@@ -306,7 +308,7 @@ export class IrGenerator {
                 break;
             }
             case 'ReturnStatement': {
-                const value = statement.expression ? this.lowerExpression(statement.expression) : null;
+                const value = statement.expression ? this.boxOptional(this.lowerExpression(statement.expression), this.function.returnType) : null;
                 if (statement.ownership === 'transfer') this.consumeLifetime(statement.expression);
                 this.destroyAllLifetimeScopes();
                 this.emit('return', {value});
@@ -508,7 +510,7 @@ export class IrGenerator {
             }
             case 'UnwrapExpression': {
                 const value = this.lowerExpression(expression.expression);
-                return this.result('unwrap', expression.inferredType, {value});
+                return this.result('unwrap', expression.inferredType, {value, optionalType: value.type});
             }
             case 'PropagateExpression':
                 return this.lowerPropagation(expression);
@@ -544,6 +546,16 @@ export class IrGenerator {
         return type.endsWith('?') ? type.slice(0, -1) : type;
     }
 
+    isPrimitiveOptional(type) {
+        return type?.endsWith('?') && ['bool', 'u8', 'i8', 'u16', 'i16', 'u32', 'i32', 'u64', 'i64', 'f32', 'f64'].includes(type.slice(0, -1));
+    }
+
+    boxOptional(value, targetType) {
+        if (!this.isPrimitiveOptional(targetType) || value.type === targetType) return value;
+        if (value.type === '<null>') return {...value, type: targetType};
+        return this.result('optional_box', targetType, {value, valueType: targetType.slice(0, -1)});
+    }
+
     lowerIdentifier(expression) {
         if (expression.semanticSymbol?.kind === 'Self') {
             return {kind: 'parameter', name: 'self', type: expression.inferredType};
@@ -556,8 +568,8 @@ export class IrGenerator {
             });
         }
         const local = this.locals.get(expression.semanticSymbol);
-        if (local?.kind === 'parameter') return {kind: 'parameter', name: local.name, type: expression.inferredType};
-        if (local) return this.result('load_local', expression.inferredType, {name: local.name});
+        if (local?.kind === 'parameter') return {kind: 'parameter', name: local.name, type: local.type};
+        if (local) return this.result('load_local', local.type, {name: local.name});
         throw new Error(`Identifier '${expression.name}' does not produce an IR value`);
     }
 
@@ -579,17 +591,18 @@ export class IrGenerator {
             throw new Error(`Member '${expression.member}' does not produce an IR value`);
         }
         const object = this.lowerExpression(expression.object);
-        return this.result('load_field', expression.inferredType, {
+        return this.result('load_field', symbol.type, {
             object,
             field: `${symbol.owner.type}.${symbol.name}`
         });
     }
 
     lowerAssignment(expression) {
-        const value = this.lowerExpression(expression.value);
+        let value = this.lowerExpression(expression.value);
         if (expression.value.ownership === 'consume') this.consumeLifetime(expression.value);
         const target = expression.target;
         const symbol = target.semanticSymbol;
+        value = this.boxOptional(value, symbol.type);
 
         if (symbol.kind === 'Field') {
             const object = target.kind === 'MemberExpression'
@@ -614,7 +627,8 @@ export class IrGenerator {
 
     lowerCall(expression) {
         const method = expression.callee.semanticSymbol;
-        const args = expression.arguments.map(argument => this.lowerExpression(argument));
+        const args = expression.arguments.map((argument, index) =>
+            this.boxOptional(this.lowerExpression(argument), method.parameters?.[index]?.type));
         for (const argument of expression.arguments) {
             if (argument.ownership === 'consume') this.consumeLifetime(argument);
         }
@@ -634,7 +648,7 @@ export class IrGenerator {
 
         if (method.kind === 'ArrayAppend') {
             const array = this.lowerExpression(expression.callee.object);
-            this.emit('array_append', {array, value: args[0], elementType: method.elementType, elementOwnership: method.elementOwnership});
+            this.emit('array_append', {array, value: this.boxOptional(args[0], method.elementType), elementType: method.elementType, elementOwnership: method.elementOwnership});
             return {kind: 'void', type: 'void'};
         }
         if (method.kind === 'StringSlice') {
@@ -824,6 +838,9 @@ export class IrGenerator {
                 object: value,
                 field: `${expression.valueField.owner.type}.${expression.valueField.name}`
             });
+        }
+        if (this.isPrimitiveOptional(value.type)) {
+            return this.result('unwrap', expression.inferredType, {value, optionalType: value.type});
         }
         return {...value, type: expression.inferredType};
     }

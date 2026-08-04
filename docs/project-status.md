@@ -11,7 +11,7 @@
 - overloads and trailing default arguments
 - fixed-width integers and IEEE `f32`/`f64`
 - arrays, generic objects, byte-oriented strings, and builders
-- optionals for references
+- optionals for references and primitives, with flow-sensitive narrowing and propagation
 - ownership transfer, borrowed/weak references, `copy`, and `delete`
 - tracing garbage collection and cycle-safe equality/hashing
 - deterministic importer-relative, project-root, and external `VALEN_LIBRARY_PATH` source modules with owning-root confinement
@@ -26,7 +26,6 @@
 - **WIP:** Unicode code-point and grapheme-aware strings
 - **WIP:** string interpolation and richer formatting
 - flow-sensitive optional narrowing for stable locals and parameters
-- **WIP:** optional primitive values
 - **WIP:** generic constraints and generic methods
 - lossless mixed-width integer promotion and predictable floating-point promotion
 - **WIP:** `else if`, expression-valued conditionals, and matching

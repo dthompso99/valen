@@ -803,10 +803,26 @@ library X86_64 {{
                 self.storeResult(instruction, "rax")
                 return
             }
+            if op == "optional_box" {
+                self.writer.line("    mov edi, 24")
+                self.writer.line("    xor esi, esi")
+                self.writer.line("    xor edx, edx")
+                self.writer.line("    xor ecx, ecx")
+                self.writer.line("    call valen_gc_alloc")
+                self.writer.line("    mov QWORD PTR [rax], 0")
+                self.writer.line("    mov QWORD PTR [rax+8], 1")
+                self.writer.line("    push rax")
+                self.load(instruction.first!, "rcx")
+                self.writer.line("    pop rax")
+                self.writer.line("    mov QWORD PTR [rax+16], rcx")
+                self.storeResult(instruction, "rax")
+                return
+            }
             if op == "unwrap" {
                 self.load(instruction.first!, "rax")
                 self.writer.line("    test rax, rax")
                 self.writer.line("    jz .Loptional_unwrap_error")
+                if instruction.ownerType != null { if self.isPrimitiveOptional(instruction.ownerType!) { self.writer.line("    mov rax, QWORD PTR [rax+16]"); self.normalize("rax", instruction.typeName!) } }
                 self.storeResult(instruction, "rax")
                 return
             }
@@ -2536,8 +2552,15 @@ library X86_64 {{
         gcArrayWeakLabel(typeName:string) -> string { return ".Lvalen_gc_array_weak_" + self.mangle(typeName) }
 
         isManagedReferenceType(typeName:string) -> bool {
+            if self.isPrimitiveOptional(typeName) { return true }
             local base = self.baseType(typeName)
             return base == "string" || base == "StringBuilder" || self.isArray(base) || self.findProgramType(base) != null
+        }
+
+        isPrimitiveOptional(typeName:string) -> bool {
+            if typeName.length < 2 || typeName[typeName.length - 1] != 63 { return false }
+            local base = typeName.slice(0, typeName.length - 1)
+            return base == "bool" || base == "u8" || base == "i8" || base == "u16" || base == "i16" || base == "u32" || base == "i32" || base == "u64" || base == "i64" || base == "f32" || base == "f64"
         }
 
         baseType(typeName:string) -> string {

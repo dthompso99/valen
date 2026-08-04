@@ -1437,10 +1437,6 @@ export class SemanticAnalyzer {
             return this.annotate(reference, UNKNOWN, null);
         }
         if (reference.optional) {
-            if (!this.isReferenceType(type)) {
-                this.report(reference.span, `Optional bootstrap values require a reference type, got '${type}'`);
-                return this.annotate(reference, UNKNOWN, null);
-            }
             type = `${type}?`;
         }
         if (!arrayElement && reference.ownership !== 'owned') {

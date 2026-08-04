@@ -1036,6 +1036,18 @@ test('optional references and diagnostic collections resolve end to end', () => 
     assert.doesNotThrow(() => new X86_64Backend().generate(ir));
 });
 
+test('primitive optionals preserve zero, null, narrowing, propagation, calls, and fields', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/optional-primitives.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot, libraryPath: path.join(projectRoot, 'lib')});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    const instructions = ir.functions.flatMap(fn => fn.blocks.flatMap(block => block.instructions));
+    assert.ok(instructions.some(instruction => instruction.op === 'optional_box' && instruction.valueType === 'i64'));
+    assert.ok(instructions.some(instruction => instruction.op === 'optional_box' && instruction.valueType === 'f64'));
+    assert.ok(instructions.some(instruction => instruction.op === 'unwrap' && instruction.optionalType === 'i64?'));
+    assert.doesNotThrow(() => new X86_64Backend().generate(ir));
+});
+
 test('optional propagation is restricted to optional-returning methods', () => {
     const source = 'entry {{ __() -> void { local value:string? = null\n local resolved = value? } }}';
     const result = new SemanticAnalyzer().analyze(new Parser().parse(source, 'propagation.ar'));

@@ -578,7 +578,7 @@ library Ir {{
                 local field = members[index]
                 if field.kind == "Field" {
                     if field.initializer != null {
-                        local value = self.lowerExpression(field.initializer!)
+                        local value = self.boxOptional(self.lowerExpression(field.initializer!), field.symbol!.typeName!)
                         local instruction = new Instruction("store_field")
                         instruction.first = instance
                         instruction.second = value
@@ -680,7 +680,7 @@ library Ir {{
         lowerStatement(statement:Ast.Statement) -> void {
             if statement.kind == "Local" {
                 local value:Value? = null
-                if statement.expression != null { value = self.lowerExpression(statement.expression!) }
+                if statement.expression != null { value = self.boxOptional(self.lowerExpression(statement.expression!), statement.symbol!.typeName!) }
                 local localName = statement.name! + "#" + self.nextLocal.toString()
                 self.nextLocal = self.nextLocal + 1
                 local localValue = new Value("local", localName, statement.symbol!.typeName!)
@@ -696,7 +696,7 @@ library Ir {{
             if statement.kind == "Return" {
                 local instruction = new Instruction("return")
                 if statement.expression != null {
-                    instruction.first = self.lowerExpression(statement.expression!)
+                    instruction.first = self.boxOptional(self.lowerExpression(statement.expression!), self.currentFunction!.returnType)
                     if statement.ownership == "transfer" { self.consumeLifetime(statement.expression!) }
                 }
                 self.destroyBindingsForReturn()
@@ -948,6 +948,7 @@ library Ir {{
                 local value = self.lowerExpression(expression.left!)
                 local instruction = self.temporary("unwrap", expression.inferredType!)
                 instruction.first = value
+                instruction.ownerType = value.typeName
                 return instruction.result!
             }
             if expression.kind == "Propagate" { return self.lowerPropagation(expression) }
@@ -973,8 +974,8 @@ library Ir {{
             }
             local binding = self.findBinding(symbol)
             if binding == null { return new Value("symbol", symbol.qualifiedName, expression.inferredType!) }
-            if binding!.value.kind == "parameter" { return new Value("parameter", binding!.value.name, expression.inferredType!) }
-            local instruction = self.temporary("load_local", expression.inferredType!)
+            if binding!.value.kind == "parameter" { return new Value("parameter", binding!.value.name, binding!.value.typeName) }
+            local instruction = self.temporary("load_local", binding!.value.typeName)
             instruction.name = binding!.value.name
             return instruction.result!
         }
@@ -992,7 +993,7 @@ library Ir {{
             if expression.symbol != null {
                 if expression.symbol!.kind == "Field" {
                     local owner = self.lowerExpression(expression.left!)
-                    local instruction = self.temporary("load_field", expression.inferredType!)
+                    local instruction = self.temporary("load_field", expression.symbol!.typeName!)
                     instruction.first = owner
                     instruction.name = expression.symbol!.qualifiedName
                     return instruction.result!
@@ -1018,6 +1019,7 @@ library Ir {{
             local value = self.lowerExpression(expression.right!)
             if expression.right!.ownership == "consume" { self.consumeLifetime(expression.right!) }
             local target = expression.left!
+            value = self.boxOptional(value, target.inferredType!)
             if target.kind == "Index" {
                 local instruction = new Instruction("array_store")
                 instruction.first = self.lowerExpression(target.left!)
@@ -1162,6 +1164,7 @@ library Ir {{
                 instruction.second = appended
                 instruction.elementType = self.arrayElementType(receiverType)
                 instruction.elementOwnership = self.arrayElementOwnership(receiverType)
+                if op == "array_append" { instruction.second = self.boxOptional(appended, instruction.elementType!) }
                 if expression.arguments[0].ownership == "consume" { self.consumeLifetime(expression.arguments[0]) }
                 self.emit(instruction)
                 return new Value("void", "", "void")
@@ -1198,7 +1201,12 @@ library Ir {{
                 }
             }
             local index:i64 = 0
-            while index < expression.arguments.length { instruction.arguments.append(self.lowerExpression(expression.arguments[index])); index = index + 1 }
+            while index < expression.arguments.length {
+                local argument = self.lowerExpression(expression.arguments[index])
+                if callee.symbol != null { if index < callee.symbol!.parameters.length { argument = self.boxOptional(argument, callee.symbol!.parameters[index].typeName!) } }
+                instruction.arguments.append(argument)
+                index = index + 1
+            }
             index = 0
             while index < expression.arguments.length { if expression.arguments[index].ownership == "consume" { self.consumeLifetime(expression.arguments[index]) }; index = index + 1 }
             if callee.symbol != null {
@@ -1340,7 +1348,31 @@ library Ir {{
                     return new Value(loadValue.result!.kind, loadValue.result!.name, loadValue.result!.typeName)
                 }
             }
+            if self.isPrimitiveOptional(value.typeName) {
+                local unwrapped = self.temporary("unwrap", expression.inferredType!)
+                unwrapped.first = value
+                unwrapped.ownerType = value.typeName
+                return new Value(unwrapped.result!.kind, unwrapped.result!.name, unwrapped.result!.typeName)
+            }
             return new Value(value.kind, value.name, expression.inferredType!)
+        }
+
+        isPrimitiveOptional(typeName:string) -> bool {
+            if !self.isOptionalTypeName(typeName) { return false }
+            local base = typeName.slice(0, typeName.length - 1)
+            return base == "bool" || self.isIntegerTypeName(base) || base == "f32" || base == "f64"
+        }
+
+        isOptionalTypeName(typeName:string) -> bool { return typeName.length > 0 && typeName[typeName.length - 1] == 63 }
+        isIntegerTypeName(typeName:string) -> bool { return typeName == "u8" || typeName == "i8" || typeName == "u16" || typeName == "i16" || typeName == "u32" || typeName == "i32" || typeName == "u64" || typeName == "i64" }
+
+        boxOptional(value:Value, targetType:string) -> ref Value {
+            if !self.isPrimitiveOptional(targetType) || value.typeName == targetType { return new Value(value.kind, value.name, value.typeName) }
+            if value.typeName == "null" { return new Value(value.kind, value.name, targetType) }
+            local boxed = self.temporary("optional_box", targetType)
+            boxed.first = value
+            boxed.elementType = targetType.slice(0, targetType.length - 1)
+            return boxed.result!
         }
 
         findBinding(symbol:Symbols.Symbol) -> ref Binding? {

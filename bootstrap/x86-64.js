@@ -458,8 +458,13 @@ export class X86_64Backend {
 
     isManagedReferenceType(type) {
         if (!type) return false;
+        if (this.isPrimitiveOptional(type)) return true;
         const base = type.endsWith('?') ? type.slice(0, -1) : type;
         return base === 'string' || base === 'StringBuilder' || base.startsWith('Array<') || this.typeSizes.has(base);
+    }
+
+    isPrimitiveOptional(type) {
+        return type?.endsWith('?') && ['bool', 'u8', 'i8', 'u16', 'i16', 'u32', 'i32', 'u64', 'i64', 'f32', 'f64'].includes(type.slice(0, -1));
     }
 
     generateInstruction(instruction, endLabel) {
@@ -688,9 +693,16 @@ export class X86_64Backend {
                 lines.push(...this.convertNumber(instruction.value.type, instruction.type));
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
                 break;
+            case 'optional_box':
+                lines.push('    mov edi, 24', '    xor esi, esi', '    xor edx, edx', '    xor ecx, ecx', '    call valen_gc_alloc',
+                    '    mov QWORD PTR [rax], 0', '    mov QWORD PTR [rax+8], 1', '    push rax',
+                    ...this.load(instruction.value, 'rcx'), '    pop rax', '    mov QWORD PTR [rax+16], rcx',
+                    `    mov ${this.temp(instruction.result)}, rax`);
+                break;
             case 'unwrap':
                 lines.push(...this.load(instruction.value, 'rax'));
                 lines.push('    test rax, rax', '    jz .Loptional_unwrap_error');
+                if (instruction.optionalType && this.isPrimitiveOptional(instruction.optionalType)) lines.push('    mov rax, QWORD PTR [rax+16]', ...this.normalize('rax', instruction.type));
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
                 break;
             case 'jump':

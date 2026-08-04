@@ -1,0 +1,45 @@
+import System from 'libSystem.ar'
+
+Counter {{
+    member value:i64? = 0
+
+    set(value:i64) -> void { self.value = value }
+    read() -> i64 {
+        if self.value == null { return -1 }
+        return self.value!
+    }
+}}
+
+entry {{
+    present(value:i64) -> i64? { return value }
+    absent() -> i64? { return null }
+    forward(value:i64?) -> i64? { return value? }
+    read(value:i64?) -> i64 {
+        if value == null { return -1 }
+        return value!
+    }
+    decimal() -> f64? { return 2.5 }
+
+    __() -> i64 {
+        local zero:i64? = 0
+        if zero == null || zero! != 0 { return 1 }
+        if self.read(self.absent()) != -1 { return 2 }
+        if self.read(self.present(42)) != 42 { return 3 }
+        if self.read(self.forward(self.present(7))) != 7 { return 4 }
+        local decimal = self.decimal()
+        if decimal == null || decimal! != 2.5 { return 5 }
+        local counter = new Counter()
+        if counter.read() != 0 { return 6 }
+        counter.set(9)
+        if counter.read() != 9 { return 7 }
+        local values = new Array<i64?>(0)
+        values.append(11)
+        values.append(null)
+        if values[0] == null || values[0]! != 11 { return 8 }
+        if values[1] != null { return 9 }
+        local rooted:i64? = 123
+        System.collectGarbage()
+        if rooted == null || rooted! != 123 { return 10 }
+        return 0
+    }
+}}

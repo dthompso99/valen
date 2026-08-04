@@ -184,9 +184,9 @@ Specializations are invariant. Generic methods and constraints are **WIP**.
 
 Strings support byte indexing, length, equality, concatenation, slicing, integer conversion, and `StringBuilder`. Interpolation and richer formatting are **WIP**.
 
-## Optional references
+## Optional values
 
-Reference optionals use `?`:
+Reference and primitive optionals use `?`:
 
 ```valen
 local engine:Engine? = null
@@ -195,7 +195,22 @@ if engine != null {
 }
 ```
 
-`!` performs a checked unwrap. Safe propagation is available in optional-returning methods. Locals and parameters are narrowed automatically after null checks inside `if`, `else`, `while`, short-circuit expressions, and after a returning guard clause. Assignment invalidates the narrowing. Optional primitive values remain **WIP**.
+Primitive optionals preserve every underlying value, including integer zero, `false`, and all
+floating-point bit patterns:
+
+```valen
+local count:i64? = 0
+if count != null {
+    local value:i64 = count!
+}
+```
+
+At the native ABI boundary a present primitive optional is represented by a nullable, GC-managed
+value box; `null` remains zero. This keeps optionals one machine word in locals, fields, parameters,
+and returns. `!`, `?`, and flow-sensitive null narrowing behave identically for reference and
+primitive optionals.
+
+`!` performs a checked unwrap. Safe propagation is available in optional-returning methods. Locals and parameters are narrowed automatically after null checks inside `if`, `else`, `while`, short-circuit expressions, and after a returning guard clause. Assignment invalidates the narrowing.
 
 ## Ownership and lifetime
 
