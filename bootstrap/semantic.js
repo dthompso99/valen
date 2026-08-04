@@ -920,12 +920,19 @@ export class SemanticAnalyzer {
                     if (expression.member === 'length') {
                         symbol = {kind: 'ArrayLength', name: 'length', type: I64};
                         type = I64;
+                    } else if (expression.member === 'capacity') {
+                        symbol = {kind: 'ArrayCapacity', name: 'capacity', type: I64};
+                        type = I64;
                     } else if (expression.member === 'append') {
                         symbol = {kind: 'ArrayAppend', name: 'append', type: UNKNOWN, elementType, elementOwnership};
                     } else if (expression.member === 'insert') {
                         symbol = {kind: 'ArrayInsert', name: 'insert', type: VOID, elementType, elementOwnership};
                     } else if (expression.member === 'remove') {
                         symbol = {kind: 'ArrayRemove', name: 'remove', type: elementType, elementType, elementOwnership};
+                    } else if (expression.member === 'reserve') {
+                        symbol = {kind: 'ArrayReserve', name: 'reserve', type: VOID, elementType};
+                    } else if (expression.member === 'shrinkToFit') {
+                        symbol = {kind: 'ArrayShrink', name: 'shrinkToFit', type: VOID, elementType};
                     } else if (expression.member === 'toString' && ownerType === 'Array<u8>') {
                         symbol = {kind: 'BytesToString', name: 'toString', type: STRING};
                     } else if (expression.member === 'hash') {
@@ -1293,6 +1300,13 @@ export class SemanticAnalyzer {
                     } else this.requireAssignable(argumentTypes[0], I64, expression.arguments[0].span, expression.arguments[0]);
                     expression.elementOwnership = callee.elementOwnership;
                     type = callee.elementType;
+                } else if (callee?.kind === 'ArrayReserve') {
+                    if (argumentTypes.length !== 1) this.report(expression.span, `Array.reserve expects 1 argument, got ${argumentTypes.length}`);
+                    else this.requireAssignable(argumentTypes[0], I64, expression.arguments[0].span, expression.arguments[0]);
+                    type = VOID;
+                } else if (callee?.kind === 'ArrayShrink') {
+                    if (argumentTypes.length !== 0) this.report(expression.span, `Array.shrinkToFit expects 0 arguments, got ${argumentTypes.length}`);
+                    type = VOID;
                 } else if (callee?.kind === 'StringSlice') {
                     if (argumentTypes.length !== 2) {
                         this.report(expression.span, `String.slice expects 2 arguments, got ${argumentTypes.length}`);

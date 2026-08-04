@@ -193,6 +193,11 @@ new array. Empty literals do not guess their element type; use `new Array<T>(0)`
 reference insertion transfers ownership into the array, while removal transfers ownership back to
 the caller. `ref` and `weak` arrays remain non-owning.
 
+Arrays expose their allocated storage through `capacity`. `reserve(minimumCapacity)` grows storage
+without changing `length` or moving ownership out of the array, and does nothing when enough capacity
+already exists. `shrinkToFit()` releases unused storage so `capacity == length`; later appends grow the
+array normally. Reserving a negative capacity terminates through the array runtime error path.
+
 Generic objects are monomorphized:
 
 ```valen

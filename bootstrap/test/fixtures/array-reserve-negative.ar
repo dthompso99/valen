@@ -1,0 +1,7 @@
+entry {{
+    __() -> i64 {
+        local values = new Array<i64>(0)
+        values.reserve(-1)
+        return 1
+    }
+}}

@@ -598,9 +598,9 @@ export class IrGenerator {
 
     lowerMember(expression) {
         const symbol = expression.semanticSymbol;
-        if (symbol?.kind === 'ArrayLength') {
+        if (symbol?.kind === 'ArrayLength' || symbol?.kind === 'ArrayCapacity') {
             const array = this.lowerExpression(expression.object);
-            return this.result('array_length', 'i64', {array});
+            return this.result(expression.semanticSymbol.kind === 'ArrayCapacity' ? 'array_capacity' : 'array_length', 'i64', {array});
         }
         if (symbol?.kind === 'StringLength') {
             const string = this.lowerExpression(expression.object);
@@ -682,6 +682,16 @@ export class IrGenerator {
         if (method.kind === 'ArrayRemove') {
             const array = this.lowerExpression(expression.callee.object);
             return this.result('array_remove', method.elementType, {array, index: args[0], elementType: method.elementType, elementOwnership: method.elementOwnership});
+        }
+        if (method.kind === 'ArrayReserve') {
+            const array = this.lowerExpression(expression.callee.object);
+            this.emit('array_reserve', {array, capacity: args[0], elementType: method.elementType});
+            return {kind: 'void', type: 'void'};
+        }
+        if (method.kind === 'ArrayShrink') {
+            const array = this.lowerExpression(expression.callee.object);
+            this.emit('array_shrink', {array, elementType: method.elementType});
+            return {kind: 'void', type: 'void'};
         }
         if (method.kind === 'StringSlice') {
             const string = this.lowerExpression(expression.callee.object);

@@ -1293,6 +1293,14 @@ library Semantics {{
                         expression.text = self.arrayElementOwnership(receiverType)
                         return self.typed(expression, self.arrayElementType(receiverType))
                     }
+                    if expression.left!.name! == "reserve" && self.isArray(receiverType) {
+                        if expression.arguments.length != 1 { self.error(expression.span, "Array.reserve expects 1 argument") } else { self.requireCompatible("i64", argumentTypes[0], expression.arguments[0].span) }
+                        return self.typed(expression, "void")
+                    }
+                    if expression.left!.name! == "shrinkToFit" && self.isArray(receiverType) {
+                        if expression.arguments.length != 0 { self.error(expression.span, "Array.shrinkToFit expects no arguments") }
+                        return self.typed(expression, "void")
+                    }
                     if expression.left!.name! == "toBytes" && receiverType == "string" {
                         if expression.arguments.length != 0 { self.error(expression.span, "String.toBytes expects no arguments") }
                         return self.typed(expression, "Array<u8>")
@@ -1676,9 +1684,12 @@ library Semantics {{
             if name == "length" {
                 if ownerType == "string" || self.isArray(ownerType) || ownerType == "StringBuilder" { return self.typed(expression, "i64") }
             }
+            if name == "capacity" && self.isArray(ownerType) { return self.typed(expression, "i64") }
             if name == "append" { return self.typed(expression, "void") }
             if name == "insert" && self.isArray(ownerType) { return self.typed(expression, "void") }
             if name == "remove" && self.isArray(ownerType) { return self.typed(expression, self.arrayElementType(ownerType)) }
+            if name == "reserve" && self.isArray(ownerType) { return self.typed(expression, "void") }
+            if name == "shrinkToFit" && self.isArray(ownerType) { return self.typed(expression, "void") }
             if name == "appendByte" { return self.typed(expression, "void") }
             if name == "appendBytes" && ownerType == "StringBuilder" { return self.typed(expression, "void") }
             if name == "build" { return self.typed(expression, "string") }

@@ -1,7 +1,7 @@
 const terminators = new Set(['return', 'jump', 'branch']);
 const integerTypes = new Set(['bool', 'u8', 'i8', 'u16', 'i16', 'u32', 'i32', 'i64']);
 const supportedOperations = new Set([
-    'allocate', 'array_append', 'array_insert', 'array_length', 'array_load', 'array_new', 'array_remove', 'array_store', 'binary', 'branch',
+    'allocate', 'array_append', 'array_capacity', 'array_insert', 'array_length', 'array_load', 'array_new', 'array_remove', 'array_reserve', 'array_shrink', 'array_store', 'binary', 'branch',
     'builder_append_byte', 'builder_append_bytes', 'builder_append_string', 'builder_build', 'builder_length', 'builder_new', 'bytes_to_string', 'call',
     'checked_cast', 'constant', 'float_constant', 'contract_call', 'convert', 'declare_local', 'destroy_array', 'destroy_object',
     'integer_to_string', 'jump', 'load_field', 'load_local', 'optional_box', 'return', 'store_field', 'store_local', 'string_concat',

@@ -1099,6 +1099,12 @@ library Ir {{
                 instruction.first = owner
                 return instruction.result!
             }
+            if expression.name! == "capacity" {
+                local owner = self.lowerExpression(expression.left!)
+                local instruction = self.temporary("array_capacity", expression.inferredType!)
+                instruction.first = owner
+                return instruction.result!
+            }
             if expression.symbol != null {
                 if expression.symbol!.kind == "Field" {
                     local owner = self.lowerExpression(expression.left!)
@@ -1290,6 +1296,21 @@ library Ir {{
                 instruction.elementType = self.arrayElementType(receiverType)
                 instruction.elementOwnership = self.arrayElementOwnership(receiverType)
                 return instruction.result!
+            }
+            if name == "reserve" && self.isArray(receiverType) {
+                local instruction = new Instruction("array_reserve")
+                instruction.first = self.lowerExpression(callee.left!)
+                instruction.second = self.lowerExpression(expression.arguments[0])
+                instruction.elementType = self.arrayElementType(receiverType)
+                self.emit(instruction)
+                return new Value("void", "", "void")
+            }
+            if name == "shrinkToFit" && self.isArray(receiverType) {
+                local instruction = new Instruction("array_shrink")
+                instruction.first = self.lowerExpression(callee.left!)
+                instruction.elementType = self.arrayElementType(receiverType)
+                self.emit(instruction)
+                return new Value("void", "", "void")
             }
             if (name == "slice" && receiverType == "string") || (name == "toString" && self.isInteger(receiverType)) || (name == "build" && receiverType == "StringBuilder") || (name == "toBytes" && receiverType == "string") || (name == "toString" && receiverType == "Array<u8>") {
                 local op = "string_slice"

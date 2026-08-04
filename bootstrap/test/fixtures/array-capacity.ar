@@ -1,0 +1,36 @@
+Item {{
+    member value:i64
+}}
+
+entry {{
+    __() -> i64 {
+        local values = new Array<i64>(0)
+        if values.capacity < 4 { return 1 }
+        values.reserve(32)
+        if values.capacity != 32 { return 2 }
+        values.append(7)
+        values.append(9)
+        values.reserve(8)
+        if values.capacity != 32 { return 3 }
+        values.shrinkToFit()
+        if values.capacity != values.length { return 4 }
+        if values[0] != 7 || values[1] != 9 { return 5 }
+
+        local items = new Array<Item?>(0)
+        items.reserve(12)
+        local item = new Item()
+        item.value = 41
+        items.append(item)
+        items.shrinkToFit()
+        if items.capacity != 1 || items[0]!.value != 41 { return 6 }
+        local returned = items.remove(0)
+        if returned!.value != 41 { return 7 }
+
+        local empty = new Array<u8>(0)
+        empty.shrinkToFit()
+        if empty.capacity != 0 { return 8 }
+        empty.append(3)
+        if empty.capacity < 4 || empty[0] != 3 { return 9 }
+        return 0
+    }
+}}

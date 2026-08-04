@@ -569,6 +569,10 @@ export class X86_64Backend {
                 lines.push(...this.load(instruction.array, 'rax'));
                 lines.push('    mov rax, QWORD PTR [rax]', `    mov ${this.temp(instruction.result)}, rax`);
                 break;
+            case 'array_capacity':
+                lines.push(...this.load(instruction.array, 'rax'));
+                lines.push('    mov rax, QWORD PTR [rax+8]', `    mov ${this.temp(instruction.result)}, rax`);
+                break;
             case 'array_load':
                 lines.push(...this.load(instruction.array, 'rdi'));
                 lines.push(...this.load(instruction.index, 'rsi'));
@@ -609,6 +613,13 @@ export class X86_64Backend {
                 lines.push(...this.load(instruction.index, 'rsi'));
                 lines.push(`    mov rdx, ${this.sizeOf(instruction.elementType)}`, '    call valen_array_remove', ...this.normalize('rax', instruction.type));
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
+                break;
+            case 'array_reserve':
+                lines.push(...this.load(instruction.array, 'rdi'), ...this.load(instruction.capacity, 'rsi'),
+                    `    mov rdx, ${this.sizeOf(instruction.elementType)}`, '    call valen_array_reserve');
+                break;
+            case 'array_shrink':
+                lines.push(...this.load(instruction.array, 'rdi'), `    mov rsi, ${this.sizeOf(instruction.elementType)}`, '    call valen_array_shrink_to_fit');
                 break;
             case 'string_length':
                 lines.push(...this.load(instruction.string, 'rax'));
@@ -1392,8 +1403,8 @@ export class X86_64Backend {
             '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    push r13', '    push r14', '    push r15', '    sub rsp, 8',
             '    mov rbx, rdi', '    mov r12, rsi', '    mov r13, rdx', '    mov r14, rcx', '    mov r15, QWORD PTR [rbx]',
             '    cmp r15, QWORD PTR [rbx+8]', '    jb .Larray_insert_shift',
-            '    mov rax, QWORD PTR [rbx+8]', '    shl rax, 1', '    mov QWORD PTR [rbx+8], rax', '    imul rax, r14', '    mov rdi, rax', '    call valen_alloc',
-            '    mov rdi, rax', '    mov rsi, QWORD PTR [rbx+16]', '    mov rcx, r15', '    imul rcx, r14', '    rep movsb', '    mov QWORD PTR [rbx+16], rax',
+            '    mov rsi, QWORD PTR [rbx+8]', '    shl rsi, 1', '    cmp rsi, 4', '    jae .Larray_insert_grow', '    mov esi, 4',
+            '.Larray_insert_grow:', '    mov rdi, rbx', '    mov rdx, r14', '    call valen_array_reserve',
             '.Larray_insert_shift:',
             '    mov rax, r15', '    sub rax, r12', '    imul rax, r14', '    mov rcx, rax',
             '    mov rsi, r12', '    imul rsi, r14', '    add rsi, QWORD PTR [rbx+16]', '    lea rdi, [rsi+r14]',
@@ -2274,6 +2285,32 @@ export class X86_64Backend {
             '    mov edi, 70',
             '    jmp .Lruntime_error',
             '',
+            '.globl valen_array_reserve',
+            'valen_array_reserve:',
+            '    test rsi, rsi',
+            '    js .Larray_bounds_error',
+            '    cmp rsi, QWORD PTR [rdi+8]',
+            '    jbe .Larray_resize_return',
+            '    jmp .Larray_resize',
+            '.globl valen_array_shrink_to_fit',
+            'valen_array_shrink_to_fit:',
+            '    mov rdx, rsi',
+            '    mov rsi, QWORD PTR [rdi]',
+            '    cmp rsi, QWORD PTR [rdi+8]',
+            '    je .Larray_resize_return',
+            '.Larray_resize:',
+            '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    push r13', '    push r14', '    push r15', '    sub rsp, 8',
+            '    mov rbx, rdi', '    mov r12, rsi', '    mov r13, rdx', '    mov r14, QWORD PTR [rbx+16]',
+            '    mov r15, QWORD PTR [rbx+8]', '    imul r15, r13',
+            '    mov rdi, r12', '    imul rdi, r13', '    call valen_alloc',
+            '    mov rdi, rax', '    mov rsi, r14', '    mov rcx, QWORD PTR [rbx]', '    imul rcx, r13', '    rep movsb',
+            '    mov QWORD PTR [rbx+16], rax', '    mov QWORD PTR [rbx+8], r12',
+            '    cmp DWORD PTR [rip+valen_arena_enabled], 0', '    jne .Larray_resize_done',
+            '    test r15, r15', '    jne .Larray_resize_unmap', '    mov r15d, 1',
+            '.Larray_resize_unmap:', '    mov rdi, r14', '    mov rsi, r15', '    mov eax, 11', '    syscall',
+            '.Larray_resize_done:', '    add rsp, 8', '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    pop rbx', '    leave',
+            '.Larray_resize_return:', '    ret',
+            '',
             '.globl valen_array_append',
             'valen_array_append:',
             '    push rbp',
@@ -2288,18 +2325,8 @@ export class X86_64Backend {
             '    mov r14, QWORD PTR [rbx]',
             '    cmp r14, QWORD PTR [rbx+8]',
             '    jb .Larray_append_store',
-            '    mov rax, QWORD PTR [rbx+8]',
-            '    shl rax, 1',
-            '    mov QWORD PTR [rbx+8], rax',
-            '    imul rax, r13',
-            '    mov rdi, rax',
-            '    call valen_alloc',
-            '    mov rdi, rax',
-            '    mov rsi, QWORD PTR [rbx+16]',
-            '    mov rcx, r14',
-            '    imul rcx, r13',
-            '    rep movsb',
-            '    mov QWORD PTR [rbx+16], rax',
+            '    mov rsi, QWORD PTR [rbx+8]', '    shl rsi, 1', '    cmp rsi, 4', '    jae .Larray_append_grow', '    mov esi, 4',
+            '.Larray_append_grow:', '    mov rdi, rbx', '    mov rdx, r13', '    call valen_array_reserve',
             '.Larray_append_store:',
             '    mov rax, r14',
             '    imul rax, r13',
