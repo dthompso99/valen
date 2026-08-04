@@ -144,6 +144,22 @@ test('dynamic arrays support construction, indexing, assignment, length, and app
     assert.doesNotThrow(() => new X86_64Backend().generate(ir));
 });
 
+test('arrays insert, shift, remove, and transfer removed ownership', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/array-insert-remove.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    const instructions = ir.functions.flatMap(fn => fn.blocks.flatMap(block => block.instructions));
+    assert.ok(instructions.some(instruction => instruction.op === 'array_insert' && instruction.elementType === 'i16'));
+    assert.ok(instructions.some(instruction => instruction.op === 'array_remove' && instruction.elementType === 'i16'));
+    assert.ok(instructions.some(instruction => instruction.op === 'array_insert' && instruction.elementOwnership === 'owned'));
+    assert.ok(instructions.some(instruction => instruction.op === 'array_remove' && instruction.elementOwnership === 'owned'));
+    const assembly = new X86_64Backend().generate(ir);
+    assert.match(assembly, /call valen_array_insert/);
+    assert.match(assembly, /call valen_array_remove/);
+    assert.match(assembly, /\.Larray_insert_shift:[\s\S]*\.Larray_insert_move:[\s\S]*jnz \.Larray_insert_move/);
+});
+
 test('array literals infer homogeneous element types and lower allocation plus stores', () => {
     const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/array-literals.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});

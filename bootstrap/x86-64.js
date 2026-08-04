@@ -108,7 +108,9 @@ export class X86_64Backend {
         lines.push(...this.gcArrayTraceFunctions());
 
         if (runtimeSymbols.has('valen_System_print')) lines.push(...this.printI64Runtime());
+        else lines.push(...this.byteConversionRuntime());
         if (this.needsProcessArguments) lines.push(...this.argumentsRuntime());
+        else lines.push(...this.arrayMutationRuntime());
         if (runtimeSymbols.has('valen_System_exit')) lines.push(...this.exitRuntime());
         if (runtimeSymbols.has('valen_System_write')) lines.push(...this.writeRuntime('valen_System_write', 1));
         if (runtimeSymbols.has('valen_System_writeError')) lines.push(...this.writeRuntime('valen_System_writeError', 2));
@@ -587,6 +589,18 @@ export class X86_64Backend {
                 lines.push(...this.load(instruction.array, 'rdi'));
                 lines.push(...this.load(instruction.value, 'rsi'));
                 lines.push(`    mov rdx, ${this.sizeOf(instruction.elementType)}`, '    call valen_array_append');
+                break;
+            case 'array_insert':
+                lines.push(...this.load(instruction.array, 'rdi'));
+                lines.push(...this.load(instruction.index, 'rsi'));
+                lines.push(...this.load(instruction.value, 'rdx'));
+                lines.push(`    mov rcx, ${this.sizeOf(instruction.elementType)}`, '    call valen_array_insert');
+                break;
+            case 'array_remove':
+                lines.push(...this.load(instruction.array, 'rdi'));
+                lines.push(...this.load(instruction.index, 'rsi'));
+                lines.push(`    mov rdx, ${this.sizeOf(instruction.elementType)}`, '    call valen_array_remove', ...this.normalize('rax', instruction.type));
+                lines.push(`    mov ${this.temp(instruction.result)}, rax`);
                 break;
             case 'string_length':
                 lines.push(...this.load(instruction.string, 'rax'));
@@ -1312,6 +1326,11 @@ export class X86_64Backend {
         ];
     }
 
+    byteConversionRuntime() {
+        const lines = this.printI64Runtime();
+        return lines.slice(lines.indexOf('.globl valen_string_to_bytes'));
+    }
+
     argumentsRuntime() {
         return [
             '.globl valen_System_arguments',
@@ -1359,8 +1378,51 @@ export class X86_64Backend {
             '    pop rbx',
             '    leave',
             '    ret',
+            '.globl valen_array_insert',
+            'valen_array_insert:',
+            '    test rsi, rsi', '    js .Larray_bounds_error', '    cmp rsi, QWORD PTR [rdi]', '    ja .Larray_bounds_error',
+            '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    push r13', '    push r14', '    push r15', '    sub rsp, 8',
+            '    mov rbx, rdi', '    mov r12, rsi', '    mov r13, rdx', '    mov r14, rcx', '    mov r15, QWORD PTR [rbx]',
+            '    cmp r15, QWORD PTR [rbx+8]', '    jb .Larray_insert_shift',
+            '    mov rax, QWORD PTR [rbx+8]', '    shl rax, 1', '    mov QWORD PTR [rbx+8], rax', '    imul rax, r14', '    mov rdi, rax', '    call valen_alloc',
+            '    mov rdi, rax', '    mov rsi, QWORD PTR [rbx+16]', '    mov rcx, r15', '    imul rcx, r14', '    rep movsb', '    mov QWORD PTR [rbx+16], rax',
+            '.Larray_insert_shift:',
+            '    mov rax, r15', '    sub rax, r12', '    imul rax, r14', '    mov rcx, rax',
+            '    mov rsi, r12', '    imul rsi, r14', '    add rsi, QWORD PTR [rbx+16]', '    lea rdi, [rsi+r14]',
+            '    test rcx, rcx', '    jz .Larray_insert_store', '    add rsi, rcx', '    add rdi, rcx',
+            '.Larray_insert_move:', '    dec rsi', '    dec rdi', '    mov al, BYTE PTR [rsi]', '    mov BYTE PTR [rdi], al', '    dec rcx', '    jnz .Larray_insert_move',
+            '.Larray_insert_store:',
+            '    mov rax, r12', '    imul rax, r14', '    add rax, QWORD PTR [rbx+16]',
+            '    cmp r14, 1', '    je .Larray_insert_store_1', '    cmp r14, 2', '    je .Larray_insert_store_2', '    cmp r14, 4', '    je .Larray_insert_store_4',
+            '    mov QWORD PTR [rax], r13', '    jmp .Larray_insert_done',
+            '.Larray_insert_store_1:', '    mov BYTE PTR [rax], r13b', '    jmp .Larray_insert_done',
+            '.Larray_insert_store_2:', '    mov WORD PTR [rax], r13w', '    jmp .Larray_insert_done',
+            '.Larray_insert_store_4:', '    mov DWORD PTR [rax], r13d',
+            '.Larray_insert_done:', '    inc r15', '    mov QWORD PTR [rbx], r15',
+            '    add rsp, 8', '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    pop rbx', '    leave', '    ret',
+            '.globl valen_array_remove',
+            'valen_array_remove:',
+            '    test rsi, rsi', '    js .Larray_bounds_error', '    cmp rsi, QWORD PTR [rdi]', '    jae .Larray_bounds_error',
+            '    push rbx', '    push r12', '    push r13', '    mov rbx, rdi', '    mov r12, rsi', '    mov r13, rdx',
+            '    mov rax, r12', '    imul rax, r13', '    add rax, QWORD PTR [rbx+16]',
+            '    cmp r13, 1', '    je .Larray_remove_load_1', '    cmp r13, 2', '    je .Larray_remove_load_2', '    cmp r13, 4', '    je .Larray_remove_load_4',
+            '    mov r12, QWORD PTR [rax]', '    jmp .Larray_remove_shift',
+            '.Larray_remove_load_1:', '    movzx r12d, BYTE PTR [rax]', '    jmp .Larray_remove_shift',
+            '.Larray_remove_load_2:', '    movzx r12d, WORD PTR [rax]', '    jmp .Larray_remove_shift',
+            '.Larray_remove_load_4:', '    mov r12d, DWORD PTR [rax]',
+            '.Larray_remove_shift:',
+            '    mov rcx, QWORD PTR [rbx]', '    dec rcx', '    sub rcx, rsi', '    imul rcx, r13',
+            '    mov rdi, rax', '    lea rsi, [rax+r13]', '    rep movsb',
+            '    dec QWORD PTR [rbx]', '    mov rdi, QWORD PTR [rbx]', '    imul rdi, r13', '    add rdi, QWORD PTR [rbx+16]', '    mov rcx, r13',
+            '.Larray_remove_clear:', '    mov BYTE PTR [rdi], 0', '    inc rdi', '    dec rcx', '    jnz .Larray_remove_clear',
+            '    mov rax, r12', '    pop r13', '    pop r12', '    pop rbx', '    ret',
             ''
         ];
+    }
+
+    arrayMutationRuntime() {
+        const lines = this.argumentsRuntime();
+        return lines.slice(lines.indexOf('.globl valen_array_insert'));
     }
 
     environmentVariableRuntime() {

@@ -655,6 +655,23 @@ library X86_64 {{
                 self.writer.line("    call valen_array_append")
                 return
             }
+            if op == "array_insert" {
+                self.load(instruction.first!, "rdi")
+                self.load(instruction.arguments[0], "rsi")
+                self.load(instruction.second!, "rdx")
+                self.writer.line("    mov rcx, " + self.sizeOf(instruction.elementType!).toString())
+                self.writer.line("    call valen_array_insert")
+                return
+            }
+            if op == "array_remove" {
+                self.load(instruction.first!, "rdi")
+                self.load(instruction.second!, "rsi")
+                self.writer.line("    mov rdx, " + self.sizeOf(instruction.elementType!).toString())
+                self.writer.line("    call valen_array_remove")
+                self.normalize("rax", instruction.typeName!)
+                self.storeResult(instruction, "rax")
+                return
+            }
             if op == "string_length" || op == "builder_length" {
                 self.load(instruction.first!, "rax")
                 if op == "string_length" { self.writer.line("    mov rax, QWORD PTR [rax+8]") } else { self.writer.line("    mov rax, QWORD PTR [rax]") }
@@ -1447,6 +1464,24 @@ library X86_64 {{
             self.writer.line("    pop rbx")
             self.writer.line("    leave")
             self.writer.line("    ret")
+            self.writer.line(".globl valen_array_insert"); self.writer.line("valen_array_insert:")
+            self.writer.line("    test rsi, rsi"); self.writer.line("    js .Larray_bounds_error"); self.writer.line("    cmp rsi, QWORD PTR [rdi]"); self.writer.line("    ja .Larray_bounds_error")
+            self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15"); self.writer.line("    sub rsp, 8")
+            self.writer.line("    mov rbx, rdi"); self.writer.line("    mov r12, rsi"); self.writer.line("    mov r13, rdx"); self.writer.line("    mov r14, rcx"); self.writer.line("    mov r15, QWORD PTR [rbx]")
+            self.writer.line("    cmp r15, QWORD PTR [rbx+8]"); self.writer.line("    jb .Larray_insert_shift"); self.writer.line("    mov rax, QWORD PTR [rbx+8]"); self.writer.line("    shl rax, 1"); self.writer.line("    mov QWORD PTR [rbx+8], rax"); self.writer.line("    imul rax, r14"); self.writer.line("    mov rdi, rax"); self.writer.line("    call valen_alloc")
+            self.writer.line("    mov rdi, rax"); self.writer.line("    mov rsi, QWORD PTR [rbx+16]"); self.writer.line("    mov rcx, r15"); self.writer.line("    imul rcx, r14"); self.writer.line("    rep movsb"); self.writer.line("    mov QWORD PTR [rbx+16], rax")
+            self.writer.line(".Larray_insert_shift:"); self.writer.line("    mov rax, r15"); self.writer.line("    sub rax, r12"); self.writer.line("    imul rax, r14"); self.writer.line("    mov rcx, rax"); self.writer.line("    mov rsi, r12"); self.writer.line("    imul rsi, r14"); self.writer.line("    add rsi, QWORD PTR [rbx+16]"); self.writer.line("    lea rdi, [rsi+r14]")
+            self.writer.line("    test rcx, rcx"); self.writer.line("    jz .Larray_insert_store"); self.writer.line("    add rsi, rcx"); self.writer.line("    add rdi, rcx")
+            self.writer.line(".Larray_insert_move:"); self.writer.line("    dec rsi"); self.writer.line("    dec rdi"); self.writer.line("    mov al, BYTE PTR [rsi]"); self.writer.line("    mov BYTE PTR [rdi], al"); self.writer.line("    dec rcx"); self.writer.line("    jnz .Larray_insert_move")
+            self.writer.line(".Larray_insert_store:"); self.writer.line("    mov rax, r12"); self.writer.line("    imul rax, r14"); self.writer.line("    add rax, QWORD PTR [rbx+16]"); self.writer.line("    cmp r14, 1"); self.writer.line("    je .Larray_insert_store_1"); self.writer.line("    cmp r14, 2"); self.writer.line("    je .Larray_insert_store_2"); self.writer.line("    cmp r14, 4"); self.writer.line("    je .Larray_insert_store_4"); self.writer.line("    mov QWORD PTR [rax], r13"); self.writer.line("    jmp .Larray_insert_done")
+            self.writer.line(".Larray_insert_store_1:"); self.writer.line("    mov BYTE PTR [rax], r13b"); self.writer.line("    jmp .Larray_insert_done"); self.writer.line(".Larray_insert_store_2:"); self.writer.line("    mov WORD PTR [rax], r13w"); self.writer.line("    jmp .Larray_insert_done"); self.writer.line(".Larray_insert_store_4:"); self.writer.line("    mov DWORD PTR [rax], r13d")
+            self.writer.line(".Larray_insert_done:"); self.writer.line("    inc r15"); self.writer.line("    mov QWORD PTR [rbx], r15"); self.writer.line("    add rsp, 8"); self.writer.line("    pop r15"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    leave"); self.writer.line("    ret")
+            self.writer.line(".globl valen_array_remove"); self.writer.line("valen_array_remove:"); self.writer.line("    test rsi, rsi"); self.writer.line("    js .Larray_bounds_error"); self.writer.line("    cmp rsi, QWORD PTR [rdi]"); self.writer.line("    jae .Larray_bounds_error")
+            self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    mov rbx, rdi"); self.writer.line("    mov r12, rsi"); self.writer.line("    mov r13, rdx"); self.writer.line("    mov rax, r12"); self.writer.line("    imul rax, r13"); self.writer.line("    add rax, QWORD PTR [rbx+16]")
+            self.writer.line("    cmp r13, 1"); self.writer.line("    je .Larray_remove_load_1"); self.writer.line("    cmp r13, 2"); self.writer.line("    je .Larray_remove_load_2"); self.writer.line("    cmp r13, 4"); self.writer.line("    je .Larray_remove_load_4"); self.writer.line("    mov r12, QWORD PTR [rax]"); self.writer.line("    jmp .Larray_remove_shift")
+            self.writer.line(".Larray_remove_load_1:"); self.writer.line("    movzx r12d, BYTE PTR [rax]"); self.writer.line("    jmp .Larray_remove_shift"); self.writer.line(".Larray_remove_load_2:"); self.writer.line("    movzx r12d, WORD PTR [rax]"); self.writer.line("    jmp .Larray_remove_shift"); self.writer.line(".Larray_remove_load_4:"); self.writer.line("    mov r12d, DWORD PTR [rax]")
+            self.writer.line(".Larray_remove_shift:"); self.writer.line("    mov rcx, QWORD PTR [rbx]"); self.writer.line("    dec rcx"); self.writer.line("    sub rcx, rsi"); self.writer.line("    imul rcx, r13"); self.writer.line("    mov rdi, rax"); self.writer.line("    lea rsi, [rax+r13]"); self.writer.line("    rep movsb"); self.writer.line("    dec QWORD PTR [rbx]"); self.writer.line("    mov rdi, QWORD PTR [rbx]"); self.writer.line("    imul rdi, r13"); self.writer.line("    add rdi, QWORD PTR [rbx+16]"); self.writer.line("    mov rcx, r13")
+            self.writer.line(".Larray_remove_clear:"); self.writer.line("    mov BYTE PTR [rdi], 0"); self.writer.line("    inc rdi"); self.writer.line("    dec rcx"); self.writer.line("    jnz .Larray_remove_clear"); self.writer.line("    mov rax, r12"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    ret")
             self.writer.line("")
         }
 

@@ -1,0 +1,6 @@
+entry {{
+    __() -> void {
+        local values = new Array<i64>(0)
+        values.remove(0)
+    }
+}}

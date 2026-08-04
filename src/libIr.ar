@@ -1146,14 +1146,17 @@ library Ir {{
                 hashed.ownerType = receiverType
                 return hashed.result!
             }
-            if (name == "append" || name == "appendByte" || name == "appendBytes") && (receiverType == "StringBuilder" || self.isArray(receiverType)) {
+            if (name == "append" || name == "appendByte" || name == "appendBytes" || name == "insert") && (receiverType == "StringBuilder" || self.isArray(receiverType)) {
                 local op = "array_append"
+                if name == "insert" { op = "array_insert" }
                 if receiverType == "StringBuilder" {
                     if name == "appendByte" { op = "builder_append_byte" } else { if name == "appendBytes" { op = "builder_append_bytes" } else { op = "builder_append_string" } }
                 }
                 local instruction = new Instruction(op)
                 instruction.first = self.lowerExpression(callee.left!)
-                local appended = self.lowerExpression(expression.arguments[0])
+                local valueIndex:i64 = 0
+                if op == "array_insert" { instruction.arguments.append(self.lowerExpression(expression.arguments[0])); valueIndex = 1 }
+                local appended = self.lowerExpression(expression.arguments[valueIndex])
                 if op == "builder_append_string" {
                     if appended.typeName != "string" {
                         local conversion = self.temporary("integer_to_string", "string")
@@ -1164,10 +1167,20 @@ library Ir {{
                 instruction.second = appended
                 instruction.elementType = self.arrayElementType(receiverType)
                 instruction.elementOwnership = self.arrayElementOwnership(receiverType)
-                if op == "array_append" { instruction.second = self.boxOptional(appended, instruction.elementType!) }
-                if expression.arguments[0].ownership == "consume" { self.consumeLifetime(expression.arguments[0]) }
+                if op == "array_append" || op == "array_insert" { instruction.second = self.boxOptional(appended, instruction.elementType!) }
+                if expression.arguments[valueIndex].ownership == "consume" { self.consumeLifetime(expression.arguments[valueIndex]) }
                 self.emit(instruction)
                 return new Value("void", "", "void")
+            }
+            if name == "remove" && self.isArray(receiverType) {
+                local array = self.lowerExpression(callee.left!)
+                local index = self.lowerExpression(expression.arguments[0])
+                local instruction = self.temporary("array_remove", expression.inferredType!)
+                instruction.first = array
+                instruction.second = index
+                instruction.elementType = self.arrayElementType(receiverType)
+                instruction.elementOwnership = self.arrayElementOwnership(receiverType)
+                return instruction.result!
             }
             if (name == "slice" && receiverType == "string") || (name == "toString" && self.isInteger(receiverType)) || (name == "build" && receiverType == "StringBuilder") || (name == "toBytes" && receiverType == "string") || (name == "toString" && receiverType == "Array<u8>") {
                 local op = "string_slice"

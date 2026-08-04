@@ -71,7 +71,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 ## 5. Collections and strings
 
 - [x] Add array literals
-- [ ] Add array removal and insertion
+- [x] Add array removal and insertion
 - [ ] Add explicit capacity reservation and shrinking
 - [ ] Add array slices/views and multidimensional conveniences
 - [ ] Add Unicode code-point and grapheme-aware string operations

@@ -1,0 +1,27 @@
+Item {{
+    member value:i64
+    __(value:i64) -> void { self.value = value }
+}}
+
+entry {{
+    __() -> i64 {
+        local values = new Array<i16>(0)
+        values.insert(0, 20)
+        values.insert(0, -10)
+        values.insert(1, 5)
+        values.insert(values.length, 30)
+        if values.length != 4 { return 1 }
+        if values[0] != -10 || values[1] != 5 || values[2] != 20 || values[3] != 30 { return 2 }
+        if values.remove(1) != 5 { return 3 }
+        if values.remove(values.length - 1) != 30 { return 4 }
+        if values.length != 2 || values[0] != -10 || values[1] != 20 { return 5 }
+
+        local items = new Array<Item>(0)
+        items.append(new Item(2))
+        items.insert(0, new Item(1))
+        local removed = items.remove(0)
+        if removed.value != 1 || items.length != 1 || items[0].value != 2 { return 6 }
+        delete removed
+        return 0
+    }
+}}

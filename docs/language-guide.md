@@ -146,13 +146,15 @@ Arrays and strings support `for` iteration:
 local values = new Array<i64>(0)
 values.append(4)
 values.append(8)
+values.insert(1, 6)
+local removed = values.remove(0)
 
 for value in values {
     total = total + value
 }
 ```
 
-`else if` shorthand, expression-valued conditionals, slices, insertion/removal, and exhaustive matching are **WIP**.
+`else if` shorthand, expression-valued conditionals, slices, and exhaustive matching are **WIP**.
 
 ## Arrays, strings, and generic objects
 
@@ -168,6 +170,11 @@ local count = names.length
 Non-empty literals infer a homogeneous element type. Numeric elements use the ordinary lossless
 promotion rules, nested literals are supported, and reference elements transfer ownership into the
 new array. Empty literals do not guess their element type; use `new Array<T>(0)`.
+
+`insert(index, value)` accepts positions from zero through `length`; inserting at `length` appends.
+`remove(index)` requires an existing element and returns it after shifting the remaining tail. Owned
+reference insertion transfers ownership into the array, while removal transfers ownership back to
+the caller. `ref` and `weak` arrays remain non-owning.
 
 Generic objects are monomorphized:
 

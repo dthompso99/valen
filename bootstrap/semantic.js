@@ -913,6 +913,10 @@ export class SemanticAnalyzer {
                         type = I64;
                     } else if (expression.member === 'append') {
                         symbol = {kind: 'ArrayAppend', name: 'append', type: UNKNOWN, elementType, elementOwnership};
+                    } else if (expression.member === 'insert') {
+                        symbol = {kind: 'ArrayInsert', name: 'insert', type: VOID, elementType, elementOwnership};
+                    } else if (expression.member === 'remove') {
+                        symbol = {kind: 'ArrayRemove', name: 'remove', type: elementType, elementType, elementOwnership};
                     } else if (expression.member === 'toString' && ownerType === 'Array<u8>') {
                         symbol = {kind: 'BytesToString', name: 'toString', type: STRING};
                     } else if (expression.member === 'hash') {
@@ -1263,6 +1267,23 @@ export class SemanticAnalyzer {
                         }
                     }
                     type = VOID;
+                } else if (callee?.kind === 'ArrayInsert') {
+                    if (argumentTypes.length !== 2) {
+                        this.report(expression.span, `Array.insert expects 2 arguments, got ${argumentTypes.length}`);
+                    } else {
+                        this.requireAssignable(argumentTypes[0], I64, expression.arguments[0].span, expression.arguments[0]);
+                        this.requireAssignable(argumentTypes[1], callee.elementType, expression.arguments[1].span, expression.arguments[1]);
+                        if (callee.elementOwnership === 'owned' && this.isOwnedReferenceType(callee.elementType)) {
+                            this.consumeArrayElement(expression.arguments[1]);
+                        }
+                    }
+                    type = VOID;
+                } else if (callee?.kind === 'ArrayRemove') {
+                    if (argumentTypes.length !== 1) {
+                        this.report(expression.span, `Array.remove expects 1 argument, got ${argumentTypes.length}`);
+                    } else this.requireAssignable(argumentTypes[0], I64, expression.arguments[0].span, expression.arguments[0]);
+                    expression.elementOwnership = callee.elementOwnership;
+                    type = callee.elementType;
                 } else if (callee?.kind === 'StringSlice') {
                     if (argumentTypes.length !== 2) {
                         this.report(expression.span, `String.slice expects 2 arguments, got ${argumentTypes.length}`);
@@ -1536,6 +1557,7 @@ export class SemanticAnalyzer {
     isOwningExpression(expression) {
         return expression?.kind === 'NewExpression' || expression?.kind === 'ArrayLiteral' || expression?.kind === 'StringLiteral' ||
             expression?.kind === 'UnaryExpression' && expression.operator === 'copy' ||
+            expression?.kind === 'CallExpression' && expression.callee?.semanticSymbol?.kind === 'ArrayRemove' && expression.elementOwnership === 'owned' ||
             expression?.kind === 'CallExpression' && expression.callee?.semanticSymbol?.returnOwnership === 'owned';
     }
 

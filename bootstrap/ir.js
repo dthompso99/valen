@@ -651,6 +651,15 @@ export class IrGenerator {
             this.emit('array_append', {array, value: this.boxOptional(args[0], method.elementType), elementType: method.elementType, elementOwnership: method.elementOwnership});
             return {kind: 'void', type: 'void'};
         }
+        if (method.kind === 'ArrayInsert') {
+            const array = this.lowerExpression(expression.callee.object);
+            this.emit('array_insert', {array, index: args[0], value: this.boxOptional(args[1], method.elementType), elementType: method.elementType, elementOwnership: method.elementOwnership});
+            return {kind: 'void', type: 'void'};
+        }
+        if (method.kind === 'ArrayRemove') {
+            const array = this.lowerExpression(expression.callee.object);
+            return this.result('array_remove', method.elementType, {array, index: args[0], elementType: method.elementType, elementOwnership: method.elementOwnership});
+        }
         if (method.kind === 'StringSlice') {
             const string = this.lowerExpression(expression.callee.object);
             return this.result('string_slice', 'string', {

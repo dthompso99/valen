@@ -1268,6 +1268,20 @@ library Semantics {{
                         }
                         return self.typed(expression, "void")
                     }
+                    if expression.left!.name! == "insert" && self.isArray(receiverType) {
+                        if expression.arguments.length != 2 { self.error(expression.span, "Array.insert expects 2 arguments") } else {
+                            self.requireCompatible("i64", argumentTypes[0], expression.arguments[0].span)
+                            local elementType = self.arrayElementType(receiverType)
+                            self.requireCompatible(elementType, argumentTypes[1], expression.arguments[1].span)
+                            if self.arrayElementOwnership(receiverType) == "owned" && self.isOwnedReference(elementType) { self.consumeArrayElement(expression.arguments[1]) }
+                        }
+                        return self.typed(expression, "void")
+                    }
+                    if expression.left!.name! == "remove" && self.isArray(receiverType) {
+                        if expression.arguments.length != 1 { self.error(expression.span, "Array.remove expects 1 argument") } else { self.requireCompatible("i64", argumentTypes[0], expression.arguments[0].span) }
+                        expression.text = self.arrayElementOwnership(receiverType)
+                        return self.typed(expression, self.arrayElementType(receiverType))
+                    }
                     if expression.left!.name! == "toBytes" && receiverType == "string" {
                         if expression.arguments.length != 0 { self.error(expression.span, "String.toBytes expects no arguments") }
                         return self.typed(expression, "Array<u8>")
@@ -1652,6 +1666,8 @@ library Semantics {{
                 if ownerType == "string" || self.isArray(ownerType) || ownerType == "StringBuilder" { return self.typed(expression, "i64") }
             }
             if name == "append" { return self.typed(expression, "void") }
+            if name == "insert" && self.isArray(ownerType) { return self.typed(expression, "void") }
+            if name == "remove" && self.isArray(ownerType) { return self.typed(expression, self.arrayElementType(ownerType)) }
             if name == "appendByte" { return self.typed(expression, "void") }
             if name == "appendBytes" && ownerType == "StringBuilder" { return self.typed(expression, "void") }
             if name == "build" { return self.typed(expression, "string") }
@@ -1984,6 +2000,7 @@ library Semantics {{
             if expression!.kind == "String" { return true }
             if expression!.kind == "Unary" { return expression!.operator! == "copy" }
             if expression!.kind == "Call" {
+                if expression!.text != null { if expression!.text! == "owned" { return true } }
                 if expression!.left == null || expression!.left!.symbol == null { return false }
                 return expression!.left!.symbol!.returnOwnership == "owned"
             }

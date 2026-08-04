@@ -18,6 +18,7 @@ export const validPrograms = [
     {name: 'default arguments', source: 'bootstrap/test/fixtures/default-arguments.ar'},
     {name: 'collection ownership', source: 'bootstrap/test/fixtures/collection-ownership.ar'},
     {name: 'array literals', source: 'bootstrap/test/fixtures/array-literals.ar'},
+    {name: 'array insertion and removal', source: 'bootstrap/test/fixtures/array-insert-remove.ar'},
     {name: 'garbage collection', source: 'bootstrap/test/fixtures/garbage-collection.ar'},
     {name: 'repeated garbage collection', source: 'bootstrap/test/fixtures/garbage-collection-repeated.ar'},
     {name: 'optional diagnostics', source: 'bootstrap/test/fixtures/diagnostics.ar'},
@@ -35,6 +36,7 @@ export const validPrograms = [
 ];
 
 export const expectedFailures = [
+    {name: 'array removal bounds status', source: 'bootstrap/test/fixtures/array-remove-bounds.ar', status: 70, stderr: /^$/},
     {name: 'native test failure status', source: 'bootstrap/test/fixtures/native-tests-failing.ar', status: 1, stderr: /test failed/},
     {name: 'invalid float conversion status', source: 'bootstrap/test/fixtures/float-conversion-failing.ar', status: 76, stderr: /^$/}
 ];

@@ -10,7 +10,7 @@
 - public-by-default and private members
 - overloads and trailing default arguments
 - fixed-width integers and IEEE `f32`/`f64`
-- arrays, invariant generic objects with contract constraints, byte-oriented strings, bulk byte/string conversion, and builders
+- dynamic arrays with insertion/removal, invariant generic objects with contract constraints, byte-oriented strings, bulk byte/string conversion, and builders
 - optionals for references and primitives, with flow-sensitive narrowing and propagation
 - ownership transfer, borrowed/weak references, `copy`, and `delete`
 - tracing garbage collection and cycle-safe equality/hashing
