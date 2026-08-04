@@ -702,6 +702,18 @@ library X86_64 {{
                 self.storeResult(instruction, "rax")
                 return
             }
+            if op == "string_to_bytes" {
+                self.load(instruction.first!, "rdi")
+                self.writer.line("    call valen_string_to_bytes")
+                self.storeResult(instruction, "rax")
+                return
+            }
+            if op == "bytes_to_string" {
+                self.load(instruction.first!, "rdi")
+                self.writer.line("    call valen_bytes_to_string")
+                self.storeResult(instruction, "rax")
+                return
+            }
             if op == "integer_to_string" {
                 self.load(instruction.first!, "rdi")
                 if self.isUnsigned(instruction.first!.typeName) { self.writer.line("    xor esi, esi") } else { self.writer.line("    mov esi, 1") }
@@ -720,6 +732,12 @@ library X86_64 {{
                 self.load(instruction.first!, "rdi")
                 self.load(instruction.second!, "rsi")
                 self.writer.line("    call valen_builder_append_string")
+                return
+            }
+            if op == "builder_append_bytes" {
+                self.load(instruction.first!, "rdi")
+                self.load(instruction.second!, "rsi")
+                self.writer.line("    call valen_builder_append_bytes")
                 return
             }
             if op == "builder_append_byte" {
@@ -1352,6 +1370,18 @@ library X86_64 {{
             self.writer.line("    pop rbx")
             self.writer.line("    leave")
             self.writer.line("    ret")
+            self.writer.line(".globl valen_string_to_bytes")
+            self.writer.line("valen_string_to_bytes:")
+            self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    mov r12, rdi")
+            self.writer.line("    mov edi, 1"); self.writer.line("    mov rsi, QWORD PTR [r12+8]"); self.writer.line("    call valen_array_new"); self.writer.line("    mov rbx, rax")
+            self.writer.line("    mov rdi, QWORD PTR [rbx+16]"); self.writer.line("    mov rsi, QWORD PTR [r12]"); self.writer.line("    mov rcx, QWORD PTR [r12+8]"); self.writer.line("    rep movsb")
+            self.writer.line("    mov rax, rbx"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    leave"); self.writer.line("    ret")
+            self.writer.line(".globl valen_bytes_to_string")
+            self.writer.line("valen_bytes_to_string:")
+            self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    mov r12, rdi")
+            self.writer.line("    mov rdi, QWORD PTR [r12]"); self.writer.line("    call valen_string_new"); self.writer.line("    mov rbx, rax")
+            self.writer.line("    mov rdi, QWORD PTR [rbx]"); self.writer.line("    mov rsi, QWORD PTR [r12+16]"); self.writer.line("    mov rcx, QWORD PTR [r12]"); self.writer.line("    rep movsb")
+            self.writer.line("    mov rax, rbx"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    leave"); self.writer.line("    ret")
             self.writer.line("")
             self.writer.line(".globl valen_array_address")
             self.writer.line("valen_array_address:")
@@ -1569,33 +1599,18 @@ library X86_64 {{
             self.writer.line("")
             self.writer.line(".globl valen_builder_append_string")
             self.writer.line("valen_builder_append_string:")
-            self.writer.line("    push rbp")
-            self.writer.line("    mov rbp, rsp")
-            self.writer.line("    push rbx")
-            self.writer.line("    push r12")
-            self.writer.line("    push r13")
-            self.writer.line("    push r14")
-            self.writer.line("    mov rbx, rdi")
-            self.writer.line("    mov r12, rsi")
-            self.writer.line("    xor r13d, r13d")
-            self.writer.line("    mov r14, QWORD PTR [r12+8]")
-            self.writer.line(".Lbuilder_append_next:")
-            self.writer.line("    cmp r13, r14")
-            self.writer.line("    jae .Lbuilder_append_done")
-            self.writer.line("    mov rsi, QWORD PTR [r12]")
-            self.writer.line("    movzx esi, BYTE PTR [rsi+r13]")
-            self.writer.line("    mov rdi, rbx")
-            self.writer.line("    mov edx, 1")
-            self.writer.line("    call valen_array_append")
-            self.writer.line("    inc r13")
-            self.writer.line("    jmp .Lbuilder_append_next")
-            self.writer.line(".Lbuilder_append_done:")
-            self.writer.line("    pop r14")
-            self.writer.line("    pop r13")
-            self.writer.line("    pop r12")
-            self.writer.line("    pop rbx")
-            self.writer.line("    leave")
-            self.writer.line("    ret")
+            self.writer.line("    mov rdx, QWORD PTR [rsi+8]"); self.writer.line("    mov rsi, QWORD PTR [rsi]"); self.writer.line("    jmp valen_builder_append_raw")
+            self.writer.line(".globl valen_builder_append_bytes"); self.writer.line("valen_builder_append_bytes:")
+            self.writer.line("    mov rdx, QWORD PTR [rsi]"); self.writer.line("    mov rsi, QWORD PTR [rsi+16]"); self.writer.line("    jmp valen_builder_append_raw")
+            self.writer.line("valen_builder_append_raw:")
+            self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15"); self.writer.line("    sub rsp, 8")
+            self.writer.line("    mov rbx, rdi"); self.writer.line("    mov r12, rsi"); self.writer.line("    mov r13, rdx"); self.writer.line("    mov r14, QWORD PTR [rbx]"); self.writer.line("    lea r15, [r14+r13]")
+            self.writer.line("    cmp r15, QWORD PTR [rbx+8]"); self.writer.line("    jbe .Lbuilder_bulk_copy"); self.writer.line("    mov rax, QWORD PTR [rbx+8]")
+            self.writer.line(".Lbuilder_bulk_grow:"); self.writer.line("    shl rax, 1"); self.writer.line("    cmp rax, r15"); self.writer.line("    jb .Lbuilder_bulk_grow")
+            self.writer.line("    mov QWORD PTR [rbx+8], rax"); self.writer.line("    mov rdi, rax"); self.writer.line("    call valen_alloc")
+            self.writer.line("    mov rdi, rax"); self.writer.line("    mov rsi, QWORD PTR [rbx+16]"); self.writer.line("    mov rcx, r14"); self.writer.line("    rep movsb"); self.writer.line("    mov QWORD PTR [rbx+16], rax")
+            self.writer.line(".Lbuilder_bulk_copy:"); self.writer.line("    mov rdi, QWORD PTR [rbx+16]"); self.writer.line("    add rdi, r14"); self.writer.line("    mov rsi, r12"); self.writer.line("    mov rcx, r13"); self.writer.line("    rep movsb"); self.writer.line("    mov QWORD PTR [rbx], r15")
+            self.writer.line("    add rsp, 8"); self.writer.line("    pop r15"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    leave"); self.writer.line("    ret")
             self.writer.line("")
             self.writer.line(".globl valen_builder_build")
             self.writer.line("valen_builder_build:")

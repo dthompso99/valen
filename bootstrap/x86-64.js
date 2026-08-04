@@ -628,6 +628,12 @@ export class X86_64Backend {
                 lines.push(...this.load(instruction.length, 'rdx'));
                 lines.push('    call valen_string_slice', `    mov ${this.temp(instruction.result)}, rax`);
                 break;
+            case 'string_to_bytes':
+                lines.push(...this.load(instruction.value, 'rdi'), '    call valen_string_to_bytes', `    mov ${this.temp(instruction.result)}, rax`);
+                break;
+            case 'bytes_to_string':
+                lines.push(...this.load(instruction.value, 'rdi'), '    call valen_bytes_to_string', `    mov ${this.temp(instruction.result)}, rax`);
+                break;
             case 'integer_to_string':
                 lines.push(...this.load(instruction.value, 'rdi'));
                 lines.push(`    mov esi, ${this.isUnsigned(instruction.integerType) ? 0 : 1}`);
@@ -644,6 +650,10 @@ export class X86_64Backend {
             case 'builder_append_string':
                 lines.push(...this.load(instruction.builder, 'rdi'), ...this.load(instruction.value, 'rsi'));
                 lines.push('    call valen_builder_append_string');
+                break;
+            case 'builder_append_bytes':
+                lines.push(...this.load(instruction.builder, 'rdi'), ...this.load(instruction.value, 'rsi'));
+                lines.push('    call valen_builder_append_bytes');
                 break;
             case 'builder_append_byte':
                 lines.push(...this.load(instruction.builder, 'rdi'), ...this.load(instruction.value, 'rsi'));
@@ -1286,6 +1296,18 @@ export class X86_64Backend {
             '    syscall',
             '    leave',
             '    ret',
+            '.globl valen_string_to_bytes',
+            'valen_string_to_bytes:',
+            '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    mov r12, rdi',
+            '    mov edi, 1', '    mov rsi, QWORD PTR [r12+8]', '    call valen_array_new', '    mov rbx, rax',
+            '    mov rdi, QWORD PTR [rbx+16]', '    mov rsi, QWORD PTR [r12]', '    mov rcx, QWORD PTR [r12+8]', '    rep movsb',
+            '    mov rax, rbx', '    pop r12', '    pop rbx', '    leave', '    ret',
+            '.globl valen_bytes_to_string',
+            'valen_bytes_to_string:',
+            '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    mov r12, rdi',
+            '    mov rdi, QWORD PTR [r12]', '    call valen_string_new', '    mov rbx, rax',
+            '    mov rdi, QWORD PTR [rbx]', '    mov rsi, QWORD PTR [r12+16]', '    mov rcx, QWORD PTR [r12]', '    rep movsb',
+            '    mov rax, rbx', '    pop r12', '    pop rbx', '    leave', '    ret',
             ''
         ];
     }
@@ -2385,32 +2407,25 @@ export class X86_64Backend {
             '',
             '.globl valen_builder_append_string',
             'valen_builder_append_string:',
-            '    push rbp',
-            '    mov rbp, rsp',
-            '    push rbx',
-            '    push r12',
-            '    push r13',
-            '    sub rsp, 8',
-            '    mov rbx, rdi',
-            '    mov r12, rsi',
-            '    xor r13d, r13d',
-            '.Lbuilder_append_loop:',
-            '    cmp r13, QWORD PTR [r12+8]',
-            '    jae .Lbuilder_append_done',
-            '    mov rax, QWORD PTR [r12]',
-            '    movzx esi, BYTE PTR [rax+r13]',
-            '    mov rdi, rbx',
-            '    mov edx, 1',
-            '    call valen_array_append',
-            '    inc r13',
-            '    jmp .Lbuilder_append_loop',
-            '.Lbuilder_append_done:',
-            '    add rsp, 8',
-            '    pop r13',
-            '    pop r12',
-            '    pop rbx',
-            '    leave',
-            '    ret',
+            '    mov rdx, QWORD PTR [rsi+8]',
+            '    mov rsi, QWORD PTR [rsi]',
+            '    jmp valen_builder_append_raw',
+            '.globl valen_builder_append_bytes',
+            'valen_builder_append_bytes:',
+            '    mov rdx, QWORD PTR [rsi]',
+            '    mov rsi, QWORD PTR [rsi+16]',
+            '    jmp valen_builder_append_raw',
+            'valen_builder_append_raw:',
+            '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    push r13', '    push r14', '    push r15', '    sub rsp, 8',
+            '    mov rbx, rdi', '    mov r12, rsi', '    mov r13, rdx', '    mov r14, QWORD PTR [rbx]', '    lea r15, [r14+r13]',
+            '    cmp r15, QWORD PTR [rbx+8]', '    jbe .Lbuilder_bulk_copy',
+            '    mov rax, QWORD PTR [rbx+8]',
+            '.Lbuilder_bulk_grow:', '    shl rax, 1', '    cmp rax, r15', '    jb .Lbuilder_bulk_grow',
+            '    mov QWORD PTR [rbx+8], rax', '    mov rdi, rax', '    call valen_alloc',
+            '    mov rdi, rax', '    mov rsi, QWORD PTR [rbx+16]', '    mov rcx, r14', '    rep movsb', '    mov QWORD PTR [rbx+16], rax',
+            '.Lbuilder_bulk_copy:',
+            '    mov rdi, QWORD PTR [rbx+16]', '    add rdi, r14', '    mov rsi, r12', '    mov rcx, r13', '    rep movsb', '    mov QWORD PTR [rbx], r15',
+            '    add rsp, 8', '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    pop rbx', '    leave', '    ret',
             '',
             '.globl valen_builder_build',
             'valen_builder_build:',

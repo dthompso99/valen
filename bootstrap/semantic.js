@@ -882,6 +882,8 @@ export class SemanticAnalyzer {
                         type = I64;
                     } else if (expression.member === 'slice') {
                         symbol = {kind: 'StringSlice', name: 'slice', type: STRING};
+                    } else if (expression.member === 'toBytes') {
+                        symbol = {kind: 'StringToBytes', name: 'toBytes', type: 'Array<u8>'};
                     } else if (expression.member === 'hash') {
                         symbol = {kind: 'StructuralHash', name: 'hash', type: I64, valueType: STRING};
                         type = STRING;
@@ -895,6 +897,7 @@ export class SemanticAnalyzer {
                         length: {kind: 'StringBuilderLength', name: 'length', type: I64},
                         append: {kind: 'StringBuilderAppend', name: 'append', type: VOID},
                         appendByte: {kind: 'StringBuilderAppendByte', name: 'appendByte', type: VOID},
+                        appendBytes: {kind: 'StringBuilderAppendBytes', name: 'appendBytes', type: VOID},
                         build: {kind: 'StringBuilderBuild', name: 'build', type: STRING}
                     };
                     symbol = builderMembers[expression.member] ?? null;
@@ -910,6 +913,8 @@ export class SemanticAnalyzer {
                         type = I64;
                     } else if (expression.member === 'append') {
                         symbol = {kind: 'ArrayAppend', name: 'append', type: UNKNOWN, elementType, elementOwnership};
+                    } else if (expression.member === 'toString' && ownerType === 'Array<u8>') {
+                        symbol = {kind: 'BytesToString', name: 'toString', type: STRING};
                     } else if (expression.member === 'hash') {
                         symbol = {kind: 'StructuralHash', name: 'hash', type: I64, valueType: ownerType};
                     } else {
@@ -1267,6 +1272,12 @@ export class SemanticAnalyzer {
                         }
                     }
                     type = STRING;
+                } else if (callee?.kind === 'StringToBytes') {
+                    if (argumentTypes.length !== 0) this.report(expression.span, 'String.toBytes expects no arguments');
+                    type = 'Array<u8>';
+                } else if (callee?.kind === 'BytesToString') {
+                    if (argumentTypes.length !== 0) this.report(expression.span, 'Array<u8>.toString expects no arguments');
+                    type = STRING;
                 } else if (callee?.kind === 'IntegerToString') {
                     if (argumentTypes.length !== 0) this.report(expression.span, 'Integer.toString expects no arguments');
                     type = STRING;
@@ -1281,6 +1292,11 @@ export class SemanticAnalyzer {
                     if (argumentTypes.length !== 1) {
                         this.report(expression.span, `StringBuilder.appendByte expects 1 argument, got ${argumentTypes.length}`);
                     } else this.requireAssignable(argumentTypes[0], 'u8', expression.arguments[0].span, expression.arguments[0]);
+                    type = VOID;
+                } else if (callee?.kind === 'StringBuilderAppendBytes') {
+                    if (argumentTypes.length !== 1) {
+                        this.report(expression.span, `StringBuilder.appendBytes expects 1 argument, got ${argumentTypes.length}`);
+                    } else this.requireAssignable(argumentTypes[0], 'Array<u8>', expression.arguments[0].span, expression.arguments[0]);
                     type = VOID;
                 } else if (callee?.kind === 'StringBuilderBuild') {
                     if (argumentTypes.length !== 0) this.report(expression.span, 'StringBuilder.build expects no arguments');

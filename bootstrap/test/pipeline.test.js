@@ -1045,6 +1045,24 @@ test('integer formatting and StringBuilder produce immutable strings', () => {
     assert.doesNotThrow(() => new X86_64Backend().generate(ir));
 });
 
+test('strings and byte arrays convert and append through bulk-copy builder operations', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/byte-conversions.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    const operations = ir.functions.flatMap(fn => fn.blocks.flatMap(block => block.instructions.map(instruction => instruction.op)));
+    assert.ok(operations.includes('string_to_bytes'));
+    assert.ok(operations.includes('bytes_to_string'));
+    assert.ok(operations.includes('builder_append_bytes'));
+    const assembly = new X86_64Backend().generate(ir);
+    assert.match(assembly, /valen_builder_append_raw:[\s\S]*rep movsb/);
+    assert.doesNotMatch(assembly, /\.Lbuilder_append_(?:loop|next):/);
+
+    const invalid = new SemanticAnalyzer().analyze(new Parser().parse('entry {{ __() -> void { local builder = new StringBuilder(); builder.appendBytes("no") } }}', 'invalid-append-bytes.ar'));
+    assert.equal(invalid.success, false);
+    assert.ok(invalid.diagnostics.some(diagnostic => /Array<u8>/.test(diagnostic.message)));
+});
+
 test('optional references and diagnostic collections resolve end to end', () => {
     const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/diagnostics.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});

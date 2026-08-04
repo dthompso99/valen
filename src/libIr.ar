@@ -1146,10 +1146,10 @@ library Ir {{
                 hashed.ownerType = receiverType
                 return hashed.result!
             }
-            if (name == "append" || name == "appendByte") && (receiverType == "StringBuilder" || self.isArray(receiverType)) {
+            if (name == "append" || name == "appendByte" || name == "appendBytes") && (receiverType == "StringBuilder" || self.isArray(receiverType)) {
                 local op = "array_append"
                 if receiverType == "StringBuilder" {
-                    if name == "appendByte" { op = "builder_append_byte" } else { op = "builder_append_string" }
+                    if name == "appendByte" { op = "builder_append_byte" } else { if name == "appendBytes" { op = "builder_append_bytes" } else { op = "builder_append_string" } }
                 }
                 local instruction = new Instruction(op)
                 instruction.first = self.lowerExpression(callee.left!)
@@ -1169,10 +1169,12 @@ library Ir {{
                 self.emit(instruction)
                 return new Value("void", "", "void")
             }
-            if (name == "slice" && receiverType == "string") || (name == "toString" && self.isInteger(receiverType)) || (name == "build" && receiverType == "StringBuilder") {
+            if (name == "slice" && receiverType == "string") || (name == "toString" && self.isInteger(receiverType)) || (name == "build" && receiverType == "StringBuilder") || (name == "toBytes" && receiverType == "string") || (name == "toString" && receiverType == "Array<u8>") {
                 local op = "string_slice"
                 if name == "toString" { op = "integer_to_string" }
                 if name == "build" { op = "builder_build" }
+                if name == "toBytes" { op = "string_to_bytes" }
+                if name == "toString" && receiverType == "Array<u8>" { op = "bytes_to_string" }
                 local owner = self.lowerExpression(callee.left!)
                 local loweredArguments = new Array<ref Value>(0)
                 local index:i64 = 0

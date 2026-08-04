@@ -191,7 +191,7 @@ Box<T:Printable> {{
 Every concrete type argument must implement the named contract. Multiple parameters carry their
 own constraints, for example `Map<K:Hashable, V>`. Generic methods remain **WIP**.
 
-Strings support byte indexing, length, equality, concatenation, slicing, integer conversion, and `StringBuilder`. Interpolation and richer formatting are **WIP**.
+Strings support byte indexing, length, equality, concatenation, slicing, integer conversion, and `StringBuilder`. `text.toBytes()` creates an independent `Array<u8>`, while `bytes.toString()` converts an `Array<u8>` back to an immutable string. `StringBuilder.appendBytes(bytes)` and ordinary string appends reserve once and bulk-copy their input. Interpolation and richer formatting are **WIP**.
 
 ## Optional values
 

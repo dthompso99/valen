@@ -659,6 +659,12 @@ export class IrGenerator {
                 length: args[1]
             });
         }
+        if (method.kind === 'StringToBytes') {
+            return this.result('string_to_bytes', 'Array<u8>', {value: this.lowerExpression(expression.callee.object)});
+        }
+        if (method.kind === 'BytesToString') {
+            return this.result('bytes_to_string', 'string', {value: this.lowerExpression(expression.callee.object)});
+        }
         if (method.kind === 'IntegerToString') {
             const value = this.lowerExpression(expression.callee.object);
             return this.result('integer_to_string', 'string', {value, integerType: value.type});
@@ -675,6 +681,11 @@ export class IrGenerator {
         if (method.kind === 'StringBuilderAppendByte') {
             const builder = this.lowerExpression(expression.callee.object);
             this.emit('builder_append_byte', {builder, value: args[0]});
+            return {kind: 'void', type: 'void'};
+        }
+        if (method.kind === 'StringBuilderAppendBytes') {
+            const builder = this.lowerExpression(expression.callee.object);
+            this.emit('builder_append_bytes', {builder, value: args[0]});
             return {kind: 'void', type: 'void'};
         }
         if (method.kind === 'StringBuilderBuild') {

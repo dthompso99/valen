@@ -13,6 +13,7 @@ export const validPrograms = [
     {name: 'floating point', source: 'bootstrap/test/fixtures/floating-point.ar'},
     {name: 'numeric promotion', source: 'bootstrap/test/fixtures/numeric-promotion.ar'},
     {name: 'generic constraints', source: 'bootstrap/test/fixtures/generic-constraints.ar'},
+    {name: 'byte conversions and bulk builder append', source: 'bootstrap/test/fixtures/byte-conversions.ar'},
     {name: 'instruction selection', source: 'bootstrap/test/fixtures/instruction-selection.ar'},
     {name: 'default arguments', source: 'bootstrap/test/fixtures/default-arguments.ar'},
     {name: 'collection ownership', source: 'bootstrap/test/fixtures/collection-ownership.ar'},

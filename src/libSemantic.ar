@@ -1268,6 +1268,18 @@ library Semantics {{
                         }
                         return self.typed(expression, "void")
                     }
+                    if expression.left!.name! == "toBytes" && receiverType == "string" {
+                        if expression.arguments.length != 0 { self.error(expression.span, "String.toBytes expects no arguments") }
+                        return self.typed(expression, "Array<u8>")
+                    }
+                    if expression.left!.name! == "toString" && receiverType == "Array<u8>" {
+                        if expression.arguments.length != 0 { self.error(expression.span, "Array<u8>.toString expects no arguments") }
+                        return self.typed(expression, "string")
+                    }
+                    if expression.left!.name! == "appendBytes" && receiverType == "StringBuilder" {
+                        if expression.arguments.length != 1 { self.error(expression.span, "StringBuilder.appendBytes expects 1 argument") } else { self.requireCompatible("Array<u8>", argumentTypes[0], expression.arguments[0].span) }
+                        return self.typed(expression, "void")
+                    }
                 }
                 if callable != null {
                     if callable!.kind == "Method" && callable!.owner != null {
@@ -1641,9 +1653,11 @@ library Semantics {{
             }
             if name == "append" { return self.typed(expression, "void") }
             if name == "appendByte" { return self.typed(expression, "void") }
+            if name == "appendBytes" && ownerType == "StringBuilder" { return self.typed(expression, "void") }
             if name == "build" { return self.typed(expression, "string") }
             if name == "slice" { return self.typed(expression, "string") }
             if name == "toString" { return self.typed(expression, "string") }
+            if name == "toBytes" && ownerType == "string" { return self.typed(expression, "Array<u8>") }
             if name == "hash" && self.isReference(ownerType) { return self.typed(expression, "i64") }
             self.error(expression.span, "Type '" + ownerType + "' has no member '" + name + "'")
             return self.typed(expression, "error")
