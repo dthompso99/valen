@@ -3,6 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {SemanticAnalyzer} from '../bootstrap/semantic.js';
+import {formatValen} from './valen-formatter.mjs';
 
 const severity = {error: 1, warning: 2, note: 3};
 
@@ -63,7 +64,7 @@ export class LanguageServer {
         if (method === 'initialize') {
             const root = params.rootUri ? uriPath(params.rootUri) : params.rootPath;
             if (root) this.rootPath = root;
-            this.respond(id, {capabilities: {textDocumentSync: 1, hoverProvider: true, definitionProvider: true, documentSymbolProvider: true, codeActionProvider: true}});
+            this.respond(id, {capabilities: {textDocumentSync: 1, hoverProvider: true, definitionProvider: true, documentSymbolProvider: true, codeActionProvider: true, documentFormattingProvider: true}});
         } else if (method === 'shutdown') this.respond(id, null);
         else if (method === 'exit') process.exit(0);
         else if (method === 'textDocument/didOpen') {
@@ -76,6 +77,7 @@ export class LanguageServer {
         else if (method === 'textDocument/definition') this.respond(id, this.definition(params));
         else if (method === 'textDocument/documentSymbol') this.respond(id, this.documentSymbols(params));
         else if (method === 'textDocument/codeAction') this.respond(id, this.codeActions(params));
+        else if (method === 'textDocument/formatting') this.respond(id, this.formatDocument(params));
         else if (id !== undefined) this.respond(id, null);
     }
 
@@ -138,6 +140,14 @@ export class LanguageServer {
         return result.diagnostics.flatMap(item => (item.data?.fixes ?? []).map(fix => ({
             title: fix.message, kind: 'quickfix', edit: {changes: {[fileUri(fix.span.source)]: [{range: spanRange(fix.span, this.sourceFor(fix.span.source, result.source)), newText: fix.replacement}]}}
         })));
+    }
+
+    formatDocument(params) {
+        const uri = params.textDocument.uri;
+        const source = this.documents.get(uriPath(uri)) ?? this.sourceFor(uriPath(uri));
+        const formatted = formatValen(source, {indent: params.options?.insertSpaces === false ? '\t' : ' '.repeat(params.options?.tabSize ?? 4)});
+        if (formatted === source) return [];
+        return [{range: {start: {line: 0, character: 0}, end: positionAt(source, source.length)}, newText: formatted}];
     }
 }
 

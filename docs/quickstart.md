@@ -57,6 +57,17 @@ The compiler also provides a semantic-check-only mode:
 ./valen --check examples/simple/simple.ar
 ```
 
+Format a source file in place, or verify formatting in CI:
+
+```sh
+node scripts/valen-format.mjs --write hello.ar
+node scripts/valen-format.mjs --check hello.ar
+```
+
+Formatting uses four-space indentation, normalizes token spacing, preserves comments and strings,
+and deliberately preserves whether conditions use optional parentheses. The language server exposes
+the same formatter through the standard document-formatting request.
+
 To stop at a relocatable ELF object without selecting a linker:
 
 ```sh

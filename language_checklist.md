@@ -87,7 +87,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 - [x] Define stable native and dynamic-library FFI boundaries
 - [ ] Add diagnostic severity enums, notes, fix hints, and multi-span labels
 - [x] Add source-level test syntax and a native test runner
-- [ ] Add formatter rules while preserving optional condition parentheses
+- [x] Add formatter rules while preserving optional condition parentheses
 - [ ] Add a language-server protocol implementation
 
 ## 7. Compiler and generated-code efficiency

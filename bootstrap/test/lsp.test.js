@@ -26,6 +26,7 @@ test('language server publishes structured diagnostics and semantic navigation',
     const invalid = `Engine {{}}\nSink {{ retain(own value:Engine) -> void {} }}\nentry {{ __() -> void { local engine = new Engine(); local sink = new Sink(); sink.retain(engine); sink.retain(engine) } }}\n`;
     server.handle({jsonrpc: '2.0', id: 1, method: 'initialize', params: {rootUri: pathToFileURL(directory).href}});
     assert.equal(sent.at(-1).result.capabilities.hoverProvider, true);
+    assert.equal(sent.at(-1).result.capabilities.documentFormattingProvider, true);
     server.handle({jsonrpc: '2.0', method: 'textDocument/didOpen', params: {textDocument: {uri, text: invalid}}});
     const published = sent.at(-1).params.diagnostics;
     assert.equal(published.length, 1);
@@ -45,6 +46,18 @@ test('language server publishes structured diagnostics and semantic navigation',
     assert.equal(sent.at(-1).result.uri, uri);
     server.handle({jsonrpc: '2.0', id: 5, method: 'textDocument/documentSymbol', params: {textDocument: {uri}}});
     assert.deepEqual(sent.at(-1).result.map(symbol => symbol.name), ['Engine', 'entry']);
+    fs.rmSync(directory, {recursive: true});
+});
+
+test('language server formats documents without changing condition style', () => {
+    const sent = [], directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-lsp-format-'));
+    const filePath = path.join(directory, 'format.ar'), uri = pathToFileURL(filePath).href;
+    const source = 'entry{{\n__()->i32{\nif(value==1){return 0}\nif value==2 {return 1}\n}\n}}';
+    const server = new LanguageServer(message => sent.push(message));
+    server.handle({jsonrpc: '2.0', method: 'textDocument/didOpen', params: {textDocument: {uri, text: source}}});
+    server.handle({jsonrpc: '2.0', id: 9, method: 'textDocument/formatting', params: {textDocument: {uri}, options: {tabSize: 4, insertSpaces: true}}});
+    assert.match(sent.at(-1).result[0].newText, /if \(value == 1\)/);
+    assert.match(sent.at(-1).result[0].newText, /if value == 2/);
     fs.rmSync(directory, {recursive: true});
 });
 
