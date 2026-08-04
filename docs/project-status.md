@@ -13,7 +13,7 @@
 - dynamic arrays with insertion/removal, invariant generic objects with contract constraints, byte-oriented strings, bulk byte/string conversion, and builders
 - optionals for references and primitives, with flow-sensitive narrowing and propagation
 - ownership transfer, borrowed/weak references, `copy`, and `delete`
-- tracing garbage collection and cycle-safe equality/hashing
+- tracing garbage collection with cooperative native-worker safepoints, plus cycle-safe equality/hashing
 - deterministic importer-relative, project-root, and external `VALEN_LIBRARY_PATH` source modules with owning-root confinement
 - source-level tests and native test execution
 - native/C FFI boundaries

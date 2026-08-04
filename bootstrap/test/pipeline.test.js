@@ -745,6 +745,10 @@ test('native synchronization and pooled execution coordinate with tracing collec
     assert.match(assembly, /valen_gc_root_push:/);
     assert.match(assembly, /valen_gc_root_pop:/);
     assert.match(assembly, /valen_gc_collect:[\s\S]*cmp QWORD PTR \[rip\+valen_gc_workers\], 0/);
+    assert.match(assembly, /valen_gc_mutator_register:[\s\S]*call valen_gc_state_lock[\s\S]*inc QWORD PTR \[rip\+valen_gc_mutators\]/);
+    assert.match(assembly, /valen_gc_safepoint:[\s\S]*valen_gc_parked/);
+    assert.match(assembly, /valen_gc_collect:[\s\S]*valen_gc_request[\s\S]*\.Lgc_collect_wait/);
+    assert.match(assembly, /valen_Operations_conditionWait:[\s\S]*call valen_gc_mutator_leave[\s\S]*call valen_gc_mutator_enter/);
     assert.match(assembly, /lock cmpxchg DWORD PTR/);
     assert.match(assembly, /lock xadd QWORD PTR/);
 });

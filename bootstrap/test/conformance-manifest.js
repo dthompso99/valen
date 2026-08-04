@@ -30,7 +30,7 @@ export const validPrograms = [
     {name: 'flow-sensitive optional narrowing', source: 'bootstrap/test/fixtures/optional-narrowing.ar'},
     {name: 'safe result propagation', source: 'bootstrap/test/fixtures/result-propagation.ar'},
     {name: 'operation state', source: 'bootstrap/test/fixtures/operation-state.ar'},
-    {name: 'native synchronization and threading', source: 'bootstrap/test/fixtures/threading.ar'},
+    {name: 'native synchronization, threading, and GC safepoints', source: 'bootstrap/test/fixtures/threading.ar'},
     {name: 'readiness event loop', source: 'bootstrap/test/fixtures/event-loop.ar'},
     {name: 'iterators and for loops', source: 'bootstrap/test/fixtures/for-loops.ar'},
     {name: 'short-circuit control flow', source: 'bootstrap/test/fixtures/short-circuit.ar'},

@@ -9,6 +9,35 @@ WorkerValue {{
     member value:i64
 }}
 
+WeakProbe {{
+    member weak value:WorkerValue?
+
+    watch(value:WorkerValue) -> void { self.value = value }
+}}
+
+AllocationWork implements Operations.Work {{
+    member ref probe:WeakProbe
+
+    __(probe:WeakProbe) -> void { self.probe = probe }
+
+    seed() -> void {
+        local value = new WorkerValue()
+        self.probe.watch(value)
+    }
+
+    run() -> Operations.OperationResult {
+        self.seed()
+        local index:i64 = 0
+        while index < 20000 {
+            local garbage = new WorkerValue()
+            garbage.value = index
+            index = index + 1
+        }
+        if self.probe.value != null { return new Operations.Failed(98, "worker collection did not clear weak reference") }
+        return new Operations.Succeeded()
+    }
+}}
+
 BlockingWork implements Operations.Work {{
     member ref ready:Operations.Atomic
     member ref gate:Operations.Atomic
@@ -75,6 +104,9 @@ entry {{
         if first.wait().code() != 51 { return 12 }
         if second.wait().code() != 52 { return 13 }
         if !cancelled.wait().cancelled() { return 14 }
+        local probe = new WeakProbe()
+        if !pool.submit(new AllocationWork(probe)).wait().succeeded() { return 18 }
+        if !pool.submit(new AllocationWork(probe)).wait().succeeded() { return 19 }
         pool.shutdown()
         pool.shutdown()
         if !pool.submit(new BackgroundWork()).wait().failed() { return 15 }
