@@ -793,6 +793,7 @@ library Ir {{
                 return
             }
             if statement.kind == "If" { self.lowerIf(statement); return }
+            if statement.kind == "Match" { self.lowerMatch(statement); return }
             if statement.kind == "While" { self.lowerWhile(statement); return }
             if statement.kind == "For" { self.lowerFor(statement); return }
             if statement.kind == "Break" {
@@ -833,6 +834,46 @@ library Ir {{
                 self.jumpIfOpen(endBlock.label)
             }
             self.currentBlock = endBlock
+        }
+
+        lowerMatch(statement:Ast.Statement) -> void {
+            local value = self.lowerExpression(statement.expression!)
+            local endBlock = self.newBlock("match_end")
+            local caseBlocks = new Array<ref Block>(0)
+            local index:i64 = 0
+            while index < statement.matchCases.length { caseBlocks.append(self.newBlock("match_case")); index = index + 1 }
+            local elseBlock = endBlock
+            if statement.alternate != null { elseBlock = self.newBlock("match_else") }
+            local testBlock = self.currentBlock!
+            index = 0
+            while index < statement.matchCases.length {
+                self.currentBlock = testBlock
+                local next = elseBlock
+                if index + 1 < statement.matchCases.length { next = self.newBlock("match_test") }
+                local comparison = self.temporary("binary", "bool")
+                comparison.first = value
+                comparison.second = self.lowerExpression(statement.matchCases[index].pattern)
+                comparison.operator = "=="
+                comparison.ownerType = value.typeName
+                local branch = new Instruction("branch")
+                branch.first = comparison.result
+                branch.target = caseBlocks[index].label
+                branch.alternateTarget = next.label
+                self.emit(branch)
+                testBlock = next
+                index = index + 1
+            }
+            if statement.matchCases.length == 0 { self.jumpIfOpen(elseBlock.label) }
+            index = 0
+            while index < statement.matchCases.length {
+                self.currentBlock = caseBlocks[index]
+                self.lowerBlock(statement.matchCases[index].body)
+                self.jumpIfOpen(endBlock.label)
+                index = index + 1
+            }
+            if statement.alternate != null { self.currentBlock = elseBlock; self.lowerBlock(statement.alternate!); self.jumpIfOpen(endBlock.label) }
+            self.currentBlock = endBlock
+            if statement.ownership == "returns" { self.jumpIfOpen(endBlock.label) }
         }
 
         lowerWhile(statement:Ast.Statement) -> void {

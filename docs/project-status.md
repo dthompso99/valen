@@ -28,7 +28,7 @@
 - flow-sensitive optional narrowing for stable locals and parameters
 - **WIP:** generic methods
 - lossless mixed-width integer promotion and predictable floating-point promotion
-- `else if` chains, expression-valued conditionals, and payload-free enums are implemented; associated-value sum types and exhaustive matching remain **WIP**.
+- `else if` chains, expression-valued conditionals, payload-free enums, and exhaustive enum statement matching are implemented; associated-value sum types and expression-valued matching remain **WIP**.
 - safe `?` propagation for optionals and result objects exposing public `valid:bool` and `value` fields
 
 ## WIP: runtime and concurrency

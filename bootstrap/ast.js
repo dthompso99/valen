@@ -156,6 +156,23 @@ export class IfStatement extends AstNode {
     }
 }
 
+export class MatchStatement extends AstNode {
+    constructor(expression, cases, alternate, span) {
+        super('MatchStatement', span);
+        this.expression = expression;
+        this.cases = cases;
+        this.alternate = alternate;
+    }
+}
+
+export class MatchCase extends AstNode {
+    constructor(pattern, body, span) {
+        super('MatchCase', span);
+        this.pattern = pattern;
+        this.body = body;
+    }
+}
+
 export class IfExpression extends AstNode {
     constructor(condition, consequent, alternate, span) {
         super('IfExpression', span);

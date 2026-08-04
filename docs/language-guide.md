@@ -264,7 +264,22 @@ if direction != Direction.South { local tag:i64 = direction.hash() }
 
 Cases may be comma-, semicolon-, or newline-separated. Enums may be top-level declarations or public/private
 nested declarations inside objects and libraries. Different enum types are not assignable even when their tags
-match. Associated-value cases and exhaustive matching remain **WIP**.
+match. Associated-value cases remain **WIP**.
+
+Enum values support exhaustive statement matching:
+
+```valen
+match direction {
+    case Direction.North { System.write("north") }
+    case Direction.East { System.write("east") }
+    case Direction.South { System.write("south") }
+    case Direction.West { System.write("west") }
+}
+```
+
+Every branch must name a unique case from the matched enum. Omitting a case is a compile error unless an
+`else` branch is present. When every branch returns, the match also satisfies the enclosing method's return
+analysis. Expression-valued matching and associated-value destructuring remain **WIP**.
 
 Strings support byte indexing, length, equality, concatenation, slicing, integer conversion, interpolation, and `StringBuilder`. `text.toBytes()` creates an independent `Array<u8>`, while `bytes.toString()` converts an `Array<u8>` back to an immutable string. `StringBuilder.appendBytes(bytes)` and ordinary string appends reserve once and bulk-copy their input.
 

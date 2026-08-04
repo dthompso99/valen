@@ -171,6 +171,7 @@ library Ast {{
         member ownership:string
         member iteratorHasNext:Symbols.Symbol?
         member iteratorNext:Symbols.Symbol?
+        member matchCases:Array<MatchCase>
 
         __(kind:string, span:Compiler.SourceSpan) -> void {
             self.kind = kind
@@ -185,6 +186,19 @@ library Ast {{
             self.ownership = "none"
             self.iteratorHasNext = null
             self.iteratorNext = null
+            self.matchCases = new Array<MatchCase>(0)
+        }
+    }}
+
+    MatchCase {{
+        member pattern:Expression
+        member body:Block
+        member span:Compiler.SourceSpan
+
+        __(pattern:Expression, body:Block, span:Compiler.SourceSpan) -> void {
+            self.pattern = pattern
+            self.body = body
+            self.span = span
         }
     }}
 

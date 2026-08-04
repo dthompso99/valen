@@ -37,6 +37,7 @@ export const validPrograms = [
     {name: 'else-if control flow', source: 'bootstrap/test/fixtures/else-if.ar'},
     {name: 'expression-valued conditionals', source: 'bootstrap/test/fixtures/conditional-expressions.ar'},
     {name: 'first-class enums', source: 'bootstrap/test/fixtures/enums.ar'},
+    {name: 'exhaustive enum matching', source: 'bootstrap/test/fixtures/enum-match.ar'},
     {name: 'checked integer parsing', source: 'bootstrap/test/fixtures/integer-parsing.ar'},
     {name: 'native test runner', source: 'bootstrap/test/fixtures/native-tests.ar'},
     {name: 'self-hosted x86 object parser', source: 'bootstrap/test/fixtures/x86-object-parser.ar'}
@@ -73,5 +74,6 @@ export const invalidPrograms = [
     {name: 'multiple semantic errors', source: 'bootstrap/test/fixtures/native-semantic-errors.ar', status: 65, stderr: /Cannot use value of type 'i64'[\s\S]*Unknown name 'missing'/},
     {name: 'module import cycle', source: 'bootstrap/test/fixtures/module-cycle-a.ar', status: 65, stderr: /module-cycle-b\.ar:1:1: error: Circular import involving/},
     {name: 'conditional branch without value', source: 'bootstrap/test/fixtures/conditional-expression-failing.ar', status: 65, stderr: /Each expression-valued conditional branch must end with an expression/},
-    {name: 'duplicate enum case', source: 'bootstrap/test/fixtures/enum-failing.ar', status: 65, stderr: /Duplicate member 'North'/}
+    {name: 'duplicate enum case', source: 'bootstrap/test/fixtures/enum-failing.ar', status: 65, stderr: /Duplicate member 'North'/},
+    {name: 'invalid enum match', source: 'bootstrap/test/fixtures/enum-match-failing.ar', status: 65, stderr: /Duplicate match case 'Direction.North'[\s\S]*does not belong to enum 'Direction'[\s\S]*Non-exhaustive match for 'Direction'; missing East, South/}
 ];

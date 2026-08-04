@@ -1060,6 +1060,50 @@ library Semantics {{
                 }
                 return
             }
+            if statement.kind == "Match" {
+                local matchedType = self.analyzeExpression(statement.expression!, scope, moduleScope)
+                local matchedEnum = self.findCanonical(matchedType)
+                if matchedEnum == null || matchedEnum!.kind != "Enum" { self.error(statement.expression!.span, "match requires an enum value"); matchedEnum = null }
+                local seen = new Array<ref Symbols.Symbol>(0)
+                local caseIndex:i64 = 0
+                while caseIndex < statement.matchCases.length {
+                    local item = statement.matchCases[caseIndex]
+                    local patternType = self.analyzeExpression(item.pattern, scope, moduleScope)
+                    local caseSymbol = item.pattern.symbol
+                    if caseSymbol == null || caseSymbol!.kind != "EnumCase" {
+                        self.error(item.pattern.span, "match case must name an enum case")
+                    } else {
+                        if matchedEnum != null && caseSymbol!.owner! !== matchedEnum! { self.error(item.pattern.span, "Case '" + caseSymbol!.qualifiedName + "' does not belong to enum '" + matchedEnum!.qualifiedName + "'") }
+                        local duplicate:bool = false
+                        local seenIndex:i64 = 0
+                        while seenIndex < seen.length { if seen[seenIndex] === caseSymbol! { duplicate = true }; seenIndex = seenIndex + 1 }
+                        if duplicate { self.error(item.pattern.span, "Duplicate match case '" + caseSymbol!.qualifiedName + "'") } else { seen.append(caseSymbol!) }
+                    }
+                    if caseSymbol != null {
+                        if caseSymbol!.kind == "EnumCase" && (matchedEnum == null || caseSymbol!.owner! === matchedEnum!) { self.requireCompatible(matchedType, patternType, item.pattern.span) }
+                    }
+                    self.analyzeBlock(item.body, new Symbols.Scope("match case", scope), moduleScope, returnType, inLoop)
+                    caseIndex = caseIndex + 1
+                }
+                if statement.alternate != null { self.analyzeBlock(statement.alternate!, new Symbols.Scope("match else", scope), moduleScope, returnType, inLoop) }
+                if matchedEnum != null && statement.alternate == null {
+                    local missing = ""
+                    local memberIndex:i64 = 0
+                    while memberIndex < matchedEnum!.memberScope!.symbols.length {
+                        local enumMember = matchedEnum!.memberScope!.symbols[memberIndex]
+                        if enumMember.kind == "EnumCase" {
+                            local found:bool = false
+                            local seenIndex:i64 = 0
+                            while seenIndex < seen.length { if seen[seenIndex] === enumMember { found = true }; seenIndex = seenIndex + 1 }
+                            if !found { if missing.length > 0 { missing = missing + ", " }; missing = missing + enumMember.name }
+                        }
+                        memberIndex = memberIndex + 1
+                    }
+                    if missing.length > 0 { self.error(statement.span, "Non-exhaustive match for '" + matchedEnum!.qualifiedName + "'; missing " + missing) } else { statement.ownership = "exhaustive" }
+                } else { if statement.alternate != null { statement.ownership = "exhaustive" } }
+                if self.matchDefinitelyReturns(statement) { statement.ownership = "returns" }
+                return
+            }
             if statement.kind == "For" {
                 local iterableType = self.analyzeExpression(statement.expression!, scope, moduleScope)
                 local elementType = "error"
@@ -1111,7 +1155,21 @@ library Semantics {{
             if statement.kind == "If" && statement.alternate != null {
                 return self.blockDefinitelyReturns(statement.body!) && self.blockDefinitelyReturns(statement.alternate!)
             }
+            if statement.kind == "Match" && (statement.ownership == "exhaustive" || statement.ownership == "returns") {
+                local index:i64 = 0
+                while index < statement.matchCases.length { if !self.blockDefinitelyReturns(statement.matchCases[index].body) { return false }; index = index + 1 }
+                if statement.alternate != null { return self.blockDefinitelyReturns(statement.alternate!) }
+                return statement.matchCases.length > 0
+            }
             return false
+        }
+
+        matchDefinitelyReturns(statement:Ast.Statement) -> bool {
+            if statement.ownership != "exhaustive" { return false }
+            local index:i64 = 0
+            while index < statement.matchCases.length { if !self.blockDefinitelyReturns(statement.matchCases[index].body) { return false }; index = index + 1 }
+            if statement.alternate != null { return self.blockDefinitelyReturns(statement.alternate!) }
+            return statement.matchCases.length > 0
         }
 
         applyOptionalNarrowing(expression:Ast.Expression, truthy:bool, scope:Symbols.Scope) -> void {

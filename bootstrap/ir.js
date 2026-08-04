@@ -303,6 +303,9 @@ export class IrGenerator {
             case 'IfStatement':
                 this.lowerIf(statement);
                 break;
+            case 'MatchStatement':
+                this.lowerMatch(statement);
+                break;
             case 'WhileStatement':
                 this.lowerWhile(statement);
                 break;
@@ -355,6 +358,35 @@ export class IrGenerator {
             if (!this.isTerminated()) this.emit('jump', {target: endBlock.label});
         }
         this.block = endBlock;
+    }
+
+    lowerMatch(statement) {
+        const value = this.lowerExpression(statement.expression);
+        const endBlock = this.newBlock('match_end');
+        const caseBlocks = statement.cases.map(() => this.newBlock('match_case'));
+        const elseBlock = statement.alternate ? this.newBlock('match_else') : endBlock;
+        let testBlock = this.block;
+        for (let index = 0; index < statement.cases.length; index++) {
+            this.block = testBlock;
+            const next = index + 1 < statement.cases.length ? this.newBlock('match_test') : elseBlock;
+            const pattern = this.lowerExpression(statement.cases[index].pattern);
+            const condition = this.result('binary', 'bool', {operator: '==', left: value, right: pattern});
+            this.emit('branch', {condition, thenTarget: caseBlocks[index].label, elseTarget: next.label});
+            testBlock = next;
+        }
+        if (statement.cases.length === 0 && this.block !== elseBlock) this.emit('jump', {target: elseBlock.label});
+        for (let index = 0; index < statement.cases.length; index++) {
+            this.block = caseBlocks[index];
+            this.lowerBlock(statement.cases[index].body);
+            if (!this.isTerminated()) this.emit('jump', {target: endBlock.label});
+        }
+        if (statement.alternate) {
+            this.block = elseBlock;
+            this.lowerBlock(statement.alternate);
+            if (!this.isTerminated()) this.emit('jump', {target: endBlock.label});
+        }
+        this.block = endBlock;
+        if (statement.definitelyReturns && !this.isTerminated()) this.emit('jump', {target: endBlock.label});
     }
 
     lowerWhile(statement) {

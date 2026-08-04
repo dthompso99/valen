@@ -1,0 +1,20 @@
+enum Direction {{ North, East, South, West }}
+
+entry {{
+    value(direction:Direction) -> i64 {
+        match direction {
+            case Direction.North { return 1 }
+            case Direction.East { return 2 }
+            case Direction.South { return 3 }
+            case Direction.West { return 4 }
+        }
+    }
+
+    __() -> i64 {
+        if self.value(Direction.South) != 3 { return 1 }
+        match Direction.North {
+            case Direction.South { return 2 }
+            else { return 0 }
+        }
+    }
+}}

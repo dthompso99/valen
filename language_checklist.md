@@ -67,7 +67,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 - [x] Add iterators and `for` loops
 - [x] Add `else if` shorthand
 - [x] Add expression-valued conditionals with branch type unification
-- [ ] Define exhaustive matching if a sum type or enum model is introduced
+- [x] Add exhaustive statement matching for enums with duplicate, foreign-case, and missing-case diagnostics
 
 ## 5. Collections and strings
 

@@ -54,12 +54,12 @@ library Parsing {{
             local typeParameters = new Array<string>(0)
             local typeConstraints = new Array<Ast.TypeReference?>(0)
             if kind == "Object" {
-                if self.match("LESS") {
+                if self.accept("LESS") {
                     typeParameters.append(self.consume("IDENTIFIER", "Expected a type parameter name").lexeme)
-                    if self.match("COLON") { typeConstraints.append(self.parseTypeReference()) } else { typeConstraints.append(null) }
-                    while self.match("COMMA") {
+                    if self.accept("COLON") { typeConstraints.append(self.parseTypeReference()) } else { typeConstraints.append(null) }
+                    while self.accept("COMMA") {
                         typeParameters.append(self.consume("IDENTIFIER", "Expected a type parameter name").lexeme)
-                        if self.match("COLON") { typeConstraints.append(self.parseTypeReference()) } else { typeConstraints.append(null) }
+                        if self.accept("COLON") { typeConstraints.append(self.parseTypeReference()) } else { typeConstraints.append(null) }
                     }
                     self.consume("GREATER", "Expected '>' after type parameters")
                 }
@@ -67,10 +67,10 @@ library Parsing {{
             local inheritedType:Ast.TypeReference? = null
             local implementedTypes = new Array<Ast.TypeReference>(0)
             if kind == "Object" {
-                if self.match("INHERITS") { inheritedType = self.parseTypeReference() }
-                if self.match("IMPLEMENTS") {
+                if self.accept("INHERITS") { inheritedType = self.parseTypeReference() }
+                if self.accept("IMPLEMENTS") {
                     implementedTypes.append(self.parseTypeReference())
-                    while self.match("COMMA") { implementedTypes.append(self.parseTypeReference()) }
+                    while self.accept("COMMA") { implementedTypes.append(self.parseTypeReference()) }
                 }
             }
             self.consume("LEFT_BRACE", "Expected '{{' after declaration name")
@@ -83,7 +83,7 @@ library Parsing {{
                     local enumCase = self.consume("IDENTIFIER", "Expected an enum case")
                     local caseNode = new Ast.MemberDeclaration("EnumCase", enumCase.lexeme, enumCase.span)
                     members.append(caseNode)
-                    if self.match("COMMA") {} else {
+                    if self.accept("COMMA") {} else {
                         if !self.atSeparator() && !self.atDeclarationEnd() { self.fail("Expected a newline, ',' or ';' after enum case") }
                     }
                 } else { members.append(self.parseMember(kind == "Library" || kind == "Test")) }
@@ -101,7 +101,7 @@ library Parsing {{
 
         parseMember(inLibrary:bool) -> Ast.MemberDeclaration {
             local visibility = "public"
-            if self.match("PRIVATE") { visibility = "private" } else { if self.match("PUBLIC") { visibility = "public" } }
+            if self.accept("PRIVATE") { visibility = "private" } else { if self.accept("PUBLIC") { visibility = "public" } }
             local nestedObject:bool = false
             if self.check("ENUM") {
                 local declaration = self.parseDeclaration("Enum")
@@ -127,24 +127,24 @@ library Parsing {{
                 nested.visibility = visibility
                 return nested
             }
-            if self.match("MEMBER") {
+            if self.accept("MEMBER") {
                 local start = self.previous()
-                local reference = self.match("REF")
+                local reference = self.accept("REF")
                 local isWeak:bool = false
-                if !reference { isWeak = self.match("WEAK") }
+                if !reference { isWeak = self.accept("WEAK") }
                 local name = self.consume("IDENTIFIER", "Expected a field name")
                 self.consume("COLON", "Expected ':' after field name")
                 local field = new Ast.MemberDeclaration("Field", name.lexeme, self.span(start.span, name.span))
                 field.declaredType = self.parseTypeReference()
-                if self.match("EQUAL") { field.initializer = self.parseExpression() }
+                if self.accept("EQUAL") { field.initializer = self.parseExpression() }
                 field.span = self.span(start.span, self.previous().span)
                 field.visibility = visibility
                 field.reference = reference
                 field.weakReference = isWeak
                 return field
             }
-            local isUnsafe = self.match("UNSAFE")
-            local isNative = self.match("NATIVE")
+            local isUnsafe = self.accept("UNSAFE")
+            local isNative = self.accept("NATIVE")
             local start = self.peek(0)
             if isNative || isUnsafe { start = self.previous() }
             local name = self.consume("IDENTIFIER", "Expected a method name")
@@ -156,14 +156,14 @@ library Parsing {{
             if !self.check("RIGHT_PAREN") {
                 local more:bool = true
                 while more {
-                    local owning = self.match("OWN")
+                    local owning = self.accept("OWN")
                     local parameterStart = self.peek(0).span
                     if owning { parameterStart = self.previous().span }
                     local parameterName = self.consume("IDENTIFIER", "Expected a parameter name")
                     self.consume("COLON", "Expected ':' after parameter name")
                     local parameterType = self.parseTypeReference()
                     local defaultValue:Ast.Expression? = null
-                    if self.match("EQUAL") { defaultValue = self.parseExpression() }
+                    if self.accept("EQUAL") { defaultValue = self.parseExpression() }
                     method.parameters.append(new Ast.Parameter(
                         parameterName.lexeme,
                         parameterType,
@@ -171,19 +171,19 @@ library Parsing {{
                         self.span(parameterStart, self.previous().span),
                         owning
                     ))
-                    more = self.match("COMMA")
+                    more = self.accept("COMMA")
                 }
             }
             self.consume("RIGHT_PAREN", "Expected ')' after parameters")
             self.consume("ARROW", "Expected '->' after parameters")
-            local returnReference = self.match("REF")
+            local returnReference = self.accept("REF")
             method.returnType = self.parseTypeReference()
             method.returnReference = returnReference
             if isNative {
-                if self.match("FROM") {
+                if self.accept("FROM") {
                     local libraryToken = self.consume("STRING_LITERAL", "Expected a library name after 'from'")
                     method.foreignLibrary = self.decodeString(libraryToken.lexeme)
-                    if self.match("AS") {
+                    if self.accept("AS") {
                         local symbol = self.consume("STRING_LITERAL", "Expected a symbol name after 'as'")
                         method.foreignSymbol = self.decodeString(symbol.lexeme)
                     } else {
@@ -198,23 +198,23 @@ library Parsing {{
 
         parseTypeReference() -> Ast.TypeReference {
             local ownership = "owned"
-            if self.match("REF") { ownership = "ref" } else { if self.match("WEAK") { ownership = "weak" } }
+            if self.accept("REF") { ownership = "ref" } else { if self.accept("WEAK") { ownership = "weak" } }
             local start = self.consume("IDENTIFIER", "Expected a type name")
             local name = start.lexeme
-            while self.match("DOT") {
+            while self.accept("DOT") {
                 local part = self.consume("IDENTIFIER", "Expected a qualified type name")
                 name = name + "." + part.lexeme
             }
             local arguments = new Array<Ast.TypeReference>(0)
-            if self.match("LESS") {
+            if self.accept("LESS") {
                 local more:bool = true
                 while more {
                     arguments.append(self.parseTypeReference())
-                    more = self.match("COMMA")
+                    more = self.accept("COMMA")
                 }
                 self.consume("GREATER", "Expected '>' after type arguments")
             }
-            local optional = self.match("QUESTION")
+            local optional = self.accept("QUESTION")
             return new Ast.TypeReference(name, arguments, optional, self.span(start.span, self.previous().span), ownership)
         }
 
@@ -236,7 +236,7 @@ library Parsing {{
         }
 
         parseStatement() -> Ast.Statement {
-            if self.match("RETURN") {
+            if self.accept("RETURN") {
                 local start = self.previous()
                 local statement = new Ast.Statement("Return", start.span)
                 if !self.atSeparator() {
@@ -245,10 +245,11 @@ library Parsing {{
                 statement.span = self.span(start.span, self.previous().span)
                 return statement
             }
-            if self.match("IF") {
+            if self.accept("IF") {
                 return self.parseIf(self.previous())
             }
-            if self.match("WHILE") {
+            if self.accept("MATCH") { return self.parseMatch(self.previous()) }
+            if self.accept("WHILE") {
                 local start = self.previous()
                 local statement = new Ast.Statement("While", start.span)
                 statement.condition = self.parseExpression()
@@ -256,7 +257,7 @@ library Parsing {{
                 statement.span = self.span(start.span, self.previous().span)
                 return statement
             }
-            if self.match("FOR") {
+            if self.accept("FOR") {
                 local start = self.previous()
                 local name = self.consume("IDENTIFIER", "Expected an iteration variable after 'for'")
                 self.consume("IN", "Expected 'in' after iteration variable")
@@ -267,19 +268,19 @@ library Parsing {{
                 statement.span = self.span(start.span, statement.body!.span)
                 return statement
             }
-            if self.match("BREAK") { return new Ast.Statement("Break", self.previous().span) }
-            if self.match("CONTINUE") { return new Ast.Statement("Continue", self.previous().span) }
-            if self.match("LOCAL") {
+            if self.accept("BREAK") { return new Ast.Statement("Break", self.previous().span) }
+            if self.accept("CONTINUE") { return new Ast.Statement("Continue", self.previous().span) }
+            if self.accept("LOCAL") {
                 local start = self.previous()
                 local name = self.consume("IDENTIFIER", "Expected a local name")
                 local statement = new Ast.Statement("Local", self.span(start.span, name.span))
                 statement.name = name.lexeme
-                if self.match("COLON") { statement.declaredType = self.parseTypeReference() }
-                if self.match("EQUAL") { statement.expression = self.parseExpression() }
+                if self.accept("COLON") { statement.declaredType = self.parseTypeReference() }
+                if self.accept("EQUAL") { statement.expression = self.parseExpression() }
                 statement.span = self.span(start.span, self.previous().span)
                 return statement
             }
-            if self.match("UNSAFE") {
+            if self.accept("UNSAFE") {
                 local start = self.previous()
                 local statement = new Ast.Statement("Unsafe", start.span)
                 statement.body = self.parseBlock()
@@ -304,8 +305,8 @@ library Parsing {{
             statement.body = self.parseBlock()
             local saved = self.current
             self.skipNewlines()
-            if self.match("ELSE") {
-                if self.match("IF") {
+            if self.accept("ELSE") {
+                if self.accept("IF") {
                     local nested = self.parseIf(self.previous())
                     local statements = new Array<Ast.Statement>(0)
                     statements.append(nested)
@@ -316,11 +317,33 @@ library Parsing {{
             return statement
         }
 
+        parseMatch(start:Compiler.Token) -> Ast.Statement {
+            local statement = new Ast.Statement("Match", start.span)
+            statement.expression = self.parseExpression()
+            self.consume("LEFT_BRACE", "Expected '{' after match expression")
+            self.skipSeparators()
+            while !self.check("RIGHT_BRACE") && !self.check("EOF") {
+                if self.accept("CASE") {
+                    local caseStart = self.previous()
+                    local pattern = self.parseExpression()
+                    local body = self.parseBlock()
+                    statement.matchCases.append(new Ast.MatchCase(pattern, body, self.span(caseStart.span, body.span)))
+                } else { if self.accept("ELSE") {
+                    if statement.alternate != null { self.fail("A match may only declare one else branch") }
+                    statement.alternate = self.parseBlock()
+                } else { self.fail("Expected 'case', 'else', or '}' in match") }}
+                self.skipSeparators()
+            }
+            local end = self.consume("RIGHT_BRACE", "Expected '}' after match")
+            statement.span = self.span(start.span, end.span)
+            return statement
+        }
+
         parseExpression() -> ref Ast.Expression { return self.parseAssignment() }
 
         parseAssignment() -> ref Ast.Expression {
             local target = self.parseBinary(1)
-            if !self.match("EQUAL") { return target }
+            if !self.accept("EQUAL") { return target }
             local expression = new Ast.Expression("Assignment", self.span(target.span, self.peek(0).span))
             expression.left = target
             expression.right = self.parseAssignment()
@@ -343,7 +366,7 @@ library Parsing {{
         }
 
         parseUnary() -> ref Ast.Expression {
-            if self.match("BANG") || self.match("MINUS") || self.match("COPY") || self.match("DELETE") {
+            if self.accept("BANG") || self.accept("MINUS") || self.accept("COPY") || self.accept("DELETE") {
                 local operator = self.previous()
                 local operand = self.parseUnary()
                 local expression = new Ast.Expression("Unary", self.span(operator.span, operand.span))
@@ -351,9 +374,9 @@ library Parsing {{
                 expression.left = operand
                 return expression
             }
-            if self.match("NEW") { return self.parseNew(self.previous()) }
+            if self.accept("NEW") { return self.parseNew(self.previous()) }
             local expression = self.parsePostfix()
-            while self.match("AS") {
+            while self.accept("AS") {
                 local converted = new Ast.Expression("Conversion", self.span(expression.span, self.peek(0).span))
                 converted.left = expression
                 converted.typeArguments.append(self.parseTypeReference())
@@ -366,18 +389,18 @@ library Parsing {{
         parseNew(start:Compiler.Token) -> Ast.Expression {
             local expression = new Ast.Expression("New", start.span)
             expression.left = self.parsePrimary()
-            while self.match("DOT") {
+            while self.accept("DOT") {
                 local memberToken = self.consume("IDENTIFIER", "Expected a member name")
                 local access = new Ast.Expression("Member", self.span(expression.left!.span, memberToken.span))
                 access.left = expression.left
                 access.name = memberToken.lexeme
                 expression.left = access
             }
-            if self.match("LESS") {
+            if self.accept("LESS") {
                 local more:bool = true
                 while more {
                     expression.typeArguments.append(self.parseTypeReference())
-                    more = self.match("COMMA")
+                    more = self.accept("COMMA")
                 }
                 self.consume("GREATER", "Expected '>' after constructed type")
             }
@@ -391,21 +414,21 @@ library Parsing {{
             local expression = self.parsePrimary()
             local scanning:bool = true
             while scanning {
-                if self.match("LEFT_PAREN") {
+                if self.accept("LEFT_PAREN") {
                     local call = new Ast.Expression("Call", expression.span)
                     call.left = expression
                     self.parseArguments(call.arguments)
                     call.span = self.span(expression.span, self.previous().span)
                     expression = call
                 } else {
-                    if self.match("DOT") {
+                    if self.accept("DOT") {
                         local memberToken = self.consume("IDENTIFIER", "Expected a member name")
                         local access = new Ast.Expression("Member", self.span(expression.span, memberToken.span))
                         access.left = expression
                         access.name = memberToken.lexeme
                         expression = access
                     } else {
-                        if self.match("LEFT_BRACKET") {
+                        if self.accept("LEFT_BRACKET") {
                             local access = new Ast.Expression("Index", expression.span)
                             access.left = expression
                             access.right = self.parseExpression()
@@ -413,12 +436,12 @@ library Parsing {{
                             access.span = self.span(expression.span, end.span)
                             expression = access
                         } else {
-                            if self.match("BANG") {
+                            if self.accept("BANG") {
                                 local unwrap = new Ast.Expression("Unwrap", self.span(expression.span, self.previous().span))
                                 unwrap.left = expression
                                 expression = unwrap
                             } else {
-                                if self.match("QUESTION") {
+                                if self.accept("QUESTION") {
                                     local propagate = new Ast.Expression("Propagate", self.span(expression.span, self.previous().span))
                                     propagate.left = expression
                                     expression = propagate
@@ -439,7 +462,7 @@ library Parsing {{
                     self.skipNewlines()
                     arguments.append(self.parseExpression())
                     self.skipNewlines()
-                    more = self.match("COMMA")
+                    more = self.accept("COMMA")
                 }
             }
             self.consume("RIGHT_PAREN", "Expected ')' after arguments")
@@ -457,7 +480,7 @@ library Parsing {{
                         self.skipNewlines()
                         literal.arguments.append(self.parseExpression())
                         self.skipNewlines()
-                        more = self.match("COMMA")
+                        more = self.accept("COMMA")
                     }
                 }
                 local end = self.consume("RIGHT_BRACKET", "Expected ']' after array literal")
@@ -495,7 +518,7 @@ library Parsing {{
             expression.body = self.parseBlock()
             self.skipNewlines()
             self.consume("ELSE", "Expression-valued 'if' requires an 'else' branch")
-            if self.match("IF") {
+            if self.accept("IF") {
                 local nested = self.parseIfExpression(self.previous())
                 local statement = new Ast.Statement("Expression", nested.span)
                 statement.expression = nested
@@ -628,9 +651,9 @@ library Parsing {{
             return self.check("RIGHT_BRACE") && self.peek(1).kind == "RIGHT_BRACE"
         }
         atSeparator() -> bool { return self.check("NEWLINE") || self.check("SEMICOLON") }
-        skipSeparators() -> void { while self.match("NEWLINE") || self.match("SEMICOLON") {} }
-        skipNewlines() -> void { while self.match("NEWLINE") {} }
-        match(kind:string) -> bool {
+        skipSeparators() -> void { while self.accept("NEWLINE") || self.accept("SEMICOLON") {} }
+        skipNewlines() -> void { while self.accept("NEWLINE") {} }
+        accept(kind:string) -> bool {
             if !self.check(kind) { return false }
             self.current = self.current + 1
             return true

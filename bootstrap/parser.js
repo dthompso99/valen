@@ -18,6 +18,8 @@ import {
     ExpressionStatement,
     LocalDeclaration,
     IfStatement,
+    MatchStatement,
+    MatchCase,
     IfExpression,
     WhileStatement,
     ForStatement,
@@ -329,6 +331,7 @@ export class Parser {
             return new ReturnStatement(expression, this.span(start, expression ?? start));
         }
         if (this.match('IF')) return this.parseIf(this.previous());
+        if (this.match('MATCH')) return this.parseMatch(this.previous());
         if (this.match('WHILE')) return this.parseWhile(this.previous());
         if (this.match('FOR')) return this.parseFor(this.previous());
         if (this.match('BREAK')) return new BreakStatement(this.span(this.previous(), this.previous()));
@@ -359,6 +362,28 @@ export class Parser {
         }
         else this.current = separatorStart;
         return new IfStatement(condition, consequent, alternate, this.span(start, alternate ?? consequent));
+    }
+
+    parseMatch(start) {
+        const expression = this.parseExpression();
+        this.consume('LEFT_BRACE', "Expected '{' after match expression");
+        const cases = [];
+        let alternate = null;
+        this.skipSeparators();
+        while (!this.check('RIGHT_BRACE') && !this.check('EOF')) {
+            if (this.match('CASE')) {
+                const caseStart = this.previous();
+                const pattern = this.parseExpression();
+                const body = this.parseBlock();
+                cases.push(new MatchCase(pattern, body, this.span(caseStart, body)));
+            } else if (this.match('ELSE')) {
+                if (alternate) this.error(this.previous(), 'A match may only declare one else branch');
+                alternate = this.parseBlock();
+            } else this.error(this.peek(), "Expected 'case', 'else', or '}' in match");
+            this.skipSeparators();
+        }
+        const end = this.consume('RIGHT_BRACE', "Expected '}' after match");
+        return new MatchStatement(expression, cases, alternate, this.span(start, end));
     }
 
     parseWhile(start) {

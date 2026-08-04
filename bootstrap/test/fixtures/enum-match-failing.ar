@@ -1,0 +1,14 @@
+enum Direction {{ North, East, South }}
+enum Status {{ Ready }}
+
+entry {{
+    inspect() -> void {
+        match Direction.North {
+            case Direction.North {}
+            case Direction.North {}
+            case Status.Ready {}
+        }
+    }
+
+    __() -> i64 { return 0 }
+}}

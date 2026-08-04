@@ -779,6 +779,38 @@ export class SemanticAnalyzer {
                 if (!statement.alternate && consequentReturns) this.applyOptionalNarrowing(statement.condition, false, scope);
                 return consequentReturns && alternateReturns;
             }
+            case 'MatchStatement': {
+                const matchedType = this.analyzeExpression(statement.expression, scope, object);
+                const matchedEnum = this.findObjectType(matchedType);
+                if (!matchedEnum || matchedEnum.kind !== 'Enum') {
+                    this.report(statement.expression.span, `match requires an enum value, got '${matchedType}'`);
+                }
+                const seen = new Set();
+                let allReturn = statement.cases.length > 0;
+                for (const item of statement.cases) {
+                    const patternType = this.analyzeExpression(item.pattern, scope, object);
+                    const caseSymbol = item.pattern.semanticSymbol;
+                    if (caseSymbol?.kind !== 'EnumCase') {
+                        this.report(item.pattern.span, 'match case must name an enum case');
+                    } else if (matchedEnum && caseSymbol.owner !== matchedEnum) {
+                        this.report(item.pattern.span, `Case '${caseSymbol.qualifiedName}' does not belong to enum '${matchedEnum.qualifiedName}'`);
+                    } else if (seen.has(caseSymbol)) {
+                        this.report(item.pattern.span, `Duplicate match case '${caseSymbol.qualifiedName}'`);
+                    } else seen.add(caseSymbol);
+                    if (caseSymbol?.kind === 'EnumCase' && (!matchedEnum || caseSymbol.owner === matchedEnum)) {
+                        this.requireAssignable(patternType, matchedType, item.pattern.span, item.pattern);
+                    }
+                    allReturn = this.analyzeBlock(item.body, new Scope(scope, 'match case'), object, method) && allReturn;
+                }
+                if (statement.alternate) {
+                    allReturn = this.analyzeBlock(statement.alternate, new Scope(scope, 'match else'), object, method) && allReturn;
+                } else if (matchedEnum) {
+                    const missing = [...matchedEnum.fields.values()].filter(item => !seen.has(item));
+                    if (missing.length) this.report(statement.span, `Non-exhaustive match for '${matchedEnum.qualifiedName}'; missing ${missing.map(item => item.name).join(', ')}`);
+                }
+                statement.definitelyReturns = allReturn && (statement.alternate !== null || matchedEnum && seen.size === matchedEnum.fields.size);
+                return statement.definitelyReturns;
+            }
             case 'WhileStatement': {
                 const condition = this.analyzeExpression(statement.condition, scope, object);
                 this.requireAssignable(condition, BOOL, statement.condition.span, statement.condition);

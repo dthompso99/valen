@@ -53,6 +53,8 @@ export const Tokens = [
     {type: 'INHERITS', value: 'inherits'},
     {type: 'IMPLEMENTS', value: 'implements'},
     {type: 'IF', value: 'if'},
+    {type: 'MATCH', value: 'match'},
+    {type: 'CASE', value: 'case'},
     {type: 'ELSE', value: 'else'},
     {type: 'WHILE', value: 'while'},
     {type: 'FOR', value: 'for'},
