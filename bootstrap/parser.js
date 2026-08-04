@@ -28,6 +28,7 @@ import {
     UnwrapExpression,
     PropagateExpression,
     StringLiteral,
+    InterpolatedString,
     ArrayLiteral,
     UnaryExpression,
     BinaryExpression,
@@ -481,6 +482,9 @@ export class Parser {
         }
         if (this.match('STRING_LITERAL')) {
             const token = this.previous();
+            if (token.value[0] === '"' && this.hasInterpolation(token.value)) {
+                return this.parseInterpolatedString(token);
+            }
             return new StringLiteral(this.decodeString(token), token.value, this.span(token, token));
         }
         if (this.match('IDENTIFIER')) {
@@ -493,6 +497,70 @@ export class Parser {
             return expression;
         }
         this.error(this.peek(), 'Expected an expression');
+    }
+
+    hasInterpolation(value) {
+        for (let index = 1; index < value.length - 1; index++) {
+            if (value[index] === '\\') index++;
+            else if (value[index] === '$' && value[index + 1] === '{') return true;
+        }
+        return false;
+    }
+
+    parseInterpolatedString(token) {
+        const parts = [];
+        let text = '';
+        let index = 1;
+        const flush = () => {
+            if (text.length === 0) return;
+            parts.push(new StringLiteral(text, JSON.stringify(text), this.span(token, token)));
+            text = '';
+        };
+        while (index < token.value.length - 1) {
+            if (token.value[index] === '\\') {
+                const escaped = token.value[++index];
+                const escapes = {n: '\n', r: '\r', t: '\t', '\\': '\\', '"': '"', "'": "'", '$': '$'};
+                text += escapes[escaped] ?? escaped;
+                index++;
+                continue;
+            }
+            if (token.value[index] !== '$' || token.value[index + 1] !== '{') {
+                text += token.value[index++];
+                continue;
+            }
+            flush();
+            const start = index + 2;
+            index = this.interpolationEnd(token.value, start, token);
+            const source = token.value.slice(start, index).trim();
+            if (source.length === 0) this.error(token, 'Interpolation expression cannot be empty');
+            const parser = new Parser();
+            parser.tokens = new Tokenizer(source, `${token.sourceName}:interpolation`).parse();
+            parser.current = 0;
+            const expression = parser.parseExpression();
+            parser.skipNewlines();
+            if (!parser.check('EOF')) parser.error(parser.peek(), "Expected '}' after interpolation expression");
+            parts.push(expression);
+            index++;
+        }
+        flush();
+        return new InterpolatedString(parts, this.span(token, token));
+    }
+
+    interpolationEnd(value, start, token) {
+        let depth = 1;
+        let quote = null;
+        for (let index = start; index < value.length - 1; index++) {
+            const character = value[index];
+            if (quote !== null) {
+                if (character === '\\') index++;
+                else if (character === quote) quote = null;
+                continue;
+            }
+            if (character === '"' || character === "'") quote = character;
+            else if (character === '{') depth++;
+            else if (character === '}' && --depth === 0) return index;
+        }
+        this.error(token, "Unclosed interpolation expression");
     }
 
     decodeString(token) {

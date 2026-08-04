@@ -75,7 +75,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 - [ ] Add explicit capacity reservation and shrinking
 - [ ] Add array slices/views and multidimensional conveniences
 - [ ] Add Unicode code-point and grapheme-aware string operations
-- [ ] Add string interpolation and richer formatting
+- [x] Add string interpolation and richer formatting
 - [x] Add bulk-copy builder optimizations and `Array<u8>` conversion APIs
 - [x] Define array equality and hashing as ordered structural traversal
 

@@ -71,6 +71,24 @@ export class Tokenizer {
                 advance();
                 while (offset < this.source.length && this.source[offset] !== quote) {
                     if (this.source[offset] === '\\') advance();
+                    else if (quote === '"' && this.source[offset] === '$' && this.source[offset + 1] === '{') {
+                        advance();
+                        advance();
+                        let depth = 1;
+                        let nestedQuote = null;
+                        while (offset < this.source.length && depth > 0) {
+                            const nested = this.source[offset];
+                            if (nestedQuote !== null) {
+                                if (nested === '\\') advance();
+                                else if (nested === nestedQuote) nestedQuote = null;
+                            } else if (nested === '"' || nested === "'") nestedQuote = nested;
+                            else if (nested === '{') depth++;
+                            else if (nested === '}') depth--;
+                            if (offset < this.source.length) advance();
+                        }
+                        if (depth > 0) this.fail('Unclosed interpolation expression', tokenLine, tokenColumn);
+                        continue;
+                    }
                     if (offset < this.source.length) advance();
                 }
                 if (offset >= this.source.length) this.fail('Unclosed string', tokenLine, tokenColumn);

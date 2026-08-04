@@ -903,6 +903,26 @@ library Ir {{
                 instruction.text = expression.text
                 return instruction.result!
             }
+            if expression.kind == "InterpolatedString" {
+                local builder = self.temporary("builder_new", "StringBuilder")
+                local index:i64 = 0
+                while index < expression.arguments.length {
+                    local value = self.lowerExpression(expression.arguments[index])
+                    if value.typeName != "string" {
+                        local conversion = self.temporary("integer_to_string", "string")
+                        conversion.first = value
+                        value = conversion.result!
+                    }
+                    local append = new Instruction("builder_append_string")
+                    append.first = builder.result
+                    append.second = value
+                    self.emit(append)
+                    index = index + 1
+                }
+                local build = self.temporary("builder_build", "string")
+                build.first = builder.result
+                return build.result!
+            }
             if expression.kind == "ArrayLiteral" { return self.lowerArrayLiteral(expression) }
             if expression.kind == "Identifier" { return self.lowerIdentifier(expression) }
             if expression.kind == "Member" { return self.lowerMember(expression) }

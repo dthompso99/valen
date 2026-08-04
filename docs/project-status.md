@@ -24,7 +24,7 @@
 - Array literals infer homogeneous owned element types, including numeric promotion and nested arrays.
 - **WIP:** array insertion/removal, capacity controls, and slices
 - **WIP:** Unicode code-point and grapheme-aware strings
-- **WIP:** string interpolation and richer formatting
+- String and integer expression interpolation is implemented; float, boolean, alignment, precision, and radix formatting remain **WIP**.
 - flow-sensitive optional narrowing for stable locals and parameters
 - **WIP:** generic methods
 - lossless mixed-width integer promotion and predictable floating-point promotion

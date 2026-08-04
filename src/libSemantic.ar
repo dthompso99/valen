@@ -1128,6 +1128,17 @@ library Semantics {{
             if expression.kind == "Integer" { return self.typed(expression, "i64") }
             if expression.kind == "Float" { return self.typed(expression, "f64") }
             if expression.kind == "String" { return self.typed(expression, "string") }
+            if expression.kind == "InterpolatedString" {
+                local index:i64 = 0
+                while index < expression.arguments.length {
+                    local partType = self.analyzeExpression(expression.arguments[index], scope, moduleScope)
+                    if partType != "string" && !self.isInteger(partType) {
+                        self.error(expression.arguments[index].span, "String interpolation requires a string or integer, got '" + partType + "'")
+                    }
+                    index = index + 1
+                }
+                return self.typed(expression, "string")
+            }
             if expression.kind == "Boolean" { return self.typed(expression, "bool") }
             if expression.kind == "Null" { return self.typed(expression, "null") }
             if expression.kind == "ArrayLiteral" {

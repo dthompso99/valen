@@ -163,7 +163,38 @@ library Compiler {{
                         self.advance()
                     }
                 } else {
-                    self.advance()
+                    if quote == 34 && character == 36 && self.peek(1) == 123 {
+                        self.advance()
+                        self.advance()
+                        local depth:i64 = 1
+                        local nestedQuote:u8 = 0
+                        while !self.atEnd() && depth > 0 {
+                            local nested = self.peek(0)
+                            if nestedQuote != 0 {
+                                if nested == 92 {
+                                    self.advance()
+                                    if !self.atEnd() { self.advance() }
+                                } else {
+                                    if nested == nestedQuote { nestedQuote = 0 }
+                                    self.advance()
+                                }
+                            } else {
+                                if nested == 34 || nested == 39 {
+                                    nestedQuote = nested
+                                } else {
+                                    if nested == 123 { depth = depth + 1 }
+                                    if nested == 125 { depth = depth - 1 }
+                                }
+                                self.advance()
+                            }
+                        }
+                        if depth > 0 {
+                            self.fail("Unclosed interpolation expression", tokenLine, tokenColumn)
+                            return
+                        }
+                    } else {
+                        self.advance()
+                    }
                 }
             }
             if !closed {

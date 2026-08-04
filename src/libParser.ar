@@ -441,7 +441,10 @@ library Parsing {{
             if token.kind == "TRUE" || token.kind == "FALSE" { kind = "Boolean" }
             if token.kind == "INTEGER_LITERAL" { kind = "Integer" }
             if token.kind == "FLOAT_LITERAL" { kind = "Float" }
-            if token.kind == "STRING_LITERAL" { kind = "String" }
+            if token.kind == "STRING_LITERAL" {
+                if token.lexeme[0] == 34 && self.hasInterpolation(token.lexeme) { return self.parseInterpolatedString(token) }
+                kind = "String"
+            }
             if token.kind == "IDENTIFIER" { kind = "Identifier" }
             if token.kind == "LEFT_PAREN" {
                 local expression = self.parseExpression()
@@ -474,6 +477,91 @@ library Parsing {{
                 index = index + 1
             }
             return builder.build()
+        }
+
+        hasInterpolation(lexeme:string) -> bool {
+            local index:i64 = 1
+            while index < lexeme.length - 1 {
+                if lexeme[index] == 92 { index = index + 2 } else {
+                    if lexeme[index] == 36 && lexeme[index + 1] == 123 { return true }
+                    index = index + 1
+                }
+            }
+            return false
+        }
+
+        parseInterpolatedString(token:Compiler.Token) -> Ast.Expression {
+            local result = new Ast.Expression("InterpolatedString", token.span)
+            local text = new StringBuilder()
+            local index:i64 = 1
+            while index < token.lexeme.length - 1 {
+                local character = token.lexeme[index]
+                if character == 92 {
+                    index = index + 1
+                    character = token.lexeme[index]
+                    if character == 110 { character = 10 }
+                    if character == 114 { character = 13 }
+                    if character == 116 { character = 9 }
+                    text.appendByte(character)
+                    index = index + 1
+                } else {
+                    if character == 36 && token.lexeme[index + 1] == 123 {
+                        local prefix = text.build()
+                        if prefix.length > 0 {
+                            local literal = new Ast.Expression("String", token.span)
+                            literal.text = prefix
+                            result.arguments.append(literal)
+                        }
+                        text = new StringBuilder()
+                        local start = index + 2
+                        local end = self.interpolationEnd(token.lexeme, start)
+                        if end < 0 { self.fail("Unclosed interpolation expression"); return copy result }
+                        local sourceText = token.lexeme.slice(start, end - start)
+                        local source = new Compiler.SourceFile(token.span.source.path + ":interpolation", sourceText)
+                        local tokenizer = new Compiler.Tokenizer(source)
+                        local tokens = tokenizer.tokenize()
+                        if tokenizer.error != null { self.fail(tokenizer.error!); return copy result }
+                        local parser = new Parser(tokens)
+                        local expression = parser.parseExpression()
+                        parser.skipNewlines()
+                        if parser.error != null { self.fail(parser.error!); return copy result }
+                        if !parser.check("EOF") { self.fail("Expected '}' after interpolation expression"); return copy result }
+                        result.arguments.append(copy expression)
+                        index = end + 1
+                    } else {
+                        text.appendByte(character)
+                        index = index + 1
+                    }
+                }
+            }
+            local suffix = text.build()
+            if suffix.length > 0 {
+                local literal = new Ast.Expression("String", token.span)
+                literal.text = suffix
+                result.arguments.append(literal)
+            }
+            return copy result
+        }
+
+        interpolationEnd(value:string, start:i64) -> i64 {
+            local depth:i64 = 1
+            local quote:u8 = 0
+            local index = start
+            while index < value.length - 1 {
+                local character = value[index]
+                if quote != 0 {
+                    if character == 92 { index = index + 1 } else { if character == quote { quote = 0 } }
+                } else {
+                    if character == 34 || character == 39 { quote = character }
+                    if character == 123 { depth = depth + 1 }
+                    if character == 125 {
+                        depth = depth - 1
+                        if depth == 0 { return index }
+                    }
+                }
+                index = index + 1
+            }
+            return -1
         }
 
         precedence(kind:string) -> i64 {

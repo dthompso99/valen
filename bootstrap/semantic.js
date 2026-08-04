@@ -830,6 +830,15 @@ export class SemanticAnalyzer {
             case 'StringLiteral':
                 type = STRING;
                 break;
+            case 'InterpolatedString':
+                for (const part of expression.parts) {
+                    const partType = this.analyzeExpression(part, scope, object);
+                    if (partType !== STRING && !integerTypes.has(partType)) {
+                        this.report(part.span, `String interpolation requires a string or integer, got '${partType}'`);
+                    }
+                }
+                type = STRING;
+                break;
             case 'ArrayLiteral': {
                 if (expression.elements.length === 0) {
                     this.report(expression.span, 'Cannot infer the element type of an empty array literal; use new Array<T>(0)');

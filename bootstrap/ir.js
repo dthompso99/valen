@@ -436,6 +436,17 @@ export class IrGenerator {
                 return this.result('constant', expression.inferredType, {value: expression.value ? 1 : 0});
             case 'StringLiteral':
                 return this.result('string_constant', expression.inferredType, {value: expression.value});
+            case 'InterpolatedString': {
+                const builder = this.result('builder_new', 'StringBuilder');
+                for (const part of expression.parts) {
+                    let value = this.lowerExpression(part);
+                    if (value.type !== 'string') {
+                        value = this.result('integer_to_string', 'string', {value, integerType: value.type});
+                    }
+                    this.emit('builder_append_string', {builder, value});
+                }
+                return this.result('builder_build', 'string', {builder});
+            }
             case 'ArrayLiteral':
                 return this.lowerArrayLiteral(expression);
             case 'NullLiteral':

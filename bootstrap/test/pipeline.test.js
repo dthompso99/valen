@@ -1061,6 +1061,22 @@ test('integer formatting and StringBuilder produce immutable strings', () => {
     assert.doesNotThrow(() => new X86_64Backend().generate(ir));
 });
 
+test('string interpolation parses nested expressions and lowers through one builder', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/string-interpolation.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    const operations = ir.functions.flatMap(fn => fn.blocks.flatMap(block => block.instructions.map(instruction => instruction.op)));
+    assert.ok(operations.includes('builder_new'));
+    assert.ok(operations.includes('integer_to_string'));
+    assert.ok(operations.includes('builder_append_string'));
+    assert.ok(operations.includes('builder_build'));
+
+    const invalid = new SemanticAnalyzer().analyze(new Parser().parse('entry {{ __() -> void { local value = "bad ${true}" } }}', 'invalid-interpolation.ar'));
+    assert.equal(invalid.success, false);
+    assert.ok(invalid.diagnostics.some(diagnostic => /requires a string or integer/.test(diagnostic.message)));
+});
+
 test('strings and byte arrays convert and append through bulk-copy builder operations', () => {
     const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/byte-conversions.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});

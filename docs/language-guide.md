@@ -198,7 +198,17 @@ Box<T:Printable> {{
 Every concrete type argument must implement the named contract. Multiple parameters carry their
 own constraints, for example `Map<K:Hashable, V>`. Generic methods remain **WIP**.
 
-Strings support byte indexing, length, equality, concatenation, slicing, integer conversion, and `StringBuilder`. `text.toBytes()` creates an independent `Array<u8>`, while `bytes.toString()` converts an `Array<u8>` back to an immutable string. `StringBuilder.appendBytes(bytes)` and ordinary string appends reserve once and bulk-copy their input. Interpolation and richer formatting are **WIP**.
+Strings support byte indexing, length, equality, concatenation, slicing, integer conversion, interpolation, and `StringBuilder`. `text.toBytes()` creates an independent `Array<u8>`, while `bytes.toString()` converts an `Array<u8>` back to an immutable string. `StringBuilder.appendBytes(bytes)` and ordinary string appends reserve once and bulk-copy their input.
+
+Double-quoted strings interpolate string and integer expressions with `${expression}`. Interpolation accepts full expressions and lowers through `StringBuilder`, so a string with several substitutions is built in linear time. Escape the dollar sign as `\${` to emit a literal interpolation marker. Single-quoted strings do not interpolate.
+
+```argon
+local name = "Valen"
+local requests:i64 = 42
+local summary = "${name} handled ${requests} requests"
+```
+
+Float, boolean, alignment, precision, and radix formatting remain **WIP**.
 
 ## Optional values
 

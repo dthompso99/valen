@@ -1,0 +1,11 @@
+entry {{
+    __() -> i64 {
+        local name = "Valen"
+        local count:i16 = 3
+        local message = "Hello, ${name}! ${count} + 4 = ${count + 4}."
+        if message != "Hello, Valen! 3 + 4 = 7." { return 1 }
+        if "nested ${"text".slice(1, 3)}" != "nested ext" { return 2 }
+        if "escaped \${name}" != 'escaped ${name}' { return 3 }
+        return 0
+    }
+}}

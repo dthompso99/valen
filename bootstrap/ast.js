@@ -225,6 +225,13 @@ export class StringLiteral extends AstNode {
     }
 }
 
+export class InterpolatedString extends AstNode {
+    constructor(parts, span) {
+        super('InterpolatedString', span);
+        this.parts = parts;
+    }
+}
+
 export class ArrayLiteral extends AstNode {
     constructor(elements, span) {
         super('ArrayLiteral', span);
