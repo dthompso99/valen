@@ -383,19 +383,19 @@ library Semantics {{
                     if memberNode.kind == "EnumCase" {
                         symbol.typeName = owner.typeName
                         symbol.enumValue = index
-                    } else { if memberNode.kind == "Field" {
+                    } else if memberNode.kind == "Field" {
                         symbol.typeName = self.bindType(memberNode.declaredType!, owner.memberScope!)
                         if memberNode.weakReference {
                             local weakType = symbol.typeName!
                             if self.isOptional(weakType) { weakType = weakType.slice(0, weakType.length - 1) }
                             if !self.isOptional(symbol.typeName!) || self.findCanonical(weakType) == null { self.error(memberNode.span, "'weak' requires an optional object member") }
                             symbol.ownership = "member-weak"
-                        } else { if memberNode.reference {
+                        } else if memberNode.reference {
                             if !self.isOwnedReference(symbol.typeName!) { self.error(memberNode.span, "'ref' requires an object, array, or builder member") }
                             symbol.ownership = "member-reference"
                         } else {
                             if self.isOwnedReference(symbol.typeName!) { symbol.ownership = "member-owned" }
-                        }}
+                        }
                     } else {
                         symbol.returnType = self.bindType(memberNode.returnType!, owner.memberScope!)
                         if memberNode.returnReference { symbol.returnOwnership = "borrowed" }
@@ -424,7 +424,7 @@ library Semantics {{
                             symbol.parameters.append(parameterSymbol)
                             parameterIndex = parameterIndex + 1
                         }
-                    }}
+                    }
                     memberNode.symbol = symbol
                     local existing = owner.memberScope!.lookupLocal(symbol.name)
                     if symbol.kind == "Method" && existing != null {
@@ -898,7 +898,7 @@ library Semantics {{
                     self.analyzeMemberList(memberNode.members, memberNode.symbol!, moduleScope)
                 } else {
                     if memberNode.kind == "EnumCase" {
-                    } else { if memberNode.kind == "Field" {
+                    } else if memberNode.kind == "Field" {
                         if memberNode.initializer != null {
                             local previousOwner = self.currentOwner
                             self.currentOwner = owner
@@ -908,7 +908,7 @@ library Semantics {{
                         }
                     } else {
                         self.analyzeMethod(memberNode, owner, moduleScope)
-                    }}
+                    }
                 }
                 index = index + 1
             }
@@ -1029,7 +1029,7 @@ library Semantics {{
                     if self.isOwnedReference(returnType) && self.currentMethod!.returnOwnership == "owned" {
                         if statement.expression!.kind == "Null" && self.isOptional(returnType) {
                             statement.ownership = "transfer"
-                        } else { if self.isOwningExpression(statement.expression) {
+                        } else if self.isOwningExpression(statement.expression) {
                             statement.ownership = "transfer"
                         } else {
                             if statement.expression!.symbol != null && (statement.expression!.symbol!.kind == "Local" || statement.expression!.symbol!.kind == "Parameter") && statement.expression!.symbol!.ownership == "owned" {
@@ -1038,7 +1038,7 @@ library Semantics {{
                             } else {
                                 self.error(statement.expression!.span, "Returning '" + returnType + "' requires an owned value; use 'copy' for a borrowed reference")
                             }
-                        }}
+                        }
                     }
                 }
                 return
@@ -1100,7 +1100,7 @@ library Semantics {{
                         memberIndex = memberIndex + 1
                     }
                     if missing.length > 0 { self.error(statement.span, "Non-exhaustive match for '" + matchedEnum!.qualifiedName + "'; missing " + missing) } else { statement.ownership = "exhaustive" }
-                } else { if statement.alternate != null { statement.ownership = "exhaustive" } }
+                } else if statement.alternate != null { statement.ownership = "exhaustive" }
                 if self.matchDefinitelyReturns(statement) { statement.ownership = "returns" }
                 return
             }
@@ -1262,7 +1262,7 @@ library Semantics {{
                 if (self.isInteger(consequent) || self.isFloat(consequent)) && (self.isInteger(alternate) || self.isFloat(alternate)) {
                     local promoted = self.numericPromotion(consequent, alternate, expression.span)
                     if promoted != null { result = promoted! } else { result = "error" }
-                } else { if consequent != alternate { self.error(expression.span, "Conditional branches have incompatible types '" + consequent + "' and '" + alternate + "'"); result = "error" } }
+                } else if consequent != alternate { self.error(expression.span, "Conditional branches have incompatible types '" + consequent + "' and '" + alternate + "'"); result = "error" }
                 expression.text = result
                 return self.typed(expression, result)
             }
@@ -1529,12 +1529,12 @@ library Semantics {{
                     } else {
                         if self.isExternalResource(deletedType) {
                             self.error(expression.span, "Native resource '" + deletedType + "' must be passed to its owning cleanup operation")
-                        } else { if expression.left!.symbol == null || (expression.left!.symbol!.kind != "Local" && expression.left!.symbol!.kind != "Parameter") || expression.left!.symbol!.ownership != "owned" {
+                        } else if expression.left!.symbol == null || (expression.left!.symbol!.kind != "Local" && expression.left!.symbol!.kind != "Parameter") || expression.left!.symbol!.ownership != "owned" {
                             self.error(expression.span, "delete requires an owned local or parameter")
                         } else {
                             expression.left!.symbol!.ownership = "destroyed"
                             expression.left!.symbol!.ownershipVersion = expression.left!.symbol!.ownershipVersion + 1
-                        } }
+                        }
                     }
                     return self.typed(expression, "void")
                 }
@@ -1949,7 +1949,7 @@ library Semantics {{
             symbol.initializerCycleState = 1
             local node = self.memberNodeForSymbol(symbol)
             local top = self.declarationForSymbol(symbol)
-            if node != null { self.visitInitializerMembers(node!.members) } else { if top != null { self.visitInitializerMembers(top!.members) } }
+            if node != null { self.visitInitializerMembers(node!.members) } else if top != null { self.visitInitializerMembers(top!.members) }
             symbol.initializerCycleState = 2
         }
 

@@ -281,12 +281,12 @@ library Compiler {{
             if character == 60 {
                 kind = "LESS"
                 if self.matchByte(60) { kind = "SHIFT_LEFT" }
-                else { if self.matchByte(61) { kind = "LESS_EQUAL" } }
+                else if self.matchByte(61) { kind = "LESS_EQUAL" }
             }
             if character == 62 {
                 kind = "GREATER"
                 if self.matchByte(62) { kind = "SHIFT_RIGHT" }
-                else { if self.matchByte(61) { kind = "GREATER_EQUAL" } }
+                else if self.matchByte(61) { kind = "GREATER_EQUAL" }
             }
             if character == 38 {
                 kind = "BIT_AND"

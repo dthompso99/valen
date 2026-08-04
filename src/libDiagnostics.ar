@@ -59,13 +59,7 @@ library Diagnostics {{
         }
 
         hasErrors() -> bool {
-            local index:i64 = 0
-            while index < self.diagnostics.length {
-                if self.diagnostics[index].severity == 1 {
-                    return true
-                }
-                index = index + 1
-            }
+            for diagnostic in self.diagnostics { if diagnostic.severity == 1 { return true } }
             return false
         }
     }}
@@ -78,41 +72,22 @@ library Diagnostics {{
 
     format(diagnostic:Diagnostic) -> string {
         local builder = new StringBuilder()
-        builder.append(diagnostic.span.source.path)
-        builder.append(":")
-        builder.append(diagnostic.span.line)
-        builder.append(":")
-        builder.append(diagnostic.span.column)
-        builder.append(": ")
-        builder.append(severityName(diagnostic.severity))
-        builder.append(": ")
-        builder.append(diagnostic.message)
-        local labelIndex:i64 = 0
-        while labelIndex < diagnostic.labels.length {
-            local label = diagnostic.labels[labelIndex]
-            if !label.primary {
-                builder.append("\n  --> "); builder.append(label.span.source.path); builder.append(":"); builder.append(label.span.line); builder.append(":"); builder.append(label.span.column); builder.append(": "); builder.append(label.message)
-            }
-            labelIndex = labelIndex + 1
+        builder.append("${diagnostic.span.source.path}:${diagnostic.span.line}:${diagnostic.span.column}: ${severityName(diagnostic.severity)}: ${diagnostic.message}")
+        for label in diagnostic.labels {
+            if !label.primary { builder.append("\n  --> ${label.span.source.path}:${label.span.line}:${label.span.column}: ${label.message}") }
         }
-        local noteIndex:i64 = 0
-        while noteIndex < diagnostic.notes.length { builder.append("\n  note: "); builder.append(diagnostic.notes[noteIndex]); noteIndex = noteIndex + 1 }
-        local fixIndex:i64 = 0
-        while fixIndex < diagnostic.fixes.length {
-            local fix = diagnostic.fixes[fixIndex]
-            builder.append("\n  help: "); builder.append(fix.message)
-            builder.append("\n  fix: "); builder.append(fix.span.source.path); builder.append(":"); builder.append(fix.span.line); builder.append(":"); builder.append(fix.span.column); builder.append(": replace with '"); builder.append(fix.replacement); builder.append("'")
-            fixIndex = fixIndex + 1
+        for note in diagnostic.notes { builder.append("\n  note: ${note}") }
+        for fix in diagnostic.fixes {
+            builder.append("\n  help: ${fix.message}")
+            builder.append("\n  fix: ${fix.span.source.path}:${fix.span.line}:${fix.span.column}: replace with '${fix.replacement}'")
         }
         return builder.build()
     }
 
     write(bag:DiagnosticBag) -> void {
-        local index:i64 = 0
-        while index < bag.diagnostics.length {
-            System.writeError(format(bag.diagnostics[index]))
+        for diagnostic in bag.diagnostics {
+            System.writeError(format(diagnostic))
             System.writeError("\n")
-            index = index + 1
         }
     }
 }}

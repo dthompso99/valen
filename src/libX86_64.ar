@@ -1246,7 +1246,7 @@ library X86_64 {{
                 local argument = arguments[index]
                 local stacked:bool = false
                 if self.isFloat(argument.typeName) { if xmm < 8 { xmm = xmm + 1 } else { stacked = true } }
-                else { if gp < 6 { gp = gp + 1 } else { stacked = true } }
+                else if gp < 6 { gp = gp + 1 } else { stacked = true }
                 if index == target { return stacked }
                 index = index + 1
             }

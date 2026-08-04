@@ -101,7 +101,7 @@ library Parsing {{
 
         parseMember(inLibrary:bool) -> Ast.MemberDeclaration {
             local visibility = "public"
-            if self.accept("PRIVATE") { visibility = "private" } else { if self.accept("PUBLIC") { visibility = "public" } }
+            if self.accept("PRIVATE") { visibility = "private" } else if self.accept("PUBLIC") { visibility = "public" }
             local nestedObject:bool = false
             if self.check("ENUM") {
                 local declaration = self.parseDeclaration("Enum")
@@ -198,7 +198,7 @@ library Parsing {{
 
         parseTypeReference() -> Ast.TypeReference {
             local ownership = "owned"
-            if self.accept("REF") { ownership = "ref" } else { if self.accept("WEAK") { ownership = "weak" } }
+            if self.accept("REF") { ownership = "ref" } else if self.accept("WEAK") { ownership = "weak" }
             local start = self.consume("IDENTIFIER", "Expected a type name")
             local name = start.lexeme
             while self.accept("DOT") {
@@ -328,10 +328,10 @@ library Parsing {{
                     local pattern = self.parseExpression()
                     local body = self.parseBlock()
                     statement.matchCases.append(new Ast.MatchCase(pattern, body, self.span(caseStart.span, body.span)))
-                } else { if self.accept("ELSE") {
+                } else if self.accept("ELSE") {
                     if statement.alternate != null { self.fail("A match may only declare one else branch") }
                     statement.alternate = self.parseBlock()
-                } else { self.fail("Expected 'case', 'else', or '}' in match") }}
+                } else { self.fail("Expected 'case', 'else', or '}' in match") }
                 self.skipSeparators()
             }
             local end = self.consume("RIGHT_BRACE", "Expected '}' after match")
@@ -619,7 +619,7 @@ library Parsing {{
             while index < value.length - 1 {
                 local character = value[index]
                 if quote != 0 {
-                    if character == 92 { index = index + 1 } else { if character == quote { quote = 0 } }
+                    if character == 92 { index = index + 1 } else if character == quote { quote = 0 }
                 } else {
                     if character == 34 || character == 39 { quote = character }
                     if character == 123 { depth = depth + 1 }

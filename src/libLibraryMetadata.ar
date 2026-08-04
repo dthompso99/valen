@@ -50,11 +50,7 @@ library LibraryMetadata {{
             output.append("\ninterface="); output.append(metadata.interfaceFingerprint)
             output.append("\nimplementation="); output.append(metadata.implementationFingerprint)
             output.append("\nobject="); output.append(metadata.objectFingerprint); output.append("\n")
-            local index:i64 = 0
-            while index < metadata.dependencies.length {
-                output.append("dependency="); output.append(metadata.dependencies[index].name); output.append("|"); output.append(metadata.dependencies[index].interfaceFingerprint); output.append("\n")
-                index = index + 1
-            }
+            for dependency in metadata.dependencies { output.append("dependency=${dependency.name}|${dependency.interfaceFingerprint}\n") }
             output.append("VALEN-LIBRARY-END\n")
             return output.build()
         }

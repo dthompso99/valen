@@ -33,26 +33,24 @@ entry {{
                 linkerMode = arguments[argumentIndex + 1]
                 if linkerMode != "auto" && linkerMode != "native" && linkerMode != "system" { System.writeError("valen: unsupported linker '"); System.writeError(linkerMode); System.writeError("'\n"); return 64 }
                 argumentIndex = argumentIndex + 1
-            } else { if argument == "--source-root" {
+            } else if argument == "--source-root" {
                 if argumentIndex + 1 >= arguments.length { System.writeError("valen: --source-root requires a directory\n"); return 64 }
                 configuredSourceRoot = arguments[argumentIndex + 1]
                 argumentIndex = argumentIndex + 1
-            }
-            else { if argument == "--library-version" {
+            } else if argument == "--library-version" {
                 if argumentIndex + 1 >= arguments.length { System.writeError("valen: --library-version requires a semantic version\n"); return 64 }
                 libraryVersion = arguments[argumentIndex + 1]; argumentIndex = argumentIndex + 1
-            }
-            else { if argument == "-O0" { optimizationLevel = 0 }
-            else {
-                if argument == "-O1" { optimizationLevel = 1 }
-                else {
-                    if argument.length >= 2 && argument.slice(0, 2) == "-O" {
-                        System.writeError("valen: unsupported optimization level '"); System.writeError(argument); System.writeError("'\n")
-                        return 64
-                    }
-                    compilerArguments.append(argument)
+            } else if argument == "-O0" {
+                optimizationLevel = 0
+            } else if argument == "-O1" {
+                optimizationLevel = 1
+            } else {
+                if argument.length >= 2 && argument.slice(0, 2) == "-O" {
+                    System.writeError("valen: unsupported optimization level '${argument}'\n")
+                    return 64
                 }
-            } } } }
+                compilerArguments.append(argument)
+            }
             argumentIndex = argumentIndex + 1
         }
         if compilerArguments.length == 2 {
@@ -92,9 +90,9 @@ entry {{
                     if compilerArguments.length == 5 {
                         if compilerArguments[1] == "--emit-object" && compilerArguments[3] == "-o" {
                             emitObjectOnly = true; sourcePath = compilerArguments[2]; outputPath = compilerArguments[4]
-                        } else { if compilerArguments[1] == "--emit-library" && compilerArguments[3] == "-o" {
+                        } else if compilerArguments[1] == "--emit-library" && compilerArguments[3] == "-o" {
                             emitLibrary = true; sourcePath = compilerArguments[2]; outputPath = compilerArguments[4]
-                        } }
+                        }
                     }
                 }
             }
@@ -157,13 +155,7 @@ entry {{
         local irPass = new IrValidation.Pass()
         local irErrors = irPass.prepare(ir, optimizationLevel == 1, !emitLibrary)
         if irErrors.length > 0 {
-            local errorIndex:i64 = 0
-            while errorIndex < irErrors.length {
-                System.writeError("valen: invalid IR: ")
-                System.writeError(irErrors[errorIndex])
-                System.writeError("\n")
-                errorIndex = errorIndex + 1
-            }
+            for error in irErrors { System.writeError("valen: invalid IR: ${error}\n") }
             return 70
         }
         if emitIr {
@@ -175,13 +167,7 @@ entry {{
         local backend = new X86_64.Backend(ir, optimizationLevel)
         local runtimeErrors = backend.validateRuntime()
         if runtimeErrors.length > 0 {
-            local runtimeErrorIndex:i64 = 0
-            while runtimeErrorIndex < runtimeErrors.length {
-                System.writeError("valen: target: ")
-                System.writeError(runtimeErrors[runtimeErrorIndex])
-                System.writeError("\n")
-                runtimeErrorIndex = runtimeErrorIndex + 1
-            }
+            for error in runtimeErrors { System.writeError("valen: target: ${error}\n") }
             return 69
         }
         local assembly = backend.generate()
@@ -280,15 +266,14 @@ entry {{
                     local includeRuntime = graph!.entry != null && module.path == graph!.entry!.path
                     local moduleAssembly:string? = null
                     if includeRuntime { moduleAssembly = assembly }
-                    else { if cache != null { moduleAssembly = cache!.loadModuleAssembly(module, false) } }
+                    else if cache != null { moduleAssembly = cache!.loadModuleAssembly(module, false) }
                     if moduleAssembly == null {
                         local moduleIr = ir!
                         if analysis != null { local moduleGenerator = new Ir.Generator(analysis!, module.path); moduleIr = moduleGenerator.generate() }
                         local modulePass = new IrValidation.Pass()
                         local moduleErrors = modulePass.prepare(moduleIr, optimizationLevel == 1, includeRuntime)
                         if moduleErrors.length > 0 {
-                            local moduleErrorIndex:i64 = 0
-                            while moduleErrorIndex < moduleErrors.length { System.writeError("valen: invalid module IR: "); System.writeError(moduleErrors[moduleErrorIndex]); System.writeError("\n"); moduleErrorIndex = moduleErrorIndex + 1 }
+                            for error in moduleErrors { System.writeError("valen: invalid module IR: ${error}\n") }
                             return 70
                         }
                         local moduleBackend = new X86_64.Backend(moduleIr, optimizationLevel, module.path, includeRuntime)

@@ -176,7 +176,7 @@ library ModuleLoading {{
                 local index:i64 = 0
                 while index <= paths.length {
                     local separator:bool = false
-                    if index == paths.length { separator = true } else { if paths[index] == 58 { separator = true } }
+                    if index == paths.length { separator = true } else if paths[index] == 58 { separator = true }
                     if separator {
                         if index > start {
                             local root = self.normalizePath(paths.slice(start, index - start))

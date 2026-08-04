@@ -85,10 +85,10 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 - [x] Finalize package and module search-path rules
 - [x] Define library versioning and compiled-library metadata
 - [x] Define stable native and dynamic-library FFI boundaries
-- [ ] Add diagnostic severity enums, notes, fix hints, and multi-span labels
+- [x] Add diagnostic severity enums, notes, fix hints, and multi-span labels
 - [x] Add source-level test syntax and a native test runner
 - [x] Add formatter rules while preserving optional condition parentheses
-- [ ] Add a language-server protocol implementation
+- [x] Add a language-server protocol implementation
 
 ## 7. Compiler and generated-code efficiency
 

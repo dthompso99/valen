@@ -502,7 +502,7 @@ library Ir {{
                         while parameterIndex < symbol.parameters.length { declaration.parameters.append(new Parameter(symbol.parameters[parameterIndex].name, symbol.parameters[parameterIndex].typeName!)); parameterIndex = parameterIndex + 1 }
                         self.program.functionDeclarations.append(declaration)
                     }
-                } else { if memberNode.kind == "Object" { self.declareFunctionSignatures(memberNode.members, memberNode.symbol!) } }
+                } else if memberNode.kind == "Object" { self.declareFunctionSignatures(memberNode.members, memberNode.symbol!) }
                 index = index + 1
             }
         }
@@ -1358,7 +1358,7 @@ library Ir {{
                 local op = "array_append"
                 if name == "insert" { op = "array_insert" }
                 if receiverType == "StringBuilder" {
-                    if name == "appendByte" { op = "builder_append_byte" } else { if name == "appendBytes" { op = "builder_append_bytes" } else { op = "builder_append_string" } }
+                    if name == "appendByte" { op = "builder_append_byte" } else if name == "appendBytes" { op = "builder_append_bytes" } else { op = "builder_append_string" }
                 }
                 local instruction = new Instruction(op)
                 instruction.first = self.lowerExpression(callee.left!)

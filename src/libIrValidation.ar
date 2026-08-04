@@ -268,8 +268,9 @@ library IrValidation {{
                 self.validateFunction(program, program.functions[index], errors)
                 index = index + 1
             }
-            if program.entry == null { if requireEntry { errors.append("program has no entry function") } }
-            else { if self.findDefinedFunction(program, program.entry!) == null { errors.append("entry is not a defined function") } }
+            if program.entry == null {
+                if requireEntry { errors.append("program has no entry function") }
+            } else if self.findDefinedFunction(program, program.entry!) == null { errors.append("entry is not a defined function") }
             return errors
         }
 
@@ -323,8 +324,9 @@ library IrValidation {{
                     if target != null { expected = target!.parameters.length; returnType = target!.returnType }
                     else { expected = external!.parameters.length; returnType = external!.returnType }
                     if instruction.arguments.length != expected { errors.append(prefix + " has incorrect call arity") }
-                    if instruction.result != null { if instruction.result!.typeName != returnType { errors.append(prefix + " has an incorrect result type") } }
-                    else { if returnType != "void" { errors.append(prefix + " discards a non-void result") } }
+                    if instruction.result != null {
+                        if instruction.result!.typeName != returnType { errors.append(prefix + " has an incorrect result type") }
+                    } else if returnType != "void" { errors.append(prefix + " discards a non-void result") }
                 }
             }
         }
