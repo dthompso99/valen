@@ -171,7 +171,9 @@ for value in values {
 }
 ```
 
-`else if` shorthand, expression-valued conditionals, slices, and exhaustive matching are **WIP**.
+`else if` chains are ordinary conditionals and may mix parenthesized and unparenthesized conditions.
+An `else` binds to the closest preceding `if`. Expression-valued conditionals, enums, and exhaustive
+matching remain **WIP**.
 
 ## Arrays, strings, and generic objects
 

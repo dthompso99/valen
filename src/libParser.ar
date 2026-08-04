@@ -229,15 +229,7 @@ library Parsing {{
                 return statement
             }
             if self.match("IF") {
-                local start = self.previous()
-                local statement = new Ast.Statement("If", start.span)
-                statement.condition = self.parseExpression()
-                statement.body = self.parseBlock()
-                local saved = self.current
-                self.skipNewlines()
-                if self.match("ELSE") { statement.alternate = self.parseBlock() } else { self.current = saved }
-                statement.span = self.span(start.span, self.previous().span)
-                return statement
+                return self.parseIf(self.previous())
             }
             if self.match("WHILE") {
                 local start = self.previous()
@@ -286,6 +278,24 @@ library Parsing {{
             local expression = self.parseExpression()
             local statement = new Ast.Statement("Expression", expression.span)
             statement.expression = expression
+            return statement
+        }
+
+        parseIf(start:Compiler.Token) -> Ast.Statement {
+            local statement = new Ast.Statement("If", start.span)
+            statement.condition = self.parseExpression()
+            statement.body = self.parseBlock()
+            local saved = self.current
+            self.skipNewlines()
+            if self.match("ELSE") {
+                if self.match("IF") {
+                    local nested = self.parseIf(self.previous())
+                    local statements = new Array<Ast.Statement>(0)
+                    statements.append(nested)
+                    statement.alternate = new Ast.Block(statements, nested.span)
+                } else { statement.alternate = self.parseBlock() }
+            } else { self.current = saved }
+            statement.span = self.span(start.span, self.previous().span)
             return statement
         }
 

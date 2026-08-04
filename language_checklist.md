@@ -44,6 +44,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 
 - [x] Add general-purpose generic objects beyond `Array<T>` using invariant monomorphized specializations
 - [x] Define generic constraints using contracts
+- [ ] Add first-class enum and sum-type declarations
 - [x] Add optional value types for stack primitives
 - [x] Add flow-sensitive optional narrowing
 - [x] Generalize safe `Result` propagation
@@ -64,7 +65,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 - [x] Add event-loop executors for nonblocking file and network I/O
 - [x] Implement short-circuit lowering for `&&` and `||`
 - [x] Add iterators and `for` loops
-- [ ] Add `else if` shorthand
+- [x] Add `else if` shorthand
 - [ ] Evaluate expression-valued conditionals and richer control-flow expressions
 - [ ] Define exhaustive matching if a sum type or enum model is introduced
 

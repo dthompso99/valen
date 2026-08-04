@@ -320,7 +320,12 @@ export class Parser {
         let alternate = null;
         const separatorStart = this.current;
         this.skipNewlines();
-        if (this.match('ELSE')) alternate = this.parseBlock();
+        if (this.match('ELSE')) {
+            if (this.match('IF')) {
+                const nested = this.parseIf(this.previous());
+                alternate = new BlockStatement([nested], nested.span);
+            } else alternate = this.parseBlock();
+        }
         else this.current = separatorStart;
         return new IfStatement(condition, consequent, alternate, this.span(start, alternate ?? consequent));
     }
