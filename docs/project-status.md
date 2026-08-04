@@ -76,6 +76,7 @@ and embedded targets.
 - The integrated x86-64 ELF linker handles freestanding executables; `--linker system` remains available for foreign libraries.
 - Cold freestanding builds emit versioned module interfaces and dependency-fingerprinted module objects, lower implementations in bounded chunks, and retain importers when only a dependency body changes.
 - Repeatable compiler and generated-code benchmarks report compile time, memory, executable size, and runtime speed; expanding the workload corpus remains **WIP**.
+- The self-hosted x86-64 backend indexes hot compiler lookups and streams common assembly fragments directly into its builder to avoid repeated linear scans and temporary concatenated strings.
 
 ## Maturity
 

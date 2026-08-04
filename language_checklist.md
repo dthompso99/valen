@@ -92,9 +92,9 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 
 ## 7. Compiler and generated-code efficiency
 
-- [ ] Replace linear compiler symbol collections where profiling justifies it
+- [x] Replace hot backend symbol, type, field, slot, allocation, and immediate lookups with string indexes
 - [x] Add a process-lifetime arena for compiler allocations
-- [ ] Reduce temporary immutable-string allocation during assembly generation
+- [x] Add direct multi-fragment and integer assembly-writer paths for hot labels, branches, calls, and frame records
 - [x] Add IR validation and canonicalization passes
 - [x] Add dead-block, dead-value, and constant-folding passes
 - [x] Add register allocation

@@ -2,6 +2,63 @@ import Ir from './libIr.ar'
 import System from './libSystem.ar'
 
 library X86_64 {{
+    StringIndex {{
+        member keys:Array<string?>
+        member values:Array<i64>
+        member count:i64
+
+        __() -> void { self.keys = new Array<string?>(16); self.values = new Array<i64>(16); self.count = 0 }
+
+        bucketFor(key:string, capacity:i64) -> i64 {
+            local value:i64 = 0
+            local index:i64 = 0
+            while index < key.length { value = value * 31 + (key[index] as i64); if value < 0 { value = 0 - (value + 1) }; value = value - (value / capacity) * capacity; index = index + 1 }
+            return value
+        }
+
+        get(key:string) -> i64 {
+            local capacity = self.keys.length
+            local bucket = self.bucketFor(key, capacity)
+            local checked:i64 = 0
+            while checked < capacity {
+                local existing = self.keys[bucket]
+                if existing == null { return -1 }
+                if existing! == key { return self.values[bucket] }
+                bucket = bucket + 1
+                if bucket == capacity { bucket = 0 }
+                checked = checked + 1
+            }
+            return -1
+        }
+
+        set(key:string, value:i64) -> void {
+            if (self.count + 1) * 4 >= self.keys.length * 3 { self.grow() }
+            self.insert(key, value)
+        }
+
+        insert(key:string, value:i64) -> void {
+            local capacity = self.keys.length
+            local bucket = self.bucketFor(key, capacity)
+            while self.keys[bucket] != null {
+                if self.keys[bucket]! == key { self.values[bucket] = value; return }
+                bucket = bucket + 1
+                if bucket == capacity { bucket = 0 }
+            }
+            self.keys[bucket] = key
+            self.values[bucket] = value
+            self.count = self.count + 1
+        }
+
+        grow() -> void {
+            local oldKeys = self.keys
+            local oldValues = self.values
+            self.keys = new Array<string?>(oldKeys.length * 2)
+            self.values = new Array<i64>(oldValues.length * 2)
+            self.count = 0
+            local index:i64 = 0
+            while index < oldKeys.length { if oldKeys[index] != null { self.insert(oldKeys[index]!, oldValues[index]) }; index = index + 1 }
+        }
+    }}
     Writer {{
         member builder:StringBuilder
         member optimize:bool
@@ -14,6 +71,9 @@ library X86_64 {{
             }
             self.builder.append(value); self.builder.appendByte(10)
         }
+        line2(first:string, second:string) -> void { self.builder.append(first); self.builder.append(second); self.builder.appendByte(10) }
+        line3(first:string, second:string, third:string) -> void { self.builder.append(first); self.builder.append(second); self.builder.append(third); self.builder.appendByte(10) }
+        lineInteger(prefix:string, value:i64, suffix:string="") -> void { self.builder.append(prefix); self.builder.append(value); self.builder.append(suffix); self.builder.appendByte(10) }
         build() -> string { return self.builder.build() }
 
         redundantMove(value:string) -> bool {
@@ -91,6 +151,15 @@ library X86_64 {{
         member slots:Array<Slot>
         member allocations:Array<Allocation>
         member immediates:Array<Immediate>
+        member functionIndex:StringIndex
+        member assemblyIndex:StringIndex
+        member fieldIndex:StringIndex
+        member typeIndex:StringIndex
+        member slotIndex:StringIndex
+        member allocationIndex:StringIndex
+        member immediateIndex:StringIndex
+        member programFunctionIndex:StringIndex
+        member programTypeIndex:StringIndex
         member currentFunctionSymbol:string
         member nextLabel:i64
         member usesPrint:bool
@@ -111,6 +180,19 @@ library X86_64 {{
             self.slots = new Array<Slot>(0)
             self.allocations = new Array<Allocation>(0)
             self.immediates = new Array<Immediate>(0)
+            self.functionIndex = new StringIndex()
+            self.assemblyIndex = new StringIndex()
+            self.fieldIndex = new StringIndex()
+            self.typeIndex = new StringIndex()
+            self.slotIndex = new StringIndex()
+            self.allocationIndex = new StringIndex()
+            self.immediateIndex = new StringIndex()
+            self.programFunctionIndex = new StringIndex()
+            self.programTypeIndex = new StringIndex()
+            local functionIndex:i64 = 0
+            while functionIndex < self.program.functions.length { self.programFunctionIndex.set(self.program.functions[functionIndex].name, functionIndex); functionIndex = functionIndex + 1 }
+            local programTypeIndex:i64 = 0
+            while programTypeIndex < self.program.types.length { self.programTypeIndex.set(self.program.types[programTypeIndex].name, programTypeIndex); programTypeIndex = programTypeIndex + 1 }
             self.currentFunctionSymbol = ""
             self.nextLabel = 0
             self.usesPrint = false
@@ -338,14 +420,16 @@ library X86_64 {{
                     local fieldAlignment = size
                     if fieldAlignment > 8 { fieldAlignment = 8 }
                     offset = self.align(offset, fieldAlignment)
-                    self.fields.append(new FieldLayout(field.qualifiedName, field.typeName, field.ownership, offset))
+                    local layout = new FieldLayout(field.qualifiedName, field.typeName, field.ownership, offset)
+                    self.fields.append(layout); self.fieldIndex.set(layout.name, self.fields.length - 1)
                     offset = offset + size
                     if fieldAlignment > alignment { alignment = fieldAlignment }
                     fieldIndex = fieldIndex + 1
                 }
                 local total = self.align(offset, alignment)
                 if total < 8 { total = 8 }
-                self.types.append(new TypeLayout(typeNode.name, total))
+                local typeLayout = new TypeLayout(typeNode.name, total)
+                self.types.append(typeLayout); self.typeIndex.set(typeLayout.name, self.types.length - 1)
                 typeIndex = typeIndex + 1
             }
         }
@@ -356,13 +440,15 @@ library X86_64 {{
                 local function = self.program.functions[index]
                 local assemblyName = self.mangle(function.name)
                 if self.findAssemblySymbol(assemblyName) != null { return }
-                self.functionSymbols.append(new FunctionSymbol(function.name, assemblyName))
+                local symbol = new FunctionSymbol(function.name, assemblyName)
+                self.functionSymbols.append(symbol); self.functionIndex.set(symbol.name, self.functionSymbols.length - 1); self.assemblyIndex.set(symbol.assemblyName, self.functionSymbols.length - 1)
                 index = index + 1
             }
             index = 0
             while index < self.program.externals.length {
                 local external = self.program.externals[index]
-                self.functionSymbols.append(new FunctionSymbol(external.name, external.runtimeName))
+                local symbol = new FunctionSymbol(external.name, external.runtimeName)
+                self.functionSymbols.append(symbol); self.functionIndex.set(symbol.name, self.functionSymbols.length - 1); self.assemblyIndex.set(symbol.assemblyName, self.functionSymbols.length - 1)
                 index = index + 1
             }
         }
@@ -398,6 +484,9 @@ library X86_64 {{
             self.slots = new Array<Slot>(0)
             self.immediates = new Array<Immediate>(0)
             self.allocations = new Array<Allocation>(0)
+            self.slotIndex = new StringIndex()
+            self.immediateIndex = new StringIndex()
+            self.allocationIndex = new StringIndex()
             if self.optimize { self.selectImmediateConstants(function); self.allocateRegisters(function) }
             local parameterIndex:i64 = 0
             while parameterIndex < function.parameters.length {
@@ -444,14 +533,14 @@ library X86_64 {{
             local rootPushDone = self.currentFunctionSymbol + "__gc_push_done"
             local rootPopSlow = self.currentFunctionSymbol + "__gc_pop_slow"
             local rootPopDone = self.currentFunctionSymbol + "__gc_pop_done"
-            self.writer.line(".globl " + self.currentFunctionSymbol)
-            self.writer.line(self.currentFunctionSymbol + ":")
+            self.writer.line2(".globl ", self.currentFunctionSymbol)
+            self.writer.line2(self.currentFunctionSymbol, ":")
             self.writer.line("    push rbp")
             self.writer.line("    mov rbp, rsp")
-            if frameSize > 0 { self.writer.line("    sub rsp, " + frameSize.toString()) }
+            if frameSize > 0 { self.writer.lineInteger("    sub rsp, ", frameSize) }
             local clearOffset:i64 = 8
             while clearOffset <= frameSize {
-                self.writer.line("    mov QWORD PTR [rbp-" + clearOffset.toString() + "], 0")
+                self.writer.lineInteger("    mov QWORD PTR [rbp-", clearOffset, "], 0")
                 clearOffset = clearOffset + 8
             }
             registerIndex = 0
@@ -461,8 +550,8 @@ library X86_64 {{
                 registerIndex = registerIndex + 1
             }
             self.writer.line("    lea rax, [rip+" + rootTraceLabel + "]")
-            self.writer.line("    mov QWORD PTR [rbp-" + (rootRecordOffset - 8).toString() + "], rax")
-            self.writer.line("    mov QWORD PTR [rbp-" + (rootRecordOffset - 16).toString() + "], rbp")
+            self.writer.lineInteger("    mov QWORD PTR [rbp-", rootRecordOffset - 8, "], rax")
+            self.writer.lineInteger("    mov QWORD PTR [rbp-", rootRecordOffset - 16, "], rbp")
             parameterIndex = 0
             local gpIndex:i64 = 0
             local xmmIndex:i64 = 0
@@ -479,17 +568,17 @@ library X86_64 {{
                         self.writer.line("    mov " + destination + ", " + self.argumentRegister(gpIndex))
                         gpIndex = gpIndex + 1
                     } else {
-                        self.writer.line("    mov rax, QWORD PTR [rbp+" + (16 + stackIndex * 8).toString() + "]")
+                        self.writer.lineInteger("    mov rax, QWORD PTR [rbp+", 16 + stackIndex * 8, "]")
                         self.writer.line("    mov " + destination + ", rax")
                         stackIndex = stackIndex + 1
                     }
                 }
                 parameterIndex = parameterIndex + 1
             }
-            self.writer.line("    cmp QWORD PTR [rip+valen_gc_workers], 0"); self.writer.line("    jne " + rootPushSlow)
-            self.writer.line("    mov rax, QWORD PTR [rip+valen_gc_roots]"); self.writer.line("    mov QWORD PTR [rbp-" + rootRecordOffset.toString() + "], rax")
-            self.writer.line("    lea rax, [rbp-" + rootRecordOffset.toString() + "]"); self.writer.line("    mov QWORD PTR [rip+valen_gc_roots], rax"); self.writer.line("    jmp " + rootPushDone)
-            self.writer.line(rootPushSlow + ":"); self.writer.line("    lea rdi, [rbp-" + rootRecordOffset.toString() + "]"); self.writer.line("    call valen_gc_root_push"); self.writer.line(rootPushDone + ":")
+            self.writer.line("    cmp QWORD PTR [rip+valen_gc_workers], 0"); self.writer.line2("    jne ", rootPushSlow)
+            self.writer.line("    mov rax, QWORD PTR [rip+valen_gc_roots]"); self.writer.lineInteger("    mov QWORD PTR [rbp-", rootRecordOffset, "], rax")
+            self.writer.lineInteger("    lea rax, [rbp-", rootRecordOffset, "]"); self.writer.line("    mov QWORD PTR [rip+valen_gc_roots], rax"); self.writer.line2("    jmp ", rootPushDone)
+            self.writer.line2(rootPushSlow, ":"); self.writer.lineInteger("    lea rdi, [rbp-", rootRecordOffset, "]"); self.writer.line("    call valen_gc_root_push"); self.writer.line2(rootPushDone, ":")
             blockIndex = 0
             while blockIndex < function.blocks.length {
                 local block = function.blocks[blockIndex]
@@ -501,10 +590,10 @@ library X86_64 {{
                 }
                 blockIndex = blockIndex + 1
             }
-            self.writer.line(endLabel + ":")
-            self.writer.line("    cmp QWORD PTR [rip+valen_gc_workers], 0"); self.writer.line("    jne " + rootPopSlow)
-            self.writer.line("    mov rcx, QWORD PTR [rbp-" + rootRecordOffset.toString() + "]"); self.writer.line("    mov QWORD PTR [rip+valen_gc_roots], rcx"); self.writer.line("    jmp " + rootPopDone)
-            self.writer.line(rootPopSlow + ":"); self.writer.line("    sub rsp, 16"); self.writer.line("    mov QWORD PTR [rsp], rax"); self.writer.line("    lea rdi, [rbp-" + rootRecordOffset.toString() + "]"); self.writer.line("    call valen_gc_root_pop"); self.writer.line("    mov rax, QWORD PTR [rsp]"); self.writer.line("    add rsp, 16"); self.writer.line(rootPopDone + ":")
+            self.writer.line2(endLabel, ":")
+            self.writer.line("    cmp QWORD PTR [rip+valen_gc_workers], 0"); self.writer.line2("    jne ", rootPopSlow)
+            self.writer.lineInteger("    mov rcx, QWORD PTR [rbp-", rootRecordOffset, "]"); self.writer.line("    mov QWORD PTR [rip+valen_gc_roots], rcx"); self.writer.line2("    jmp ", rootPopDone)
+            self.writer.line2(rootPopSlow, ":"); self.writer.line("    sub rsp, 16"); self.writer.line("    mov QWORD PTR [rsp], rax"); self.writer.lineInteger("    lea rdi, [rbp-", rootRecordOffset, "]"); self.writer.line("    call valen_gc_root_pop"); self.writer.line("    mov rax, QWORD PTR [rsp]"); self.writer.line("    add rsp, 16"); self.writer.line2(rootPopDone, ":")
             registerIndex = 0
             while registerIndex < 4 {
                 local registerName = self.allocationRegister(registerIndex)
@@ -513,12 +602,12 @@ library X86_64 {{
             }
             self.writer.line("    leave")
             self.writer.line("    ret")
-            self.writer.line(rootTraceLabel + ":")
+            self.writer.line2(rootTraceLabel, ":")
             self.writer.line("    push rbx")
             self.writer.line("    mov rbx, rdi")
             slotIndex = 0
             while slotIndex < roots.length {
-                self.writer.line("    mov rdi, QWORD PTR [rbx-" + roots[slotIndex].offset.toString() + "]")
+                self.writer.lineInteger("    mov rdi, QWORD PTR [rbx-", roots[slotIndex].offset, "]")
                 self.writer.line("    call valen_gc_mark")
                 slotIndex = slotIndex + 1
             }
@@ -600,7 +689,7 @@ library X86_64 {{
             if op == "unary" { self.generateUnary(instruction); return }
             if op == "binary" { self.generateBinary(instruction); return }
             if op == "allocate" {
-                self.writer.line("    mov rdi, " + self.typeSize(instruction.ownerType!).toString())
+                self.writer.lineInteger("    mov rdi, ", self.typeSize(instruction.ownerType!))
                 self.writer.line("    lea rsi, [rip+" + self.gcTraceLabel(instruction.ownerType!) + "]")
                 self.writer.line("    lea rdx, [rip+" + self.gcWeakLabel(instruction.ownerType!) + "]")
                 self.writer.line("    xor ecx, ecx")
@@ -620,11 +709,11 @@ library X86_64 {{
             }
             if op == "destroy_array" {
                 self.load(instruction.first!, "rdi")
-                self.writer.line("    call " + self.arrayDestroyLabel(instruction.ownerType!))
+                self.writer.line2("    call ", self.arrayDestroyLabel(instruction.ownerType!))
                 return
             }
             if op == "array_new" {
-                self.writer.line("    mov rdi, " + self.sizeOf(instruction.elementType!).toString())
+                self.writer.lineInteger("    mov rdi, ", self.sizeOf(instruction.elementType!))
                 self.load(instruction.first!, "rsi")
                 self.writer.line("    lea rdx, [rip+" + self.gcArrayTraceLabel(instruction.result!.typeName) + "]")
                 self.writer.line("    lea rcx, [rip+" + self.gcArrayWeakLabel(instruction.result!.typeName) + "]")
@@ -648,7 +737,7 @@ library X86_64 {{
                     self.writer.line("    call valen_string_address")
                     self.writer.line("    movzx eax, BYTE PTR [rax]")
                 } else {
-                    self.writer.line("    mov rdx, " + self.sizeOf(instruction.elementType!).toString())
+                    self.writer.lineInteger("    mov rdx, ", self.sizeOf(instruction.elementType!))
                     self.writer.line("    call valen_array_address")
                     self.loadMemory("[rax]", instruction.elementType!, "rax")
                     if instruction.elementOwnership != null { if instruction.elementOwnership! == "weak" {
@@ -666,7 +755,7 @@ library X86_64 {{
             if op == "array_store" {
                 self.load(instruction.first!, "rdi")
                 self.load(instruction.second!, "rsi")
-                self.writer.line("    mov rdx, " + self.sizeOf(instruction.elementType!).toString())
+                self.writer.lineInteger("    mov rdx, ", self.sizeOf(instruction.elementType!))
                 self.writer.line("    call valen_array_address")
                 if instruction.elementOwnership != null { if instruction.elementOwnership! == "owned" {
                     local elementBase = self.baseType(instruction.elementType!)
@@ -683,7 +772,7 @@ library X86_64 {{
             if op == "array_append" {
                 self.load(instruction.first!, "rdi")
                 self.load(instruction.second!, "rsi")
-                self.writer.line("    mov rdx, " + self.sizeOf(instruction.elementType!).toString())
+                self.writer.lineInteger("    mov rdx, ", self.sizeOf(instruction.elementType!))
                 self.writer.line("    call valen_array_append")
                 return
             }
@@ -691,27 +780,27 @@ library X86_64 {{
                 self.load(instruction.first!, "rdi")
                 self.load(instruction.arguments[0], "rsi")
                 self.load(instruction.second!, "rdx")
-                self.writer.line("    mov rcx, " + self.sizeOf(instruction.elementType!).toString())
+                self.writer.lineInteger("    mov rcx, ", self.sizeOf(instruction.elementType!))
                 self.writer.line("    call valen_array_insert")
                 return
             }
             if op == "array_remove" {
                 self.load(instruction.first!, "rdi")
                 self.load(instruction.second!, "rsi")
-                self.writer.line("    mov rdx, " + self.sizeOf(instruction.elementType!).toString())
+                self.writer.lineInteger("    mov rdx, ", self.sizeOf(instruction.elementType!))
                 self.writer.line("    call valen_array_remove")
                 self.normalize("rax", instruction.typeName!)
                 self.storeResult(instruction, "rax")
                 return
             }
             if op == "array_reserve" {
-                self.load(instruction.first!, "rdi"); self.load(instruction.second!, "rsi"); self.writer.line("    mov rdx, " + self.sizeOf(instruction.elementType!).toString()); self.writer.line("    call valen_array_reserve"); return
+                self.load(instruction.first!, "rdi"); self.load(instruction.second!, "rsi"); self.writer.lineInteger("    mov rdx, ", self.sizeOf(instruction.elementType!)); self.writer.line("    call valen_array_reserve"); return
             }
             if op == "array_shrink" {
-                self.load(instruction.first!, "rdi"); self.writer.line("    mov rsi, " + self.sizeOf(instruction.elementType!).toString()); self.writer.line("    call valen_array_shrink_to_fit"); return
+                self.load(instruction.first!, "rdi"); self.writer.lineInteger("    mov rsi, ", self.sizeOf(instruction.elementType!)); self.writer.line("    call valen_array_shrink_to_fit"); return
             }
             if op == "array_slice" {
-                self.load(instruction.first!, "rdi"); self.load(instruction.second!, "rsi"); self.load(instruction.arguments[0], "rdx"); self.writer.line("    call " + self.arraySliceLabel(instruction.typeName!)); self.storeResult(instruction, "rax"); return
+                self.load(instruction.first!, "rdi"); self.load(instruction.second!, "rsi"); self.load(instruction.arguments[0], "rdx"); self.writer.line2("    call ", self.arraySliceLabel(instruction.typeName!)); self.storeResult(instruction, "rax"); return
             }
             if op == "string_length" || op == "builder_length" {
                 self.load(instruction.first!, "rax")
@@ -739,7 +828,7 @@ library X86_64 {{
                 self.load(instruction.first!, "rdi")
                 self.load(instruction.second!, "rsi")
                 self.writer.line("    xor edx, edx")
-                self.writer.line("    call " + self.equalityFunction(instruction.ownerType!))
+                self.writer.line2("    call ", self.equalityFunction(instruction.ownerType!))
                 if instruction.operator! == "!=" { self.writer.line("    xor eax, 1") }
                 self.storeResult(instruction, "rax")
                 return
@@ -747,14 +836,14 @@ library X86_64 {{
             if op == "structural_hash" {
                 self.load(instruction.first!, "rdi")
                 self.writer.line("    xor esi, esi")
-                self.writer.line("    call " + self.hashFunction(instruction.ownerType!))
+                self.writer.line2("    call ", self.hashFunction(instruction.ownerType!))
                 self.storeResult(instruction, "rax")
                 return
             }
             if op == "structural_copy" {
                 self.load(instruction.first!, "rdi")
                 self.writer.line("    xor esi, esi")
-                self.writer.line("    call " + self.copyFunction(instruction.ownerType!))
+                self.writer.line2("    call ", self.copyFunction(instruction.ownerType!))
                 self.storeResult(instruction, "rax")
                 return
             }
@@ -908,12 +997,12 @@ library X86_64 {{
                 self.storeResult(instruction, "rax")
                 return
             }
-            if op == "jump" { self.writer.line("    jmp " + self.blockLabel(instruction.target!)); return }
+            if op == "jump" { self.writer.line2("    jmp ", self.blockLabel(instruction.target!)); return }
             if op == "branch" {
                 self.load(instruction.first!, "rax")
                 self.writer.line("    test rax, rax")
                 self.writer.line("    jnz " + self.blockLabel(instruction.target!))
-                self.writer.line("    jmp " + self.blockLabel(instruction.alternateTarget!))
+                self.writer.line2("    jmp ", self.blockLabel(instruction.alternateTarget!))
                 return
             }
             if op == "return" {
@@ -923,7 +1012,7 @@ library X86_64 {{
                         if instruction.first!.typeName == "f32" { self.writer.line("    movd xmm0, eax") } else { self.writer.line("    movq xmm0, rax") }
                     }
                 }
-                self.writer.line("    jmp " + endLabel)
+                self.writer.line2("    jmp ", endLabel)
                 return
             }
         }
@@ -1057,9 +1146,9 @@ library X86_64 {{
             local padding:i64 = 0
             if stackCount - (stackCount / 2) * 2 == 1 { padding = 8; self.writer.line("    sub rsp, 8") }
             self.pushStackArguments(instruction.arguments)
-            self.writer.line("    call " + self.functionSymbol(instruction.target!))
+            self.writer.line2("    call ", self.functionSymbol(instruction.target!))
             local stackBytes = stackCount * 8 + padding
-            if stackBytes > 0 { self.writer.line("    add rsp, " + stackBytes.toString()) }
+            if stackBytes > 0 { self.writer.lineInteger("    add rsp, ", stackBytes) }
             if instruction.result != null {
                 if self.isFloat(instruction.typeName!) { if instruction.typeName! == "f32" { self.writer.line("    movd eax, xmm0") } else { self.writer.line("    movq rax, xmm0") } }
                 self.normalize("rax", instruction.typeName!); self.storeResult(instruction, "rax")
@@ -1075,7 +1164,7 @@ library X86_64 {{
             self.writer.line("    mov rax, QWORD PTR [rdi]")
             self.writer.line("    call QWORD PTR [rax+" + (40 + instruction.slot * 8).toString() + "]")
             local stackBytes = stackCount * 8 + padding
-            if stackBytes > 0 { self.writer.line("    add rsp, " + stackBytes.toString()) }
+            if stackBytes > 0 { self.writer.lineInteger("    add rsp, ", stackBytes) }
             if instruction.result != null {
                 if self.isFloat(instruction.typeName!) { if instruction.typeName! == "f32" { self.writer.line("    movd eax, xmm0") } else { self.writer.line("    movq rax, xmm0") } }
                 self.normalize("rax", instruction.typeName!); self.storeResult(instruction, "rax")
@@ -1111,7 +1200,7 @@ library X86_64 {{
             self.pushStackArguments(instruction.arguments)
             self.writer.line("    call r11")
             local stackBytes = stackCount * 8 + padding
-            if stackBytes > 0 { self.writer.line("    add rsp, " + stackBytes.toString()) }
+            if stackBytes > 0 { self.writer.lineInteger("    add rsp, ", stackBytes) }
             if instruction.result != null {
                 if self.isFloat(instruction.typeName!) { if instruction.typeName! == "f32" { self.writer.line("    movd eax, xmm0") } else { self.writer.line("    movq rax, xmm0") } }
                 self.normalize("rax", instruction.typeName!); self.storeResult(instruction, "rax")
@@ -1192,7 +1281,7 @@ library X86_64 {{
             self.writer.line("    mov QWORD PTR [rip+valen_process_envp], rax")
             self.writer.line("    sub rsp, 32")
             self.writer.line("    mov QWORD PTR [rbp-8], 0"); self.writer.line("    lea rax, [rip+main__gc_roots]"); self.writer.line("    mov QWORD PTR [rbp-24], rax"); self.writer.line("    mov QWORD PTR [rbp-16], rbp"); self.writer.line("    lea rdi, [rbp-32]"); self.writer.line("    call valen_gc_root_push")
-            self.writer.line("    mov rdi, " + entrySize.toString())
+            self.writer.lineInteger("    mov rdi, ", entrySize)
             self.writer.line("    lea rsi, [rip+" + self.gcTraceLabel(entry!.ownerType) + "]")
             self.writer.line("    lea rdx, [rip+" + self.gcWeakLabel(entry!.ownerType) + "]")
             self.writer.line("    xor ecx, ecx")
@@ -3063,6 +3152,7 @@ library X86_64 {{
 
         allocateRegisters(function:Ir.Function) -> void {
             self.allocations = new Array<Allocation>(0)
+            self.allocationIndex = new StringIndex()
             local position:i64 = 0
             local blockIndex:i64 = 0
             while blockIndex < function.blocks.length {
@@ -3070,7 +3160,7 @@ library X86_64 {{
                 while instructionIndex < function.blocks[blockIndex].instructions.length {
                     local instruction = function.blocks[blockIndex].instructions[instructionIndex]
                     if instruction.result != null {
-                        if self.findImmediate(instruction.result!.name) == null && !self.isManagedReferenceType(instruction.result!.typeName) { self.allocations.append(new Allocation(instruction.result!.name, position)) }
+                        if self.findImmediate(instruction.result!.name) == null && !self.isManagedReferenceType(instruction.result!.typeName) { local allocation = new Allocation(instruction.result!.name, position); self.allocations.append(allocation); self.allocationIndex.set(allocation.name, self.allocations.length - 1) }
                     }
                     self.recordAllocationUse(instruction.first, position)
                     self.recordAllocationUse(instruction.second, position)
@@ -3110,6 +3200,7 @@ library X86_64 {{
 
         selectImmediateConstants(function:Ir.Function) -> void {
             self.immediates = new Array<Immediate>(0)
+            self.immediateIndex = new StringIndex()
             local blockIndex:i64 = 0
             while blockIndex < function.blocks.length {
                 local instructionIndex:i64 = 0
@@ -3118,7 +3209,7 @@ library X86_64 {{
                     if instruction.op == "constant" && instruction.result != null && !self.isFloat(instruction.result!.typeName) {
                         local parsed = System.parseInteger(instruction.text!)
                         if parsed.valid && parsed.value >= -2147483648 && parsed.value <= 2147483647 {
-                            if self.immediateUsesEligible(function, instruction.result!.name) { self.immediates.append(new Immediate(instruction.result!.name, parsed.value)) }
+                            if self.immediateUsesEligible(function, instruction.result!.name) { local immediate = new Immediate(instruction.result!.name, parsed.value); self.immediates.append(immediate); self.immediateIndex.set(immediate.name, self.immediates.length - 1) }
                         }
                     }
                     instructionIndex = instructionIndex + 1
@@ -3158,12 +3249,9 @@ library X86_64 {{
         }
 
         findImmediate(name:string) -> ref Immediate? {
-            local index:i64 = 0
-            while index < self.immediates.length {
-                if self.immediates[index].name == name { return self.immediates[index] }
-                index = index + 1
-            }
-            return null
+            local index = self.immediateIndex.get(name)
+            if index < 0 { return null }
+            return self.immediates[index]
         }
 
         recordAllocationUse(value:Ir.Value?, position:i64) -> void {
@@ -3189,12 +3277,9 @@ library X86_64 {{
         }
 
         findAllocation(name:string) -> ref Allocation? {
-            local index:i64 = 0
-            while index < self.allocations.length {
-                if self.allocations[index].name == name { return self.allocations[index] }
-                index = index + 1
-            }
-            return null
+            local index = self.allocationIndex.get(name)
+            if index < 0 { return null }
+            return self.allocations[index]
         }
 
         load(value:Ir.Value, register:string) -> void {
@@ -3229,7 +3314,8 @@ library X86_64 {{
 
         reserve(key:string, typeName:string) -> void {
             if self.findSlot(key) != null { return }
-            self.slots.append(new Slot(key, (self.slots.length + 1) * 8, typeName))
+            local value = new Slot(key, (self.slots.length + 1) * 8, typeName)
+            self.slots.append(value); self.slotIndex.set(key, self.slots.length - 1)
         }
 
         slot(key:string) -> string { return "QWORD PTR [rbp-" + self.findSlot(key)!.offset.toString() + "]" }
@@ -3242,9 +3328,9 @@ library X86_64 {{
         blockLabel(name:string) -> string { return self.currentFunctionSymbol + "__" + name }
 
         findSlot(key:string) -> ref Slot? {
-            local index:i64 = 0
-            while index < self.slots.length { if self.slots[index].key == key { return self.slots[index] }; index = index + 1 }
-            return null
+            local index = self.slotIndex.get(key)
+            if index < 0 { return null }
+            return self.slots[index]
         }
 
         internString(value:string) -> void {
@@ -3274,38 +3360,38 @@ library X86_64 {{
         }
 
         findField(name:string) -> ref FieldLayout? {
-            local index:i64 = 0
-            while index < self.fields.length { if self.fields[index].name == name { return self.fields[index] }; index = index + 1 }
-            return null
+            local index = self.fieldIndex.get(name)
+            if index < 0 { return null }
+            return self.fields[index]
         }
 
         findFunction(name:string) -> ref Ir.Function? {
-            local index:i64 = 0
-            while index < self.program.functions.length { if self.program.functions[index].name == name { return self.program.functions[index] }; index = index + 1 }
-            return null
+            local index = self.programFunctionIndex.get(name)
+            if index < 0 { return null }
+            return self.program.functions[index]
         }
 
         findProgramType(name:string) -> ref Ir.Type? {
-            local index:i64 = 0
-            while index < self.program.types.length { if self.program.types[index].name == name { return self.program.types[index] }; index = index + 1 }
-            return null
+            local index = self.programTypeIndex.get(name)
+            if index < 0 { return null }
+            return self.program.types[index]
         }
 
         findAssemblySymbol(name:string) -> ref FunctionSymbol? {
-            local index:i64 = 0
-            while index < self.functionSymbols.length { if self.functionSymbols[index].assemblyName == name { return self.functionSymbols[index] }; index = index + 1 }
-            return null
+            local index = self.assemblyIndex.get(name)
+            if index < 0 { return null }
+            return self.functionSymbols[index]
         }
 
         functionSymbol(name:string) -> string {
-            local index:i64 = 0
-            while index < self.functionSymbols.length { if self.functionSymbols[index].name == name { return self.functionSymbols[index].assemblyName }; index = index + 1 }
+            local index = self.functionIndex.get(name)
+            if index >= 0 { return self.functionSymbols[index].assemblyName }
             return self.mangle(name)
         }
 
         typeSize(name:string) -> i64 {
-            local index:i64 = 0
-            while index < self.types.length { if self.types[index].name == name { return self.types[index].size }; index = index + 1 }
+            local index = self.typeIndex.get(name)
+            if index >= 0 { return self.types[index].size }
             return 8
         }
 
