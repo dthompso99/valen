@@ -17,7 +17,7 @@
 - deterministic importer-relative, project-root, and external `VALEN_LIBRARY_PATH` source modules with owning-root confinement
 - source-level tests and native test execution
 - native/C FFI boundaries
-- inline operations, single-worker native execution, mutexes, conditions, and atomics
+- inline operations, single-worker and fixed-size pooled native execution, mutexes, conditions, and atomics
 
 ## WIP: language ergonomics
 
@@ -33,7 +33,6 @@
 
 ## WIP: runtime and concurrency
 
-- **WIP:** thread pools
 - Poll-backed readiness operations and an event-loop executor for files and networking
 - **WIP:** additional operating systems and architectures
 - x86-64 Linux executables own their `_start` adapter, link without an implicit C runtime, and

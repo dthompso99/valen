@@ -251,8 +251,8 @@ library X86_64 {{
             index = 0
             while index < self.program.functions.length {
                 local displayName = self.program.functions[index].displayName
-                if displayName.length >= 10 {
-                    if displayName.slice(displayName.length - 10, 10) == ".runWorker" { worker = self.functionSymbol(self.program.functions[index].name) }
+                if displayName.length >= 36 {
+                    if displayName.slice(displayName.length - 36, 36) == "Operations.ThreadOperation.runWorker" { worker = self.functionSymbol(self.program.functions[index].name) }
                 }
                 index = index + 1
             }

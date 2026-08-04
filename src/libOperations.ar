@@ -1,4 +1,5 @@
 import EventLoop from './libEventLoop.ar'
+import System from './libSystem.ar'
 
 library Operations {{
     native threadAvailable() -> bool
@@ -270,6 +271,164 @@ library Operations {{
             self.active = operation
             if !operation.start() { operation.runInline() }
             return operation
+        }
+    }}
+
+    PoolOperation implements Operation {{
+        private member work:Work
+        private member terminal:OperationResult?
+        private member claimed:bool
+        private member mutex:Mutex
+        private member condition:Condition
+
+        __(own work:Work) -> void {
+            self.work = work
+            self.terminal = null
+            self.claimed = false
+            self.mutex = new Mutex()
+            self.condition = new Condition()
+        }
+
+        runQueued() -> void {
+            self.mutex.lock()
+            if self.terminal != null || self.claimed { self.mutex.unlock(); return }
+            self.claimed = true
+            self.mutex.unlock()
+            local completed = self.work.run()
+            self.mutex.lock()
+            if self.terminal == null { self.terminal = completed }
+            self.condition.notifyAll()
+            self.mutex.unlock()
+        }
+
+        complete() -> bool {
+            self.mutex.lock()
+            local done = self.terminal != null
+            self.mutex.unlock()
+            return done
+        }
+
+        cancel() -> bool {
+            self.mutex.lock()
+            if self.terminal != null || self.claimed { self.mutex.unlock(); return false }
+            self.terminal = new Cancelled("requested")
+            self.condition.notifyAll()
+            self.mutex.unlock()
+            return true
+        }
+
+        result() -> ref OperationResult? {
+            self.mutex.lock()
+            local value = self.terminal
+            self.mutex.unlock()
+            return value
+        }
+
+        wait() -> ref OperationResult {
+            self.mutex.lock()
+            while self.terminal == null { self.condition.wait(self.mutex) }
+            local value = self.terminal!
+            self.mutex.unlock()
+            return value
+        }
+    }}
+
+    PoolOperationView implements Operation {{
+        private member target:PoolOperation
+
+        __(own target:PoolOperation) -> void { self.target = target }
+        borrowTarget() -> ref PoolOperation { return self.target }
+        complete() -> bool { return self.target.complete() }
+        cancel() -> bool { return self.target.cancel() }
+        result() -> ref OperationResult? { return self.target.result() }
+        wait() -> ref OperationResult { return self.target.wait() }
+    }}
+
+    PoolWorker implements Work {{
+        private member ref pool:ThreadPoolExecutor
+
+        __(pool:ThreadPoolExecutor) -> void { self.pool = pool }
+        run() -> OperationResult { self.pool.runWorker(); return new Succeeded() }
+    }}
+
+    ThreadPoolExecutor implements Executor {{
+        private member pending:Array<weak PoolOperation?>
+        private member workers:Array<ThreadOperation>
+        private member nextIndex:i64
+        private member mutex:Mutex
+        private member availableCondition:Condition
+        private member stopping:bool
+        private member inline:bool
+
+        __(size:i64) -> void {
+            self.pending = new Array<weak PoolOperation?>(0)
+            self.workers = new Array<ThreadOperation>(0)
+            self.nextIndex = 0
+            self.mutex = new Mutex()
+            self.availableCondition = new Condition()
+            self.stopping = false
+            self.inline = size <= 0 || !Operations.threadAvailable()
+            if self.inline { return }
+            System.enableProcessArena()
+            local index:i64 = 0
+            while index < size {
+                local worker = new ThreadOperation(new PoolWorker(self))
+                if !worker.start() {
+                    self.mutex.lock()
+                    self.stopping = true
+                    self.availableCondition.notifyAll()
+                    self.mutex.unlock()
+                    local joinIndex:i64 = 0
+                    while joinIndex < self.workers.length { self.workers[joinIndex].wait(); joinIndex = joinIndex + 1 }
+                    self.inline = true
+                    return
+                }
+                self.workers.append(worker)
+                index = index + 1
+            }
+        }
+
+        available() -> bool { return !self.inline }
+
+        submit(own work:Work) -> Operation {
+            local view = new PoolOperationView(new PoolOperation(work))
+            if self.inline {
+                view.borrowTarget().runQueued()
+            } else {
+                local queued = view.borrowTarget()
+                self.mutex.lock()
+                if self.stopping {
+                    self.mutex.unlock()
+                    queued.runQueued()
+                } else {
+                    self.pending.append(queued)
+                    self.availableCondition.notifyOne()
+                    self.mutex.unlock()
+                }
+            }
+            return view
+        }
+
+        runWorker() -> void {
+            while true {
+                self.mutex.lock()
+                while self.nextIndex >= self.pending.length && !self.stopping { self.availableCondition.wait(self.mutex) }
+                if self.nextIndex >= self.pending.length && self.stopping { self.mutex.unlock(); return }
+                local operation = self.pending[self.nextIndex]
+                self.nextIndex = self.nextIndex + 1
+                self.mutex.unlock()
+                if operation != null { operation!.runQueued() }
+            }
+        }
+
+        shutdown() -> void {
+            if self.inline || self.stopping { return }
+            self.mutex.lock()
+            self.stopping = true
+            self.availableCondition.notifyAll()
+            self.mutex.unlock()
+            local index:i64 = 0
+            while index < self.workers.length { self.workers[index].wait(); index = index + 1 }
         }
     }}
 }}

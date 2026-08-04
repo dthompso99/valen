@@ -4,6 +4,24 @@ BackgroundWork implements Operations.Work {{
     run() -> Operations.OperationResult { return new Operations.Failed(42, "worker complete") }
 }}
 
+BlockingWork implements Operations.Work {{
+    member ref ready:Operations.Atomic
+    member ref gate:Operations.Atomic
+    member codeValue:i64
+
+    __(ready:Operations.Atomic, gate:Operations.Atomic, code:i64) -> void {
+        self.ready = ready
+        self.gate = gate
+        self.codeValue = code
+    }
+
+    run() -> Operations.OperationResult {
+        self.ready.add(1)
+        while self.gate.load() == 0 {}
+        return new Operations.Failed(self.codeValue, "pool complete")
+    }
+}}
+
 entry {{
     __() -> i32 {
         local atomic = new Operations.Atomic(4)
@@ -28,6 +46,27 @@ entry {{
         if result.code() != 42 { return 7 }
         if result.detail()! != "worker complete" { return 8 }
         if result !== operation.result()! { return 9 }
+
+        local ready = new Operations.Atomic(0)
+        local gate = new Operations.Atomic(0)
+        local pool = new Operations.ThreadPoolExecutor(2)
+        if !pool.available() { return 10 }
+        local first = pool.submit(new BlockingWork(ready, gate, 51))
+        local second = pool.submit(new BlockingWork(ready, gate, 52))
+        local cancelled = pool.submit(new BlockingWork(ready, gate, 53))
+        while ready.load() < 2 {}
+        if !cancelled.cancel() { return 11 }
+        gate.store(1)
+        if first.wait().code() != 51 { return 12 }
+        if second.wait().code() != 52 { return 13 }
+        if !cancelled.wait().cancelled() { return 14 }
+        pool.shutdown()
+        pool.shutdown()
+        if !pool.submit(new BackgroundWork()).wait().failed() { return 15 }
+
+        local fallback = new Operations.ThreadPoolExecutor(0)
+        if fallback.available() { return 16 }
+        if fallback.submit(new BackgroundWork()).wait().code() != 42 { return 17 }
         return 0
     }
 }}

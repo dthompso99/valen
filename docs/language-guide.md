@@ -370,10 +370,15 @@ local result = operation.wait()
 ```
 
 `InlineExecutor` is deterministic and is the portable fallback. x86-64 Linux also provides a
-joinable single-worker `ThreadExecutor`, mutexes, conditions, atomics, and a poll-backed
+joinable single-worker `ThreadExecutor`, a fixed-size persistent-worker `ThreadPoolExecutor`, mutexes, conditions, atomics, and a poll-backed
 `EventLoopExecutor`. Readiness-aware work implements `ReadyWork`, returning its descriptor and
-interest, and is submitted with `submitReady()`. Thread pools and other platform implementations
-are **WIP**.
+interest, and is submitted with `submitReady()`.
+
+The pool queues work in submission order. `shutdown()` drains the queue and joins its workers; later
+submissions execute inline. Targets without native threads, and pools constructed with a non-positive
+size, use inline execution automatically. Cancellation succeeds only before a worker claims an operation.
+Native pools currently select the locked process-lifetime arena because tracing roots are not thread-aware;
+their managed allocations are reclaimed at process exit. Inline fallback retains ordinary tracing collection.
 
 ## Native and unsafe code
 

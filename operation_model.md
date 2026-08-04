@@ -30,6 +30,25 @@ Exactly one of `succeeded()`, `failed()`, and `cancelled()` is true for every st
 
 Executors must detect or prevent waiting arrangements that would deadlock their own sole worker. That is an executor rule rather than a change to method-call semantics.
 
+## Thread pools
+
+`Operations.ThreadPoolExecutor(size)` starts a fixed number of persistent workers when native threads
+are available. Submissions are FIFO and transfer their `Work` into a returned operation view. A queued
+operation may be cancelled before a worker claims it; running work remains non-cancellable. Dropping the
+view permits unclaimed work to be reclaimed, matching the event-loop executor's scheduling-reference rule.
+
+`shutdown()` is explicit and idempotent. It rejects new asynchronous submissions, drains queued operations,
+wakes and joins every worker, and executes later submissions inline. A non-positive size or a target without
+thread support selects the same inline behavior from construction. Callers must not wait on dependent pool
+work from every pool worker simultaneously; cross-operation dependency scheduling remains the caller's
+responsibility until worker-aware cooperative waiting is introduced.
+
+The tracing collector and its root chain are not yet thread-aware. Before native workers start, the pool
+therefore enables Valen's locked process-lifetime arena. This makes concurrent allocation safe and disables
+collection while workers may hold roots. Inline fallback does not enable the arena. Thread-aware tracing GC
+is required before pooled processes can reclaim managed allocations before process exit.
+
+
 ## Readiness event loops
 
 `Operations.ReadyWork` adds a native descriptor and readiness interest to ordinary `Work`.

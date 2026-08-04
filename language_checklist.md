@@ -61,7 +61,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 - [x] Specify ownership transfer and retained references for submitted work and operation results
 - [x] Implement a native single-worker `ThreadExecutor` with portable inline fallback
 - [x] Add native mutex, condition, and atomic synchronization objects
-- [ ] Add a thread-pool executor after single-worker correctness is established
+- [x] Add a fixed-size persistent-worker thread-pool executor with inline fallback and explicit shutdown
 - [x] Add event-loop executors for nonblocking file and network I/O
 - [x] Implement short-circuit lowering for `&&` and `||`
 - [x] Add iterators and `for` loops
