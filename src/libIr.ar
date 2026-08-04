@@ -1013,6 +1013,7 @@ library Ir {{
                 return build.result!
             }
             if expression.kind == "ArrayLiteral" { return self.lowerArrayLiteral(expression) }
+            if expression.kind == "If" { return self.lowerIfExpression(expression) }
             if expression.kind == "Identifier" { return self.lowerIdentifier(expression) }
             if expression.kind == "Member" { return self.lowerMember(expression) }
             if expression.kind == "Index" { return self.lowerIndex(expression) }
@@ -1070,6 +1071,43 @@ library Ir {{
             local instruction = self.temporary("constant", typeName)
             instruction.text = textValue
             return instruction.result!
+        }
+
+        lowerIfExpression(expression:Ast.Expression) -> ref Value {
+            local name = "$if#" + self.nextLocal.toString()
+            self.nextLocal = self.nextLocal + 1
+            local declared = new Instruction("declare_local"); declared.name = name; declared.typeName = expression.inferredType; self.emit(declared)
+            local condition = self.lowerExpression(expression.left!)
+            local thenBlock = self.newBlock("if_value_then"); local elseBlock = self.newBlock("if_value_else"); local endBlock = self.newBlock("if_value_end")
+            local branch = new Instruction("branch"); branch.first = condition; branch.target = thenBlock.label; branch.alternateTarget = elseBlock.label; self.emit(branch)
+            self.currentBlock = thenBlock
+            self.storeConditionalValue(name, expression.inferredType!, self.lowerValueBlock(expression.body!))
+            local jump = new Instruction("jump"); jump.target = endBlock.label; self.emit(jump)
+            self.currentBlock = elseBlock
+            self.storeConditionalValue(name, expression.inferredType!, self.lowerValueBlock(expression.alternate!))
+            jump = new Instruction("jump"); jump.target = endBlock.label; self.emit(jump)
+            self.currentBlock = endBlock
+            local loaded = self.temporary("load_local", expression.inferredType!); loaded.name = name
+            return loaded.result!
+        }
+
+        lowerValueBlock(block:Ast.Block) -> ref Value {
+            local lifetimeStart = self.bindings.length
+            local index:i64 = 0
+            while index < block.statements.length - 1 { self.lowerStatement(block.statements[index]); index = index + 1 }
+            local terminal = block.statements[block.statements.length - 1]
+            local value = self.lowerExpression(terminal.expression!)
+            self.consumeLifetime(terminal.expression!)
+            self.destroyBindings(lifetimeStart)
+            return value
+        }
+
+        storeConditionalValue(name:string, typeName:string, value:Value) -> void {
+            local converted = self.boxOptional(value, typeName)
+            if converted.typeName != typeName && self.isNumeric(converted.typeName) && self.isNumeric(typeName) {
+                local conversion = self.temporary("convert", typeName); conversion.first = converted; converted = conversion.result!
+            }
+            local stored = new Instruction("store_local"); stored.name = name; stored.typeName = typeName; stored.first = converted; self.emit(stored)
         }
 
         lowerIdentifier(expression:Ast.Expression) -> ref Value {
@@ -1665,5 +1703,7 @@ library Ir {{
         isInteger(name:string) -> bool {
             return name == "u8" || name == "i8" || name == "u16" || name == "i16" || name == "u32" || name == "i32" || name == "u64" || name == "i64"
         }
+
+        isNumeric(name:string) -> bool { return self.isInteger(name) || name == "f32" || name == "f64" }
     }}
 }}

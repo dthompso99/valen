@@ -172,8 +172,24 @@ for value in values {
 ```
 
 `else if` chains are ordinary conditionals and may mix parenthesized and unparenthesized conditions.
-An `else` binds to the closest preceding `if`. Expression-valued conditionals, enums, and exhaustive
-matching remain **WIP**.
+An `else` binds to the closest preceding `if`.
+
+Conditionals may also produce values. Every branch must end with an expression, an `else` branch is
+required, and branch values must have a common type. Numeric branches use ordinary lossless promotion;
+each branch has its own scope and optional narrowing. Owned values created or selected inside a branch
+transfer into the conditional result.
+
+```valen
+local label = if score >= 90 {
+    "excellent"
+} else if score >= 70 {
+    "good"
+} else {
+    "needs work"
+}
+```
+
+Enums and exhaustive matching remain **WIP**.
 
 ## Arrays, strings, and generic objects
 

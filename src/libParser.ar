@@ -430,6 +430,7 @@ library Parsing {{
 
         parsePrimary() -> ref Ast.Expression {
             local token = self.advanceToken()
+            if token.kind == "IF" { return self.parseIfExpression(token) }
             if token.kind == "LEFT_BRACKET" {
                 local literal = new Ast.Expression("ArrayLiteral", token.span)
                 self.skipNewlines()
@@ -468,6 +469,24 @@ library Parsing {{
             local expression = new Ast.Expression(kind!, token.span)
             if token.kind == "IDENTIFIER" { expression.name = token.lexeme }
             if token.kind == "STRING_LITERAL" { expression.text = self.decodeString(token.lexeme) } else { expression.text = token.lexeme }
+            return expression
+        }
+
+        parseIfExpression(start:Compiler.Token) -> Ast.Expression {
+            local expression = new Ast.Expression("If", start.span)
+            expression.left = self.parseExpression()
+            expression.body = self.parseBlock()
+            self.skipNewlines()
+            self.consume("ELSE", "Expression-valued 'if' requires an 'else' branch")
+            if self.match("IF") {
+                local nested = self.parseIfExpression(self.previous())
+                local statement = new Ast.Statement("Expression", nested.span)
+                statement.expression = nested
+                local statements = new Array<Ast.Statement>(0)
+                statements.append(statement)
+                expression.alternate = new Ast.Block(statements, nested.span)
+            } else { expression.alternate = self.parseBlock() }
+            expression.span = self.span(start.span, expression.alternate!.span)
             return expression
         }
 

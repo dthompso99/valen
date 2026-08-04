@@ -138,6 +138,15 @@ export class IfStatement extends AstNode {
     }
 }
 
+export class IfExpression extends AstNode {
+    constructor(condition, consequent, alternate, span) {
+        super('IfExpression', span);
+        this.condition = condition;
+        this.consequent = consequent;
+        this.alternate = alternate;
+    }
+}
+
 export class WhileStatement extends AstNode {
     constructor(condition, body, span) {
         super('WhileStatement', span);

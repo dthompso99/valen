@@ -461,6 +461,8 @@ export class IrGenerator {
             }
             case 'ArrayLiteral':
                 return this.lowerArrayLiteral(expression);
+            case 'IfExpression':
+                return this.lowerIfExpression(expression);
             case 'NullLiteral':
                 return this.result('constant', expression.inferredType, {value: 0});
             case 'IdentifierExpression':
@@ -563,6 +565,48 @@ export class IrGenerator {
         if (!this.isTerminated()) this.emit('jump', {target: endBlock.label});
         this.block = endBlock;
         return this.result('load_local', 'bool', {name});
+    }
+
+    lowerIfExpression(expression) {
+        const name = `$if#${this.nextLocal++}`;
+        this.emit('declare_local', {name, type: expression.inferredType, value: null});
+        const condition = this.lowerExpression(expression.condition);
+        const thenBlock = this.newBlock('if_value_then');
+        const elseBlock = this.newBlock('if_value_else');
+        const endBlock = this.newBlock('if_value_end');
+        this.emit('branch', {condition, thenTarget: thenBlock.label, elseTarget: elseBlock.label});
+        this.block = thenBlock;
+        this.emitConditionalValue(name, expression.inferredType, this.lowerValueBlock(expression.consequent));
+        this.emit('jump', {target: endBlock.label});
+        this.block = elseBlock;
+        this.emitConditionalValue(name, expression.inferredType, this.lowerValueBlock(expression.alternate));
+        this.emit('jump', {target: endBlock.label});
+        this.block = endBlock;
+        return this.result('load_local', expression.inferredType, {name});
+    }
+
+    lowerValueBlock(block) {
+        const lifetimeScope = [];
+        this.lifetimeScopes.push(lifetimeScope);
+        for (let index = 0; index < block.statements.length - 1; index++) this.lowerStatement(block.statements[index]);
+        const terminal = block.statements.at(-1);
+        const value = this.lowerExpression(terminal.expression);
+        this.consumeLifetime(terminal.expression);
+        if (!this.isTerminated()) this.destroyLifetimeScope(lifetimeScope);
+        this.lifetimeScopes.pop();
+        return value;
+    }
+
+    emitConditionalValue(name, type, value) {
+        let converted = this.boxOptional(value, type);
+        if (converted.type !== type && this.isNumericType(converted.type) && this.isNumericType(type)) {
+            converted = this.result('convert', type, {value: converted, fromType: converted.type});
+        }
+        this.emit('store_local', {name, type, value: converted});
+    }
+
+    isNumericType(type) {
+        return ['u8', 'i8', 'u16', 'i16', 'u32', 'i32', 'u64', 'i64', 'f32', 'f64'].includes(type);
     }
 
     optionalBaseTypeName(type) {

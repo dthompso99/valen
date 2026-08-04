@@ -1,0 +1,37 @@
+Item {{
+    member value:i64
+}}
+
+entry {{
+    __() -> i64 {
+        local score:i64 = 75
+        local label = if score >= 90 {
+            "excellent"
+        } else if score >= 70 {
+            "good"
+        } else {
+            "needs work"
+        }
+        if label != "good" { return 1 }
+
+        local small:u8 = 2
+        local wide:i64 = 4
+        local promoted = if false { small } else { wide }
+        if promoted != 4 { return 2 }
+
+        local maybe:Item? = new Item()
+        maybe!.value = 9
+        local narrowed = if maybe != null { maybe.value } else { 0 }
+        if narrowed != 9 { return 3 }
+
+        local selected = if true {
+            local item = new Item()
+            item.value = 11
+            item
+        } else {
+            new Item()
+        }
+        if selected.value != 11 { return 4 }
+        return 0
+    }
+}}

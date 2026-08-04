@@ -669,6 +669,40 @@ export class SemanticAnalyzer {
         return definitelyReturns;
     }
 
+    analyzeValueBlock(block, parentScope, object) {
+        this.analyzeBlock(block, parentScope, object, this.currentMethod);
+        const terminal = block.statements.at(-1);
+        if (!terminal || terminal.kind !== 'ExpressionStatement') {
+            this.report(block.span, 'Each expression-valued conditional branch must end with an expression');
+            return UNKNOWN;
+        }
+        return terminal.expression.inferredType ?? UNKNOWN;
+    }
+
+    conditionalType(left, right, expression) {
+        let type = left;
+        if ((integerTypes.has(left) || this.isFloat(left)) && (integerTypes.has(right) || this.isFloat(right))) {
+            type = this.numericPromotion(left, right, expression.span) ?? UNKNOWN;
+        } else if (left === right) type = left;
+        else if (this.conformsTo(left, right)) type = right;
+        else if (this.conformsTo(right, left)) type = left;
+        else {
+            this.report(expression.span, `Conditional branches have incompatible types '${left}' and '${right}'`);
+            type = UNKNOWN;
+        }
+        const leftExpression = expression.consequent.statements.at(-1)?.expression;
+        const rightExpression = expression.alternate.statements.at(-1)?.expression;
+        const numeric = this.isNumericTypeName(left) && this.isNumericTypeName(right);
+        if (leftExpression && !numeric) this.requireAssignable(left, type, leftExpression.span, leftExpression);
+        if (rightExpression && !numeric) this.requireAssignable(right, type, rightExpression.span, rightExpression);
+        expression.branchType = type;
+        return type;
+    }
+
+    isNumericTypeName(type) {
+        return integerTypes.has(type) || this.isFloat(type);
+    }
+
     analyzeStatement(statement, scope, object, method) {
         switch (statement.kind) {
             case 'BlockStatement':
@@ -865,6 +899,18 @@ export class SemanticAnalyzer {
                 expression.elementOwnership = 'owned';
                 type = `Array<${elementType}>`;
                 symbol = {kind: 'ArrayType', name: 'Array', type, elementType, elementOwnership: 'owned'};
+                break;
+            }
+            case 'IfExpression': {
+                const condition = this.analyzeExpression(expression.condition, scope, object);
+                this.requireAssignable(condition, BOOL, expression.condition.span, expression.condition);
+                const consequentScope = new Scope(scope, 'if expression consequent');
+                this.applyOptionalNarrowing(expression.condition, true, consequentScope);
+                const consequent = this.analyzeValueBlock(expression.consequent, consequentScope, object);
+                const alternateScope = new Scope(scope, 'if expression alternate');
+                this.applyOptionalNarrowing(expression.condition, false, alternateScope);
+                const alternate = this.analyzeValueBlock(expression.alternate, alternateScope, object);
+                type = this.conditionalType(consequent, alternate, expression);
                 break;
             }
             case 'NullLiteral':
@@ -1598,7 +1644,7 @@ export class SemanticAnalyzer {
     }
 
     isOwningExpression(expression) {
-        return expression?.kind === 'NewExpression' || expression?.kind === 'ArrayLiteral' || expression?.kind === 'StringLiteral' ||
+        return expression?.kind === 'NewExpression' || expression?.kind === 'ArrayLiteral' || expression?.kind === 'StringLiteral' || expression?.kind === 'IfExpression' ||
             expression?.kind === 'UnaryExpression' && expression.operator === 'copy' ||
             expression?.kind === 'CallExpression' && expression.callee?.semanticSymbol?.kind === 'ArrayRemove' && expression.elementOwnership === 'owned' ||
             expression?.kind === 'CallExpression' && expression.callee?.semanticSymbol?.returnOwnership === 'owned';

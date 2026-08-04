@@ -1,0 +1,10 @@
+entry {{
+    __() -> i64 {
+        local value = if true {
+            local incomplete = 1
+        } else {
+            2
+        }
+        return value
+    }
+}}

@@ -131,6 +131,8 @@ library Ast {{
         member arguments:Array<TypeReference>
         member optional:bool
         member ownership:string
+        member body:Block?
+        member alternate:Block?
         member span:Compiler.SourceSpan
         member symbol:Symbols.Symbol?
 
@@ -199,6 +201,8 @@ library Ast {{
         member symbol:Symbols.Symbol?
         member inferredType:string?
         member ownership:string
+        member body:Block?
+        member alternate:Block?
 
         __(kind:string, span:Compiler.SourceSpan) -> void {
             self.kind = kind
@@ -213,6 +217,8 @@ library Ast {{
             self.symbol = null
             self.inferredType = null
             self.ownership = "none"
+            self.body = null
+            self.alternate = null
         }
     }}
 }}

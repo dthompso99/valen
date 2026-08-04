@@ -130,6 +130,8 @@ library Semantics {{
             while index < expression.typeArguments.length { self.visitGenericType(program, expression.typeArguments[index]); index = index + 1 }
             if expression.left != null { self.visitGenericExpression(program, expression.left!) }
             if expression.right != null { self.visitGenericExpression(program, expression.right!) }
+            if expression.body != null { self.visitGenericBlock(program, expression.body!) }
+            if expression.alternate != null { self.visitGenericBlock(program, expression.alternate!) }
             index = 0
             while index < expression.arguments.length { self.visitGenericExpression(program, expression.arguments[index]); index = index + 1 }
         }
@@ -218,6 +220,8 @@ library Semantics {{
             while index < expression.typeArguments.length { self.substituteType(expression.typeArguments[index], parameters, arguments); index = index + 1 }
             if expression.left != null { self.substituteExpression(expression.left!, parameters, arguments) }
             if expression.right != null { self.substituteExpression(expression.right!, parameters, arguments) }
+            if expression.body != null { self.substituteBlock(expression.body!, parameters, arguments) }
+            if expression.alternate != null { self.substituteBlock(expression.alternate!, parameters, arguments) }
             index = 0
             while index < expression.arguments.length { self.substituteExpression(expression.arguments[index], parameters, arguments); index = index + 1 }
         }
@@ -984,6 +988,14 @@ library Semantics {{
             }
         }
 
+        analyzeValueBlock(block:Ast.Block, parent:Symbols.Scope, moduleScope:Symbols.Scope) -> string {
+            self.analyzeBlock(block, parent, moduleScope, self.currentMethod!.returnType!, false)
+            if block.statements.length == 0 { self.error(block.span, "Each expression-valued conditional branch must end with an expression"); return "error" }
+            local terminal = block.statements[block.statements.length - 1]
+            if terminal.kind != "Expression" { self.error(terminal.span, "Each expression-valued conditional branch must end with an expression"); return "error" }
+            return terminal.expression!.inferredType!
+        }
+
         analyzeStatement(statement:Ast.Statement, scope:Symbols.Scope, moduleScope:Symbols.Scope, returnType:string, inLoop:bool) -> void {
             if statement.kind == "Local" {
                 local valueType:string? = null
@@ -1174,6 +1186,23 @@ library Semantics {{
                 }
                 expression.text = elementType
                 return self.typed(expression, "Array<" + elementType + ">")
+            }
+            if expression.kind == "If" {
+                local conditionType = self.analyzeExpression(expression.left!, scope, moduleScope)
+                self.requireCompatible("bool", conditionType, expression.left!.span)
+                local consequentScope = new Symbols.Scope("if expression consequent", scope)
+                self.applyOptionalNarrowing(expression.left!, true, consequentScope)
+                local consequent = self.analyzeValueBlock(expression.body!, consequentScope, moduleScope)
+                local alternateScope = new Symbols.Scope("if expression alternate", scope)
+                self.applyOptionalNarrowing(expression.left!, false, alternateScope)
+                local alternate = self.analyzeValueBlock(expression.alternate!, alternateScope, moduleScope)
+                local result = consequent
+                if (self.isInteger(consequent) || self.isFloat(consequent)) && (self.isInteger(alternate) || self.isFloat(alternate)) {
+                    local promoted = self.numericPromotion(consequent, alternate, expression.span)
+                    if promoted != null { result = promoted! } else { result = "error" }
+                } else { if consequent != alternate { self.error(expression.span, "Conditional branches have incompatible types '" + consequent + "' and '" + alternate + "'"); result = "error" } }
+                expression.text = result
+                return self.typed(expression, result)
             }
             if expression.kind == "Identifier" {
                 local symbol = scope.lookup(expression.name!)
@@ -2033,6 +2062,7 @@ library Semantics {{
             if expression!.kind == "New" { return true }
             if expression!.kind == "ArrayLiteral" { return true }
             if expression!.kind == "String" { return true }
+            if expression!.kind == "If" { return true }
             if expression!.kind == "Unary" { return expression!.operator! == "copy" }
             if expression!.kind == "Call" {
                 if expression!.text != null { if expression!.text! == "owned" { return true } }

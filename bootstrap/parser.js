@@ -16,6 +16,7 @@ import {
     ExpressionStatement,
     LocalDeclaration,
     IfStatement,
+    IfExpression,
     WhileStatement,
     ForStatement,
     BreakStatement,
@@ -455,6 +456,7 @@ export class Parser {
     }
 
     parsePrimary() {
+        if (this.match('IF')) return this.parseIfExpression(this.previous());
         if (this.match('LEFT_BRACKET')) {
             const start = this.previous();
             const elements = [];
@@ -502,6 +504,19 @@ export class Parser {
             return expression;
         }
         this.error(this.peek(), 'Expected an expression');
+    }
+
+    parseIfExpression(start) {
+        const condition = this.parseExpression();
+        const consequent = this.parseBlock();
+        this.skipNewlines();
+        this.consume('ELSE', "Expression-valued 'if' requires an 'else' branch");
+        let alternate;
+        if (this.match('IF')) {
+            const nested = this.parseIfExpression(this.previous());
+            alternate = new BlockStatement([new ExpressionStatement(nested, nested.span)], nested.span);
+        } else alternate = this.parseBlock();
+        return new IfExpression(condition, consequent, alternate, this.span(start, alternate));
     }
 
     hasInterpolation(value) {

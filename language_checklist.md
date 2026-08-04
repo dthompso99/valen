@@ -66,7 +66,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 - [x] Implement short-circuit lowering for `&&` and `||`
 - [x] Add iterators and `for` loops
 - [x] Add `else if` shorthand
-- [ ] Evaluate expression-valued conditionals and richer control-flow expressions
+- [x] Add expression-valued conditionals with branch type unification
 - [ ] Define exhaustive matching if a sum type or enum model is introduced
 
 ## 5. Collections and strings
