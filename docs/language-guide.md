@@ -27,7 +27,24 @@ library Tools {{
 }}
 ```
 
-Package metadata, library versions, and compiled modules are **WIP**.
+Libraries can be published as a relocatable object plus versioned metadata:
+
+```sh
+valen --library-version 1.2.3 --emit-library src/tools.ar -o build/tools.o
+valen --validate-library build/tools.o.vmeta
+```
+
+The source module must declare exactly one public `library`. The adjacent `.vmeta` records its
+name and semantic version, compiler-interface version, target, native ABI, public-interface and
+implementation fingerprints, object fingerprint, and the exact interface fingerprint required
+from each imported library. Validation rejects malformed semantic versions, incompatible compiler,
+target or ABI values, missing objects, and object/metadata mismatches before linking.
+
+Versions follow SemVer syntax. Library authors increment patch for compatible fixes, minor for
+backward-compatible additions, and major for incompatible public-interface changes. The compiler
+records and verifies exact interfaces; it does not infer whether an API change deserves a major
+version or resolve version ranges. A registry, dependency solver, lockfile, and compiled-library
+import resolution remain package-manager concerns rather than source-language syntax.
 
 ## Native networking
 

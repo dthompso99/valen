@@ -6,7 +6,7 @@ export class X86_64Backend {
     generate(program, {optimizationLevel = 1, moduleId = null, includeRuntime = true} = {}) {
         if (![0, 1].includes(optimizationLevel)) throw new Error(`Unsupported optimization level '-O${optimizationLevel}'`);
         this.optimize = optimizationLevel === 1;
-        prepareIr(program, {optimize: this.optimize});
+        prepareIr(program, {optimize: this.optimize, requireEntry: includeRuntime});
         this.program = program;
         this.functionSymbols = new Map();
         this.fieldOffsets = new Map();

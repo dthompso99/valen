@@ -82,7 +82,7 @@ Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/va
 ## 6. Modules, diagnostics, and tooling
 
 - [x] Finalize package and module search-path rules
-- [ ] Define library versioning and compiled-library metadata
+- [x] Define library versioning and compiled-library metadata
 - [x] Define stable native and dynamic-library FFI boundaries
 - [ ] Add diagnostic severity enums, notes, fix hints, and multi-span labels
 - [x] Add source-level test syntax and a native test runner

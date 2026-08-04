@@ -1,0 +1,5 @@
+import Support from './compiled-library-dependency.ar'
+
+library Arithmetic {{
+    add(left:i64, right:i64) -> i64 { return Support.identity(left + right) }
+}}

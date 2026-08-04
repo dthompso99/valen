@@ -153,12 +153,12 @@ export class IrCanonicalizer {
 }
 
 export class IrValidator {
-    validate(program) {
+    validate(program, {requireEntry = true} = {}) {
         const errors = [];
         const types = this.unique(program.types, 'type', errors);
         const functions = this.unique([...program.functions, ...program.externals], 'function', errors);
         const entry = functions.get(program.entry);
-        if (!program.entry || !entry || !program.functions.includes(entry)) errors.push(`entry '${program.entry ?? '<missing>'}' is not a defined function`);
+        if (requireEntry && (!program.entry || !entry || !program.functions.includes(entry))) errors.push(`entry '${program.entry ?? '<missing>'}' is not a defined function`);
 
         for (const type of program.types) {
             if (type.base && !types.has(type.base)) errors.push(`type '${type.name}' has unknown base '${type.base}'`);
@@ -257,7 +257,7 @@ export class IrValidator {
     }
 }
 
-export function prepareIr(program, {optimize = true} = {}) {
+export function prepareIr(program, {optimize = true, requireEntry = true} = {}) {
     new IrCanonicalizer().run(program, {optimize});
-    return new IrValidator().validate(program);
+    return new IrValidator().validate(program, {requireEntry});
 }

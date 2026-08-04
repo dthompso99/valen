@@ -7,9 +7,33 @@ import {X86Assembler} from './x86-assembler.js';
 import {ElfLinker} from './linker.js';
 import {ModuleLoader} from './module-loader.js';
 import {SemanticAnalyzer} from './semantic.js';
-import {ModuleInterfaceCache} from './module-interface.js';
+import {ModuleInterface, ModuleInterfaceCache} from './module-interface.js';
+import {LibraryMetadata} from './library-metadata.js';
 
 export class Compiler {
+    emitLibrary(sourcePath, objectPath, version, {sourceRoot, optimizationLevel = 1} = {}) {
+        const graph = new ModuleLoader(sourceRoot ? {sourceRoot} : {}).load(sourcePath);
+        const semantic = new SemanticAnalyzer().analyzeModules(graph);
+        if (!semantic.success) throw new Error(semantic.diagnostics.map(item => item.message).join('\n'));
+        const entry = graph.entry;
+        const libraries = entry.program.libraries.filter(item => item.visibility !== 'private');
+        if (libraries.length !== 1) throw new Error('A compiled library source must declare exactly one public library');
+        const artifact = ModuleInterface.create(entry);
+        const ir = new IrGenerator().generate(semantic);
+        const assembly = new X86_64Backend().generate(ir, {optimizationLevel, moduleId: entry.id, includeRuntime: false});
+        const object = new X86Assembler().assemble(assembly);
+        fs.writeFileSync(objectPath, object);
+        const dependencies = artifact.imports.map(item => {
+            const imported = [...graph.modules.values()].find(module => module.id === item.moduleId);
+            return {name: item.name, interfaceFingerprint: ModuleInterface.create(imported).interfaceFingerprint};
+        });
+        const metadata = LibraryMetadata.create({name: libraries[0].name, version,
+            interfaceFingerprint: artifact.interfaceFingerprint, implementationFingerprint: artifact.implementationFingerprint,
+            object, dependencies});
+        LibraryMetadata.write(`${objectPath}.vmeta`, metadata);
+        return {objectPath, metadataPath: `${objectPath}.vmeta`, metadata};
+    }
+
     emitObject(sourcePath, objectPath, {assemblyPath = `${objectPath}.s`, sourceRoot, optimizationLevel = 1} = {}) {
         const graph = new ModuleLoader(sourceRoot ? {sourceRoot} : {}).load(sourcePath);
         new ModuleInterfaceCache(process.env.VALEN_CACHE_PATH ?? process.env.ARGON_CACHE_PATH,
@@ -49,6 +73,16 @@ export class Compiler {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     const args = process.argv.slice(2);
+    if (args[0] === '--validate-library') {
+        if (!args[1] || args.length !== 2) throw new Error('Usage: --validate-library <artifact.vmeta>');
+        const metadata = LibraryMetadata.parse(fs.readFileSync(args[1], 'utf8'));
+        const objectPath = args[1].endsWith('.vmeta') ? args[1].slice(0, -6) : null;
+        if (!objectPath || !fs.existsSync(objectPath)) throw new Error('Compiled library object is missing');
+        const actualObject = LibraryMetadata.create({...metadata, object: fs.readFileSync(objectPath)}).objectFingerprint;
+        if (actualObject !== metadata.objectFingerprint) throw new Error('Compiled library object fingerprint does not match metadata');
+        process.stdout.write(`${metadata.name} ${metadata.version}\n`);
+        process.exit(0);
+    }
     const levelFlag = args.find(argument => /^-O/.test(argument));
     if (levelFlag && !['-O0', '-O1'].includes(levelFlag)) throw new Error(`Unsupported optimization level '${levelFlag}'`);
     const optimizationLevel = levelFlag === '-O0' ? 0 : 1;
@@ -58,13 +92,21 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     const linkerIndex = args.indexOf('--linker');
     if (linkerIndex >= 0 && !args[linkerIndex + 1]) throw new Error('--linker requires auto, native, or system');
     const linker = linkerIndex >= 0 ? args[linkerIndex + 1] : 'auto';
+    const versionIndex = args.indexOf('--library-version');
+    if (versionIndex >= 0 && !args[versionIndex + 1]) throw new Error('--library-version requires a semantic version');
+    const libraryVersion = versionIndex >= 0 ? args[versionIndex + 1] : undefined;
     const positional = args.filter((argument, index) => argument !== levelFlag &&
         (sourceRootIndex < 0 || index !== sourceRootIndex && index !== sourceRootIndex + 1) &&
-        (linkerIndex < 0 || index !== linkerIndex && index !== linkerIndex + 1));
+        (linkerIndex < 0 || index !== linkerIndex && index !== linkerIndex + 1) &&
+        (versionIndex < 0 || index !== versionIndex && index !== versionIndex + 1));
+    const emitLibrary = positional[0] === '--emit-library';
     const emitObject = positional[0] === '--emit-object';
-    const sourcePath = positional[emitObject ? 1 : 0];
-    const outputPath = positional[emitObject ? 2 : 1] ?? (emitObject ? 'a.o' : 'a.out');
+    const sourcePath = positional[emitObject || emitLibrary ? 1 : 0];
+    const outputPath = positional[emitObject || emitLibrary ? 2 : 1] ?? (emitObject || emitLibrary ? 'a.o' : 'a.out');
     if (!sourcePath) throw new Error('Usage: node compiler.js [-O0|-O1] <source-file> [output]');
-    if (emitObject) new Compiler().emitObject(sourcePath, outputPath, {optimizationLevel, sourceRoot});
+    if (emitLibrary) {
+        if (!libraryVersion) throw new Error('--emit-library requires --library-version <major.minor.patch>');
+        new Compiler().emitLibrary(sourcePath, outputPath, libraryVersion, {optimizationLevel, sourceRoot});
+    } else if (emitObject) new Compiler().emitObject(sourcePath, outputPath, {optimizationLevel, sourceRoot});
     else new Compiler().compile(sourcePath, outputPath, {optimizationLevel, sourceRoot, linker});
 }

@@ -162,6 +162,39 @@ test('generation 1 passes the native compiler conformance suite', async t => {
         assert.equal(compilerDynamic.status, 0, compilerDynamic.stderr);
         assert.doesNotMatch(compilerDynamic.stdout, /NEEDED/, 'generation 1 unexpectedly requires a shared library');
 
+        await t.test('compiled libraries carry validated version and ABI metadata', () => {
+            const source = path.join(projectRoot, 'bootstrap/test/fixtures/compiled-library.ar');
+            const object = path.join(directory, 'arithmetic-library.o');
+            const emitted = spawnSync(compilerPath,
+                ['--library-version', '1.2.3-beta.1+build.7', '--emit-library', source, '-o', object],
+                {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(emitted.status, 0, emitted.stderr || emitted.stdout);
+            assert.equal(spawnSync('readelf', ['-h', object], {encoding: 'utf8'}).status, 0);
+            const metadataPath = `${object}.vmeta`;
+            const metadata = fs.readFileSync(metadataPath, 'utf8');
+            assert.match(metadata, /^VALEN-LIBRARY-1\n/);
+            assert.match(metadata, /name=Arithmetic\nversion=1\.2\.3-beta\.1\+build\.7\n/);
+            assert.match(metadata, /dependency=Support\|[-0-9]+\n/);
+            const valid = spawnSync(compilerPath, ['--validate-library', metadataPath], {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(valid.status, 0, valid.stderr);
+            assert.equal(valid.stdout, 'Arithmetic 1.2.3-beta.1+build.7\n');
+            const objectBytes = fs.readFileSync(object);
+            fs.writeFileSync(object, Buffer.concat([objectBytes, Buffer.from([0])]));
+            const mismatched = spawnSync(compilerPath, ['--validate-library', metadataPath], {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(mismatched.status, 65);
+            assert.match(mismatched.stderr, /object fingerprint does not match/);
+            fs.writeFileSync(object, objectBytes);
+            fs.writeFileSync(metadataPath, metadata.replace('abi=valen-native-1', 'abi=valen-native-2'));
+            const incompatible = spawnSync(compilerPath, ['--validate-library', metadataPath], {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(incompatible.status, 65);
+            assert.match(incompatible.stderr, /Incompatible library ABI/);
+            const invalidVersion = spawnSync(compilerPath,
+                ['--library-version', '01.2.3', '--emit-library', source, '-o', path.join(directory, 'invalid-library.o')],
+                {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(invalidVersion.status, 64);
+            assert.match(invalidVersion.stderr, /Invalid semantic version/);
+        });
+
         await t.test('native compiler cache hits, invalidates, and preserves foreign libraries', () => {
             const cachePath = path.join(directory, 'cache');
             fs.mkdirSync(cachePath);

@@ -12,6 +12,8 @@ import X86Object from './libX86Object.ar'
 import CompilerCache from './libCompilerCache.ar'
 import Linking from './libLinker.ar'
 import Elf from './libElf.ar'
+import LibraryMetadata from './libLibraryMetadata.ar'
+import ModuleInterfaces from './libModuleInterface.ar'
 
 entry {{
     __() -> i32 {
@@ -22,6 +24,7 @@ entry {{
         local optimizationLevel:i64 = 1
         local configuredSourceRoot:string? = null
         local linkerMode:string = "auto"
+        local libraryVersion:string? = null
         local argumentIndex:i64 = 1
         while argumentIndex < arguments.length {
             local argument = arguments[argumentIndex]
@@ -35,6 +38,10 @@ entry {{
                 configuredSourceRoot = arguments[argumentIndex + 1]
                 argumentIndex = argumentIndex + 1
             }
+            else { if argument == "--library-version" {
+                if argumentIndex + 1 >= arguments.length { System.writeError("valen: --library-version requires a semantic version\n"); return 64 }
+                libraryVersion = arguments[argumentIndex + 1]; argumentIndex = argumentIndex + 1
+            }
             else { if argument == "-O0" { optimizationLevel = 0 }
             else {
                 if argument == "-O1" { optimizationLevel = 1 }
@@ -45,7 +52,7 @@ entry {{
                     }
                     compilerArguments.append(argument)
                 }
-            } } }
+            } } } }
             argumentIndex = argumentIndex + 1
         }
         if compilerArguments.length == 2 {
@@ -54,12 +61,14 @@ entry {{
                 return 0
             }
         }
+        if compilerArguments.length == 3 { if compilerArguments[1] == "--validate-library" { return self.validateCompiledLibrary(compilerArguments[2]) } }
 
         local sourcePath:string? = null
         local outputPath:string? = null
         local checkOnly:bool = false
         local emitIr:bool = false
         local emitObjectOnly:bool = false
+        local emitLibrary:bool = false
         if compilerArguments.length == 2 {
             sourcePath = compilerArguments[1]
         } else {
@@ -83,7 +92,9 @@ entry {{
                     if compilerArguments.length == 5 {
                         if compilerArguments[1] == "--emit-object" && compilerArguments[3] == "-o" {
                             emitObjectOnly = true; sourcePath = compilerArguments[2]; outputPath = compilerArguments[4]
-                        }
+                        } else { if compilerArguments[1] == "--emit-library" && compilerArguments[3] == "-o" {
+                            emitLibrary = true; sourcePath = compilerArguments[2]; outputPath = compilerArguments[4]
+                        } }
                     }
                 }
             }
@@ -92,6 +103,7 @@ entry {{
             self.writeUsage()
             return 64
         }
+        if emitLibrary && libraryVersion == null { System.writeError("valen: --emit-library requires --library-version <major.minor.patch>\n"); return 64 }
 
         local cwd = System.currentDirectory()
         if cwd == null {
@@ -143,7 +155,7 @@ entry {{
             ir = generator.generate()
         }
         local irPass = new IrValidation.Pass()
-        local irErrors = irPass.prepare(ir, optimizationLevel == 1)
+        local irErrors = irPass.prepare(ir, optimizationLevel == 1, !emitLibrary)
         if irErrors.length > 0 {
             local errorIndex:i64 = 0
             while errorIndex < irErrors.length {
@@ -159,6 +171,7 @@ entry {{
             System.write(normalizer.format(ir))
             return 0
         }
+        if emitLibrary { return self.emitCompiledLibrary(graph, ir, outputPath!, libraryVersion!, optimizationLevel) }
         local backend = new X86_64.Backend(ir, optimizationLevel)
         local runtimeErrors = backend.validateRuntime()
         if runtimeErrors.length > 0 {
@@ -196,6 +209,48 @@ entry {{
             return 69
         }
         if !self.writeObject(objectPath, object!) { return 74 }
+        return 0
+    }
+
+    emitCompiledLibrary(graph:ModuleLoading.ModuleGraph, ir:Ir.Program, objectPath:string, version:string, optimizationLevel:i64) -> i32 {
+        if graph.entry == null { System.writeError("valen: compiled library has no source module\n"); return 65 }
+        local libraryName:string? = null; local declarationIndex:i64 = 0
+        while declarationIndex < graph.entry!.program.declarations.length {
+            local declaration = graph.entry!.program.declarations[declarationIndex]
+            if declaration.kind == "Library" { if libraryName != null { System.writeError("valen: compiled library source must declare exactly one library\n"); return 65 }; libraryName = declaration.name }
+            declarationIndex = declarationIndex + 1
+        }
+        if libraryName == null { System.writeError("valen: compiled library source must declare exactly one library\n"); return 65 }
+        local backend = new X86_64.Backend(ir, optimizationLevel, graph.entry!.path, false)
+        local assembler = new X86Object.Assembler(); local structured = assembler.assembleObject(backend.generate())
+        if structured == null { System.writeError("valen: native library object encoder failed: "); System.writeError(assembler.error); System.writeError("\n"); return 69 }
+        local object = structured!.build()
+        if !self.writeObject(objectPath, object) { return 74 }
+        local interfaceBuilder = new ModuleInterfaces.Builder(); local artifact = interfaceBuilder.create(graph.entry!)
+        local dependencies = new Array<LibraryMetadata.Dependency>(0); local importIndex:i64 = 0
+        while importIndex < graph.entry!.imports.length {
+            local imported = graph.entry!.imports[importIndex]
+            local importedArtifact = interfaceBuilder.create(imported.loadedModule)
+            dependencies.append(new LibraryMetadata.Dependency(imported.name, importedArtifact.interfaceFingerprint.toString()))
+            importIndex = importIndex + 1
+        }
+        local codec = new LibraryMetadata.Codec()
+        local metadata = codec.create(libraryName!, version, artifact.interfaceFingerprint.toString(), artifact.implementationFingerprint.toString(), object, dependencies)
+        if metadata == null { System.writeError("valen: "); System.writeError(codec.error); System.writeError("\n"); return 64 }
+        if !codec.write(objectPath + ".vmeta", metadata!) { System.writeError("valen: "); System.writeError(codec.error); System.writeError("\n"); return 74 }
+        return 0
+    }
+
+    validateCompiledLibrary(path:string) -> i32 {
+        local source = Compiler.loadSource(path)
+        if source == null { System.writeError("valen: cannot load library metadata; OS error "); System.writeError(System.lastError().toString()); System.writeError("\n"); return 66 }
+        local codec = new LibraryMetadata.Codec(); local metadata = codec.parse(source!.content)
+        if metadata == null { System.writeError("valen: "); System.writeError(codec.error); System.writeError("\n"); return 65 }
+        if path.length < 7 || path.slice(path.length - 6, 6) != ".vmeta" { System.writeError("valen: library metadata path must end in .vmeta\n"); return 65 }
+        local objectSource = Compiler.loadSource(path.slice(0, path.length - 6))
+        if objectSource == null { System.writeError("valen: compiled library object is missing\n"); return 66 }
+        if codec.hashString(objectSource!.content).toString() != metadata!.objectFingerprint { System.writeError("valen: compiled library object fingerprint does not match metadata\n"); return 65 }
+        System.write(metadata!.name); System.write(" "); System.write(metadata!.version); System.write("\n")
         return 0
     }
 
@@ -301,5 +356,7 @@ entry {{
         System.write("  valen --check <source-file>\n")
         System.write("  valen --emit-ir <source-file>\n")
         System.write("  valen --emit-object <source-file> -o <object-file>\n")
+        System.write("  valen --library-version <semver> --emit-library <source-file> -o <object-file>\n")
+        System.write("  valen --validate-library <object-file>.vmeta\n")
     }
 }}

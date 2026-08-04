@@ -53,6 +53,15 @@ program. The whole-program cache remains the faster path for an exact warm build
 The interface and chunk formats are internal, versioned compiler artifacts, not a stable Valen ABI.
 Deleting the cache directory is always safe.
 
+Published compiled libraries use a separate boundary: `--emit-library` writes an ELF64 relocatable
+object and a deterministic `.vmeta` sidecar. `--library-version` requires SemVer syntax. Metadata
+format 1 identifies `valen-interface-1`, `x86_64-linux`, and `valen-native-1`, fingerprints the
+exported interface, implementation and object bytes, and records each imported interface.
+`--validate-library` checks those compatibility fields and confirms the adjacent object still
+matches its manifest. These names are explicit compatibility epochs; changing the compiler
+implementation alone does not invalidate a library, while a compiler-interface, target, or ABI
+change does.
+
 Object emission and linking are separate policy choices. Direct ELF emission does not imply a
 freestanding executable: the emitted object may be linked without foreign libraries for the
 self-contained Linux runtime, or passed to the hosted system linker with the explicit libraries

@@ -1,0 +1,145 @@
+import System from './libSystem.ar'
+import Compiler from './libCompiler.ar'
+
+library LibraryMetadata {{
+    Dependency {{
+        member name:string
+        member interfaceFingerprint:string
+        __(name:string, interfaceFingerprint:string) -> void { self.name = name; self.interfaceFingerprint = interfaceFingerprint }
+    }}
+
+    Artifact {{
+        member name:string
+        member version:string
+        member compiler:string
+        member target:string
+        member abi:string
+        member interfaceFingerprint:string
+        member implementationFingerprint:string
+        member objectFingerprint:string
+        member dependencies:Array<Dependency>
+
+        __(name:string, version:string) -> void {
+            self.name = name; self.version = version
+            self.compiler = "valen-interface-1"; self.target = "x86_64-linux"; self.abi = "valen-native-1"
+            self.interfaceFingerprint = ""; self.implementationFingerprint = ""; self.objectFingerprint = ""
+            self.dependencies = new Array<Dependency>(0)
+        }
+    }}
+
+    Codec {{
+        member error:string
+        __() -> void { self.error = "" }
+
+        create(name:string, version:string, interfaceFingerprint:string, implementationFingerprint:string, object:Array<u8>, dependencies:Array<Dependency>) -> ref Artifact? {
+            if !self.validName(name) { self.error = "Invalid library name '" + name + "'"; return null }
+            if !self.validVersion(version) { self.error = "Invalid semantic version '" + version + "'"; return null }
+            local result = new Artifact(name, version)
+            result.interfaceFingerprint = interfaceFingerprint; result.implementationFingerprint = implementationFingerprint
+            result.objectFingerprint = self.hashBytes(object).toString(); result.dependencies = dependencies
+            return result
+        }
+
+        serialize(metadata:Artifact) -> string {
+            local output = new StringBuilder()
+            output.append("VALEN-LIBRARY-1\nname="); output.append(metadata.name)
+            output.append("\nversion="); output.append(metadata.version)
+            output.append("\ncompiler="); output.append(metadata.compiler)
+            output.append("\ntarget="); output.append(metadata.target)
+            output.append("\nabi="); output.append(metadata.abi)
+            output.append("\ninterface="); output.append(metadata.interfaceFingerprint)
+            output.append("\nimplementation="); output.append(metadata.implementationFingerprint)
+            output.append("\nobject="); output.append(metadata.objectFingerprint); output.append("\n")
+            local index:i64 = 0
+            while index < metadata.dependencies.length {
+                output.append("dependency="); output.append(metadata.dependencies[index].name); output.append("|"); output.append(metadata.dependencies[index].interfaceFingerprint); output.append("\n")
+                index = index + 1
+            }
+            output.append("VALEN-LIBRARY-END\n")
+            return output.build()
+        }
+
+        parse(content:string) -> ref Artifact? {
+            self.error = ""
+            local lines = self.lines(content)
+            if lines.length < 10 || lines[0] != "VALEN-LIBRARY-1" || lines[lines.length - 1] != "VALEN-LIBRARY-END" { self.error = "Unsupported or malformed Valen library metadata"; return null }
+            local name = self.value(lines, "name="); local version = self.value(lines, "version=")
+            if name == null || version == null { self.error = "Missing Valen library identity or version"; return null }
+            local result = new Artifact(name!, version!)
+            local compiler = self.value(lines, "compiler="); local target = self.value(lines, "target="); local abi = self.value(lines, "abi=")
+            local interfaceFingerprint = self.value(lines, "interface="); local implementationFingerprint = self.value(lines, "implementation="); local objectFingerprint = self.value(lines, "object=")
+            if compiler == null || target == null || abi == null || interfaceFingerprint == null || implementationFingerprint == null || objectFingerprint == null { self.error = "Missing required Valen library metadata"; return null }
+            if compiler! != "valen-interface-1" { self.error = "Incompatible library compiler interface '" + compiler! + "'"; return null }
+            if target! != "x86_64-linux" { self.error = "Incompatible library target '" + target! + "'"; return null }
+            if abi! != "valen-native-1" { self.error = "Incompatible library ABI '" + abi! + "'"; return null }
+            if !self.validVersion(version!) { self.error = "Invalid semantic version '" + version! + "'"; return null }
+            result.interfaceFingerprint = interfaceFingerprint!; result.implementationFingerprint = implementationFingerprint!; result.objectFingerprint = objectFingerprint!
+            local index:i64 = 1
+            while index + 1 < lines.length {
+                if self.starts(lines[index], "dependency=") {
+                    local dependency = lines[index].slice(11, lines[index].length - 11); local separator = self.findByte(dependency, 0, 124)
+                    if separator < 1 { self.error = "Malformed Valen library dependency"; return null }
+                    result.dependencies.append(new Dependency(dependency.slice(0, separator), dependency.slice(separator + 1, dependency.length - separator - 1)))
+                }
+                index = index + 1
+            }
+            return result
+        }
+
+        write(path:string, metadata:Artifact) -> bool {
+            local output = System.openWrite(path)
+            if output == null { self.error = "Could not open library metadata output"; return false }
+            local content = self.serialize(metadata); local written = System.writeFile(output!, content); local closed = System.close(output!)
+            if written != content.length || closed != 0 { self.error = "Could not write library metadata"; return false }
+            return true
+        }
+
+        lines(content:string) -> Array<string> {
+            local result = new Array<string>(0); local start:i64 = 0; local index:i64 = 0
+            while index < content.length { if content[index] == 10 { result.append(content.slice(start, index - start)); start = index + 1 }; index = index + 1 }
+            if start < content.length { result.append(content.slice(start, content.length - start)) }
+            return result
+        }
+
+        value(lines:Array<string>, prefix:string) -> string? {
+            local index:i64 = 1
+            while index + 1 < lines.length { if self.starts(lines[index], prefix) { return lines[index].slice(prefix.length, lines[index].length - prefix.length) }; index = index + 1 }
+            return null
+        }
+
+        validName(value:string) -> bool {
+            if value.length == 0 || !self.alpha(value[0]) && value[0] != 95 { return false }
+            local index:i64 = 1
+            while index < value.length { if !self.alpha(value[index]) && !self.digit(value[index]) && value[index] != 95 { return false }; index = index + 1 }
+            return true
+        }
+
+        validVersion(value:string) -> bool {
+            local coreEnd = value.length; local index:i64 = 0
+            while index < value.length { if value[index] == 45 || value[index] == 43 { coreEnd = index; break }; index = index + 1 }
+            local component:i64 = 0; local start:i64 = 0; index = 0
+            while index <= coreEnd {
+                if index == coreEnd || value[index] == 46 {
+                    if index == start || component > 2 { return false }
+                    if index - start > 1 && value[start] == 48 { return false }
+                    local digitIndex = start
+                    while digitIndex < index { if !self.digit(value[digitIndex]) { return false }; digitIndex = digitIndex + 1 }
+                    component = component + 1; start = index + 1
+                }
+                index = index + 1
+            }
+            if component != 3 { return false }
+            if coreEnd < value.length { if coreEnd + 1 >= value.length { return false } }
+            index = coreEnd
+            while index < value.length { if !self.alpha(value[index]) && !self.digit(value[index]) && value[index] != 45 && value[index] != 43 && value[index] != 46 { return false }; index = index + 1 }
+            return true
+        }
+
+        starts(value:string, prefix:string) -> bool { return value.length >= prefix.length && value.slice(0, prefix.length) == prefix }
+        alpha(value:u8) -> bool { return value >= 65 && value <= 90 || value >= 97 && value <= 122 }
+        digit(value:u8) -> bool { return value >= 48 && value <= 57 }
+        hashBytes(input:Array<u8>) -> i64 { local value:i64 = 1469598103934665603; local index:i64 = 0; while index < input.length { value = value * 1099511628211 + (input[index] as i64); index = index + 1 }; return value }
+        hashString(input:string) -> i64 { local value:i64 = 1469598103934665603; local index:i64 = 0; while index < input.length { value = value * 1099511628211 + (input[index] as i64); index = index + 1 }; return value }
+        findByte(input:string, start:i64, value:u8) -> i64 { local index = start; while index < input.length { if input[index] == value { return index }; index = index + 1 }; return -1 }
+    }}
+}}

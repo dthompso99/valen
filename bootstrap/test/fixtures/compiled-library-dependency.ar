@@ -1,0 +1,3 @@
+library Support {{
+    identity(value:i64) -> i64 { return value }
+}}
