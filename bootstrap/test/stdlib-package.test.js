@@ -6,6 +6,27 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
 
+test('generation 0 packages and consumes generic standard-library modules', () => {
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-bootstrap-stdlib-package-'));
+    try {
+        const libraryRoot = path.join(directory, 'lib/valen');
+        let result = spawnSync(process.execPath, [path.join(root, 'scripts/package-stdlib.mjs'), '--output', libraryRoot],
+            {cwd: root, encoding: 'utf8'});
+        assert.equal(result.status, 0, result.stderr);
+        const executable = path.join(directory, 'collections');
+        result = spawnSync(process.execPath, [path.join(root, 'bootstrap/compiler.js'),
+            path.join(root, 'bootstrap/test/fixtures/stdlib-collections.ar'), executable], {
+            cwd: root, encoding: 'utf8', env: {...process.env,
+                VALEN_SYSROOT: path.join(libraryRoot, 'current/x86_64-linux'), VALEN_LIBRARY_PATH: ''}
+        });
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(spawnSync(executable).status, 0);
+    } finally {
+        fs.rmSync(directory, {recursive: true, force: true});
+    }
+});
+
 test('self-hosted toolchain packages and statically consumes the installed standard library', {timeout: 30000}, () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-stdlib-package-'));

@@ -17,23 +17,24 @@ const defaultSysroot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 export class Compiler {
     emitLibrary(sourcePath, objectPath, version, {sourceRoot, optimizationLevel = 1} = {}) {
         const graph = new ModuleLoader({sourceRoot, sysroot: process.env.VALEN_SYSROOT ?? defaultSysroot}).load(sourcePath);
+        const interfaces = new Map([...graph.modules.values()].map(module => [module, ModuleInterface.create(module)]));
         const semantic = new SemanticAnalyzer().analyzeModules(graph);
         if (!semantic.success) throw new Error(semantic.diagnostics.map(item => item.message).join('\n'));
         const entry = graph.entry;
         const libraries = entry.program.libraries.filter(item => item.visibility !== 'private');
         if (libraries.length !== 1) throw new Error('A compiled library source must declare exactly one public library');
-        const artifact = ModuleInterface.create(entry);
+        const artifact = interfaces.get(entry);
         const ir = new IrGenerator().generate(semantic);
         const assembly = new X86_64Backend().generate(ir, {optimizationLevel, moduleId: entry.id, includeRuntime: false, includeModuleMetadata: true});
         const object = new X86Assembler().assemble(assembly);
         fs.writeFileSync(objectPath, object);
         fs.writeFileSync(`${objectPath}.vmi`, ModuleInterface.serialize(artifact, new Map(artifact.imports.map(item => {
             const imported = [...graph.modules.values()].find(module => module.id === item.moduleId);
-            return [item.moduleId, ModuleInterface.create(imported).interfaceFingerprint];
+            return [item.moduleId, interfaces.get(imported).interfaceFingerprint];
         }))));
         const dependencies = artifact.imports.map(item => {
             const imported = [...graph.modules.values()].find(module => module.id === item.moduleId);
-            return {name: item.name, interfaceFingerprint: ModuleInterface.create(imported).interfaceFingerprint};
+            return {name: item.name, interfaceFingerprint: interfaces.get(imported).interfaceFingerprint};
         });
         const metadata = LibraryMetadata.create({name: libraries[0].name, version,
             interfaceFingerprint: artifact.interfaceFingerprint, implementationFingerprint: artifact.implementationFingerprint,
