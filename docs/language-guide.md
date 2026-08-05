@@ -396,7 +396,7 @@ unsafe {
 }
 ```
 
-See the [FFI reference](../ffi.md) for supported boundary types.
+See the [FFI reference](reference/ffi.md) for supported boundary types.
 
 ## Tests
 

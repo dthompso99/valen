@@ -84,4 +84,4 @@ and embedded targets.
 
 Valen is ready for language experiments, compiler development, small native examples, and demonstrating a complete self-hosting toolchain. It is not yet ready to promise stable syntax, binary compatibility, production performance, security hardening, or cross-platform application deployment.
 
-The authoritative active work is in the [issue tracker](https://gitea.hallrd.click/dthompson/valen/issues). The repository’s [language checklist](../language_checklist.md) is a readable roadmap snapshot.
+The authoritative active work is in the [issue tracker](https://gitea.hallrd.click/dthompson/valen/issues). This page summarizes the currently implemented surface and known gaps without maintaining a second task list.

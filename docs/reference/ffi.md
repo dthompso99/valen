@@ -42,4 +42,4 @@ SQLite statement pointers out of ordinary Valen code.
 Freestanding targets do not implicitly provide a C ABI or libc. A `from` declaration requires
 the target's explicit `foreign-abi` capability; otherwise it is a compile-time error. Plain
 `native` declarations may instead resolve to target runtime facilities or application hooks.
-See [the freestanding profile](docs/freestanding.md).
+See [the freestanding profile](../freestanding.md).

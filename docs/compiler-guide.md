@@ -91,7 +91,6 @@ The self-hosted compiler can stop at the same boundary with
 | `examples/` | Small runnable Valen programs |
 | `docs/` | User and contributor documentation |
 | `docker/` | Multi-stage bootstrap proof |
-| `language_checklist.md` | Detailed feature roadmap snapshot |
 
 The main parallel files are intentionally easy to recognize: for example, `bootstrap/semantic.js` corresponds to `src/libSemantic.ar`, and `bootstrap/x86-64.js` corresponds to `src/libX86_64.ar`.
 

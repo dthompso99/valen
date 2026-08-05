@@ -17,16 +17,15 @@ For compiler contributors:
 
 - [Compiler developer guide](compiler-guide.md) explains the bootstrap, self-hosted pipeline, repository layout, and tests.
 - [Contributor and agent guide](agent-guide.md) records the project’s working conventions.
-- [Bootstrap checklist](bootstrap_checklist.md) preserves the original self-hosting plan.
 - [Freestanding profile](freestanding.md) defines the capability boundary for kernels, firmware, and embedded targets.
 
-Focused technical references remain at the repository root:
+Focused technical references:
 
-- [Operation model](../operation_model.md)
-- [Generic objects](../generics.md)
-- [Floating-point rules](../floating_point.md)
-- [Native and C FFI](../ffi.md)
-- [Unsafe boundary](../unsafe_boundary.md)
-- [x86-64 ABI](../x86_64_abi.md)
+- [Operation model](reference/operation-model.md)
+- [Generic objects](reference/generics.md)
+- [Floating-point rules](reference/floating-point.md)
+- [Native and C FFI](reference/ffi.md)
+- [Unsafe boundary](reference/unsafe-boundary.md)
+- [x86-64 ABI](reference/x86-64-abi.md)
 
-The [language roadmap](../language_checklist.md) is the detailed feature inventory. Unchecked roadmap items should be treated as **WIP**, even when their intended behavior has been discussed.
+Planned work belongs in the [issue tracker](https://gitea.hallrd.click/dthompson/valen/issues). Documentation describes implemented behavior in the present tense and marks incomplete behavior as **WIP**.
