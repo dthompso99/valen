@@ -449,6 +449,31 @@ test('generic objects monomorphize concrete invariant specializations', () => {
     assert.match(wrongArity.diagnostics[0].message, /requires 2 type arguments, got 1/);
 });
 
+test('imported generic templates specialize once in the consuming module', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-cross-module-generic-'));
+    try {
+        const library = path.join(directory, 'box.ar');
+        const consumer = path.join(directory, 'consumer.ar');
+        fs.writeFileSync(library, `
+            Box<T> {{ member value:T; __(value:T) -> void { self.value = value }; get() -> T { return self.value } }}
+            library Box {{}}
+        `);
+        fs.writeFileSync(consumer, `
+            import Box from './box.ar'
+            entry {{ __() -> i64 { local first = new Box<i64>(20); local second = new Box<i64>(22); return first.get() + second.get() - 42 } }}
+        `);
+        const semantic = new SemanticAnalyzer().analyzeFile(consumer, {sourceRoot: directory});
+        assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+        const specialization = semantic.program.objects.filter(item => item.name === 'Box<i64>');
+        assert.equal(specialization.length, 1);
+        const ir = new IrGenerator().generate(semantic);
+        assert.equal(ir.types.filter(type => type.name.endsWith('::Box<i64>')).length, 1);
+        assert.doesNotThrow(() => new X86_64Backend().generate(ir));
+    } finally {
+        fs.rmSync(directory, {recursive: true, force: true});
+    }
+});
+
 test('generic constraints require type arguments to satisfy contracts', () => {
     const valid = new SemanticAnalyzer().analyze(new Parser().parse(`
         Printable {{ print() -> i64 { return 0 } }}

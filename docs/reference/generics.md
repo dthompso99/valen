@@ -20,4 +20,6 @@ Concrete specializations are invariant. `Box<Dog>` and `Box<Animal>` are distinc
 
 The compiler monomorphizes each used specialization. Every concrete type receives its own substituted field and method signatures, object layout, runtime descriptor, garbage-collector trace functions, and mangled native symbols. Repeated uses of the same canonical specialization reuse it.
 
+Generic templates may be imported from another source or packaged standard-library module. The module interface fingerprints the template body, while the packaged source supplies that body for deterministic consumer-side specialization. Generated concrete types remain private implementation details of the consuming module and participate in its normal compiler cache identity.
+
 Type parameters may be used in fields, constructors, method parameters and returns, local annotations, arrays, optionals, and nested generic arguments. Open generic values and generic native declarations are not supported. Generic constraints and generic methods are separate language features.

@@ -71,23 +71,15 @@ source imports; artifact selection is build policy.
 
 ## Generic modules
 
-Generic stdlib APIs such as `StringMap<T>` cannot be distributed as an ordinary closed object alone:
-the consuming application may instantiate them with a type unknown when the stdlib was built. Their
-package interface must therefore retain enough template representation for deterministic
-cross-module monomorphization, such as typed generic IR or the required source body. Concrete
-specializations can then be cached and linked like other objects.
+Generic stdlib APIs may be instantiated with types unknown when the stdlib is built. Their `.vmi`
+interfaces therefore fingerprint the complete generic template, and the packaged source supplies
+the method bodies for deterministic consumer-side monomorphization. Each canonical specialization
+is emitted once into the consuming module and follows that module's normal cache identity; generated
+specializations do not become part of the library's public interface.
 
-The first collection target is `StringMap<T>`, followed by `StringSet` built on a small concrete map
-specialization. A fully generic `HashMap<K, V>` should wait until hashing and equality contracts,
-generic ownership, and cross-module specialization have been exercised by these real uses.
-
-## Delivery sequence
-
-1. Define stable `std/...` module names and separate platform-neutral APIs from implementations.
-2. Add a compiler-relative sysroot while retaining `VALEN_LIBRARY_PATH` for external packages.
-3. Resolve compatible `.vmi`, `.vmeta`, and `.o` artifacts and feed selected objects to the linker.
-4. Preserve generic templates across module boundaries and cache concrete specializations.
-5. Introduce `StringMap<T>` and `StringSet`, then migrate compiler indexing code where appropriate.
-6. Package compiler, interfaces, objects, metadata, and source as one versioned toolchain.
-7. Rebuild the Clippy service from the installed toolchain as the end-to-end static-distribution proof.
-8. Define the dynamic ABI and optional `.so` mode only after the static package boundary is proven.
+`std/libStringMap.ar` provides an owning `StringMap<T>` for object values. `set` transfers ownership
+to the map, `get` returns a borrowed optional reference, and `remove` returns an independent owned
+value. `Collections.StringSet` is built on a concrete map specialization, and the standard scope
+library uses the same map for its set implementation. Primitive map values and a fully generic
+`HashMap<K, V>` remain **WIP** until generic ownership and hashing/equality contracts can express
+their policies without special cases.

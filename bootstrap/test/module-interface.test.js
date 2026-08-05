@@ -52,3 +52,17 @@ test('module interface dependencies record imported interface fingerprints', () 
         fs.rmSync(directory, {recursive: true, force: true});
     }
 });
+
+test('generic template bodies participate in interface fingerprints', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-generic-interface-'));
+    try {
+        const main = "import Box from './library.ar'\nentry {{ __() -> i64 { return 0 } }}\n";
+        const first = load(directory, {main, library: 'Box<T> {{ value(input:T) -> T { return input } }}\nlibrary Box {{}}\n'});
+        const firstArtifact = ModuleInterface.create([...first.modules.values()].find(module => module.path.endsWith('library.ar')));
+        const changed = load(directory, {main, library: 'Box<T> {{ value(input:T) -> T { local result = input; return result } }}\nlibrary Box {{}}\n'});
+        const changedArtifact = ModuleInterface.create([...changed.modules.values()].find(module => module.path.endsWith('library.ar')));
+        assert.notEqual(changedArtifact.interfaceFingerprint, firstArtifact.interfaceFingerprint);
+    } finally {
+        fs.rmSync(directory, {recursive: true, force: true});
+    }
+});

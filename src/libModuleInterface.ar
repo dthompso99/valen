@@ -24,7 +24,7 @@ library ModuleInterfaces {{
             output.append("module|"); output.append(modulePath); output.append("\n")
             local index:i64 = 0
             while index < module.program.declarations.length {
-                self.declaration(output, module.program.declarations[index], "")
+                if module.program.declarations[index].genericArguments.length == 0 { self.declaration(output, module.program.declarations[index], "") }
                 index = index + 1
             }
             local summary = output.build()
@@ -43,6 +43,7 @@ library ModuleInterfaces {{
 
         declaration(output:StringBuilder, declaration:Ast.Declaration, prefix:string) -> void {
             output.append(prefix); output.append(declaration.kind); output.append("|"); output.append(declaration.name); output.append("|")
+            self.typeParameters(output, declaration.typeParameters, declaration.typeConstraints); output.append("|")
             self.type(output, declaration.inheritedType); output.append("|")
             local index:i64 = 0
             while index < declaration.implementedTypes.length { if index > 0 { output.append(",") }; self.type(output, declaration.implementedTypes[index]); index = index + 1 }
@@ -77,10 +78,17 @@ library ModuleInterfaces {{
                 }
                 index = index + 1
             }
+            if declaration.typeParameters.length > 0 {
+                output.append("template|")
+                local span = declaration.span
+                if span.start >= 0 && span.end >= span.start && span.end <= span.source.content.length { output.append(span.source.content.slice(span.start, span.end - span.start)) }
+                output.append("\n")
+            }
         }
 
         memberDeclaration(output:StringBuilder, item:Ast.MemberDeclaration, prefix:string) -> void {
             output.append(prefix); output.append(item.kind); output.append("|"); output.append(item.name); output.append("|")
+            self.typeParameters(output, item.typeParameters, item.typeConstraints); output.append("|")
             self.type(output, item.inheritedType); output.append("|")
             local index:i64 = 0
             while index < item.implementedTypes.length { if index > 0 { output.append(",") }; self.type(output, item.implementedTypes[index]); index = index + 1 }
@@ -118,6 +126,19 @@ library ModuleInterfaces {{
                 output.append(">")
             }
             if reference!.optional { output.append("?") }
+        }
+
+        typeParameters(output:StringBuilder, parameters:Array<string>, constraints:Array<Ast.TypeReference?>) -> void {
+            if parameters.length == 0 { return }
+            output.append("<")
+            local index:i64 = 0
+            while index < parameters.length {
+                if index > 0 { output.append(",") }
+                output.append(parameters[index])
+                if index < constraints.length { if constraints[index] != null { output.append(":"); self.type(output, constraints[index]) } }
+                index = index + 1
+            }
+            output.append(">")
         }
 
         expressionSource(output:StringBuilder, expression:Ast.Expression) -> void {

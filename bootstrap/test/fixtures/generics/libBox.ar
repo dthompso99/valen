@@ -1,0 +1,13 @@
+Box < T > {{
+    member value:T
+
+    __(value:T) -> void {
+        self.value = value
+    }
+
+    get() -> T {
+        return self.value
+    }
+}}
+
+library Box {{}}

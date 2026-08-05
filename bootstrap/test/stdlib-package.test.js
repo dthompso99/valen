@@ -24,6 +24,14 @@ test('self-hosted toolchain packages and statically consumes the installed stand
             {cwd: root, encoding: 'utf8', env: {...process.env, VALEN_SYSROOT: sysroot, VALEN_LIBRARY_PATH: ''}});
         assert.equal(result.status, 0, result.stderr);
         assert.equal(spawnSync(executable).status, 0);
+        const collections = path.join(directory, 'collections');
+        result = spawnSync(compiler, [path.join(root, 'bootstrap/test/fixtures/stdlib-collections.ar'), '-o', collections],
+            {cwd: root, encoding: 'utf8', env: {...process.env, VALEN_SYSROOT: sysroot, VALEN_LIBRARY_PATH: ''}});
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(spawnSync(collections).status, 0);
+        const stringMapInterface = fs.readFileSync(path.join(sysroot, 'interfaces/std/libStringMap.vmi'), 'utf8');
+        assert.match(stringMapInterface, /StringMap/);
+        assert.match(stringMapInterface, /T/);
         assert.equal(spawnSync('readelf', ['-d', executable], {encoding: 'utf8'}).stdout.includes('NEEDED'), false);
         for (const kind of ['source', 'objects', 'metadata', 'interfaces']) {
             assert.equal(fs.existsSync(path.join(sysroot, kind, 'std')), true, `missing ${kind}`);

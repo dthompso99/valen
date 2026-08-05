@@ -1,0 +1,10 @@
+import Box from'./libBox.ar'
+
+entry {{
+    __() -> i32 {
+        local first = new Box < i64 >(20)
+        local second = new Box < i64 >(22)
+        if first.get() + second.get() != 42 { return 1 }
+        return 0
+    }
+}}

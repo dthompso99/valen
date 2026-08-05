@@ -70,9 +70,17 @@ export class SemanticAnalyzer {
         this.diagnostics.push(...graph.diagnostics);
         this.moduleScopes = new Map();
 
+        const genericExports = new Map([...graph.modules.values()].map(module => [module,
+            new Map(module.program.objects.filter(item => item.typeParameters?.length).map(item => [item.name, item]))]));
+
         for (const module of graph.modules.values()) {
             this.moduleScopes.set(module, new Scope(this.globals, `module ${module.id}`, module.id));
-            this.prepareGenericSpecializations(module.program);
+            const templates = new Map(genericExports.get(module));
+            for (const [name, imported] of module.imports) {
+                const template = genericExports.get(imported.module)?.get(name);
+                if (template) templates.set(name, template);
+            }
+            this.prepareGenericSpecializations(module.program, templates);
         }
         for (const module of graph.modules.values()) {
             const scope = this.moduleScopes.get(module);
@@ -122,8 +130,9 @@ export class SemanticAnalyzer {
         }
     }
 
-    prepareGenericSpecializations(program) {
-        const templates = new Map(program.objects.filter(item => item.typeParameters?.length).map(item => [item.name, item]));
+    prepareGenericSpecializations(program, availableTemplates = null) {
+        const templates = availableTemplates ?? new Map(program.objects
+            .filter(item => item.typeParameters?.length).map(item => [item.name, item]));
         if (templates.size === 0) return;
         const concrete = new Map(program.objects.filter(item => !item.typeParameters?.length).map(item => [item.name, item]));
         const pending = [];
@@ -136,7 +145,9 @@ export class SemanticAnalyzer {
             if (node.kind === 'TypeReference' && bindings.has(node.name) && node.typeArguments.length === 0) {
                 const replacement = structuredClone(bindings.get(node.name));
                 const span = node.span;
-                Object.assign(node, replacement, {span});
+                const optional = node.optional || replacement.optional;
+                const ownership = node.ownership !== 'owned' ? node.ownership : replacement.ownership;
+                Object.assign(node, replacement, {span, optional, ownership});
                 return;
             }
             for (const value of Object.values(node)) {

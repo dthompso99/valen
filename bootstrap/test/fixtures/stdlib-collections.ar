@@ -1,0 +1,26 @@
+import StringMap from'std/libStringMap.ar'
+import Collections from'std/libCollections.ar'
+
+Value {{
+    member number:i64
+    __(number:i64) -> void { self.number = number }
+}}
+
+entry {{
+    __() -> i32 {
+        local values = new StringMap < Value >()
+        values.set("answer", new Value(40))
+        values.set("answer", new Value(42))
+        if values.length() != 1 { return 1 }
+        if values.get("answer")!.number != 42 { return 2 }
+        if values.remove("missing") != null { return 3 }
+        local answer = values.remove("answer")
+        if answer == null || answer!.number != 42 || values.length() != 0 { return 4 }
+
+        local names = new Collections.StringSet()
+        if!names.add("valen") || names.add("valen") { return 5 }
+        if!names.contains("valen") || names.length() != 1 { return 6 }
+        if!names.remove("valen") || names.contains("valen") { return 7 }
+        return 0
+    }
+}}

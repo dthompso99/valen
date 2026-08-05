@@ -1,0 +1,33 @@
+import StringMap from'./libStringMap.ar'
+
+StringSetEntry {{}}
+
+library Collections {{
+    StringSet {{
+        member entries:StringMap < StringSetEntry >
+
+        __() -> void {
+            self.entries = new StringMap < StringSetEntry >()
+        }
+
+        add(value:string) -> bool {
+            if self.entries.contains(value) { return false }
+            self.entries.set(value, new StringSetEntry())
+            return true
+        }
+
+        remove(value:string) -> bool {
+            if!self.entries.contains(value) { return false }
+            self.entries.remove(value)
+            return true
+        }
+
+        contains(value:string) -> bool {
+            return self.entries.contains(value)
+        }
+
+        length() -> i64 {
+            return self.entries.length()
+        }
+    }}
+}}

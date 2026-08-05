@@ -1,3 +1,5 @@
+import StringMap from './libStringMap.ar'
+
 library Scopes {{
     Symbol {{
         member name:string
@@ -100,10 +102,10 @@ library Scopes {{
     }}
 
     StringSet {{
-        member entries:SymbolMap
+        member entries:StringMap<Scopes.Symbol>
 
         __() -> void {
-            self.entries = new SymbolMap()
+            self.entries = new StringMap<Scopes.Symbol>()
         }
 
         add(value:string) -> bool {

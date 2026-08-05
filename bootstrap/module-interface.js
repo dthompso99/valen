@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const MODULE_INTERFACE_VERSION = 1;
+export const MODULE_INTERFACE_VERSION = 2;
 
 const hash = value => {
     let result = 1469598103934665603n;
@@ -50,23 +50,27 @@ const member = declaration => {
     return container(declaration);
 };
 
-const container = declaration => ({
-    kind: declaration.kind === 'LibraryDeclaration' ? 'library' : declaration.kind === 'EnumDeclaration' ? 'enum' : 'object',
-    name: declaration.name,
-    visibility: declaration.visibility ?? 'public',
-    typeParameters: declaration.typeParameters ?? [],
-    typeConstraints: (declaration.typeConstraints ?? []).map(type),
-    inherits: type(declaration.inheritedType),
-    implements: (declaration.implementedTypes ?? []).map(type),
-    members: declaration.kind === 'EnumDeclaration'
-        ? declaration.cases.map(item => ({kind: 'enum-case', name: item.name, value: item.value}))
-        : declaration.members.filter(item => item.visibility !== 'private').map(member)
-});
+const container = declaration => {
+    const result = {
+        kind: declaration.kind === 'LibraryDeclaration' ? 'library' : declaration.kind === 'EnumDeclaration' ? 'enum' : 'object',
+        name: declaration.name,
+        visibility: declaration.visibility ?? 'public',
+        typeParameters: declaration.typeParameters ?? [],
+        typeConstraints: (declaration.typeConstraints ?? []).map(type),
+        inherits: type(declaration.inheritedType),
+        implements: (declaration.implementedTypes ?? []).map(type),
+        members: declaration.kind === 'EnumDeclaration'
+            ? declaration.cases.map(item => ({kind: 'enum-case', name: item.name, value: item.value}))
+            : declaration.members.filter(item => item.visibility !== 'private').map(member)
+    };
+    if (declaration.typeParameters?.length) result.template = expression(declaration);
+    return result;
+};
 
 export class ModuleInterface {
     static create(module) {
         const exports = [...module.program.objects, ...module.program.libraries]
-            .filter(declaration => declaration.visibility !== 'private').map(container);
+            .filter(declaration => declaration.visibility !== 'private' && !declaration.genericArguments?.length).map(container);
         const summary = JSON.stringify({version: MODULE_INTERFACE_VERSION, module: module.id, exports});
         return {
             version: MODULE_INTERFACE_VERSION,

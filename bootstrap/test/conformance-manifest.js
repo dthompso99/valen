@@ -13,6 +13,8 @@ export const validPrograms = [
     {name: 'floating point', source: 'bootstrap/test/fixtures/floating-point.ar'},
     {name: 'numeric promotion', source: 'bootstrap/test/fixtures/numeric-promotion.ar'},
     {name: 'generic constraints', source: 'bootstrap/test/fixtures/generic-constraints.ar'},
+    {name: 'cross-module generic specialization', source: 'bootstrap/test/fixtures/generics/cross-module-generic.ar'},
+    {name: 'standard generic collections', source: 'bootstrap/test/fixtures/stdlib-collections.ar'},
     {name: 'byte conversions and bulk builder append', source: 'bootstrap/test/fixtures/byte-conversions.ar'},
     {name: 'string interpolation', source: 'bootstrap/test/fixtures/string-interpolation.ar'},
     {name: 'Unicode string operations', source: 'bootstrap/test/fixtures/unicode-strings.ar'},

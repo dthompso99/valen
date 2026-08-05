@@ -231,9 +231,12 @@ library Semantics {{
             while index < parameters.length {
                 if reference.name == parameters[index] && reference.arguments.length == 0 {
                     local replacement = copy arguments[index]
+                    local optional = reference.optional
+                    local ownership = reference.ownership
                     reference.name = replacement.name
                     reference.arguments = replacement.arguments
-                    if replacement.optional { reference.optional = true }
+                    reference.optional = optional || replacement.optional
+                    if ownership == "owned" { reference.ownership = replacement.ownership }
                     return
                 }
                 index = index + 1
@@ -248,6 +251,27 @@ library Semantics {{
                 local declaration = program.declarations[index]
                 if declaration.name == name && declaration.typeParameters.length > 0 { return declaration }
                 index = index + 1
+            }
+            local moduleIndex:i64 = 0
+            while moduleIndex < self.graph.modules.length {
+                local module = self.graph.modules[moduleIndex]
+                if module.program === program {
+                    local importIndex:i64 = 0
+                    while importIndex < module.imports.length {
+                        local imported = module.imports[importIndex]
+                        if imported.name == name {
+                            local declarationIndex:i64 = 0
+                            while declarationIndex < imported.loadedModule.program.declarations.length {
+                                local candidate = imported.loadedModule.program.declarations[declarationIndex]
+                                if candidate.name == name && candidate.typeParameters.length > 0 { return candidate }
+                                declarationIndex = declarationIndex + 1
+                            }
+                        }
+                        importIndex = importIndex + 1
+                    }
+                    return null
+                }
+                moduleIndex = moduleIndex + 1
             }
             return null
         }

@@ -1,0 +1,51 @@
+StringMap < T > {{
+    member keys:Array < string >
+    member values:Array < T?>
+
+    __() -> void {
+        self.keys = new Array < string >(0)
+        self.values = new Array < T?>(0)
+    }
+
+    indexOf(key:string) -> i64 {
+        local index:i64 = 0
+        while index < self.keys.length {
+            if self.keys[index] == key { return index }
+            index = index + 1
+        }
+        return - 1
+    }
+
+    contains(key:string) -> bool {
+        return self.indexOf(key) >= 0
+    }
+
+    get(key:string) -> ref T?{
+        local index = self.indexOf(key)
+        if index < 0 { return null }
+        return self.values[index]!
+    }
+
+    set(key:string, own value:T) -> void {
+        local index = self.indexOf(key)
+        if index >= 0 {
+            self.values[index] = copy value
+            return
+        }
+        self.keys.append(key)
+        self.values.append(value)
+    }
+
+    remove(key:string) -> T?{
+        local index = self.indexOf(key)
+        if index < 0 { return null }
+        self.keys.remove(index)
+        return copy self.values.remove(index)!
+    }
+
+    length() -> i64 {
+        return self.keys.length
+    }
+}}
+
+library StringMap {{}}

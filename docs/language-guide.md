@@ -245,6 +245,20 @@ Box<T:Printable> {{
 Every concrete type argument must implement the named contract. Multiple parameters carry their
 own constraints, for example `Map<K:Hashable, V>`. Generic methods remain **WIP**.
 
+The packaged standard library includes an owning string-keyed map for object values:
+
+```valen
+import StringMap from 'std/libStringMap.ar'
+
+local values = new StringMap<Record>()
+values.set("current", new Record())
+local current:ref Record? = values.get("current")
+```
+
+`set` transfers the value into the map, `get` borrows it, and `remove` returns an independent owned
+value. `Collections.StringSet` provides the corresponding string set. Primitive map values and fully
+generic key types remain **WIP**.
+
 ## Enums
 
 Enums define a closed set of payload-free named values. Cases use `Type.Case`, carry an allocation-free
