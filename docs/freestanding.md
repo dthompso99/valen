@@ -87,7 +87,7 @@ one route must not remove the others.
 - Ordinary x86-64 Linux executables provide `_start`, link with `-nostdlib`, and have no implicit
   shared-library dependency. Target-native symbols are validated before linking.
 - Foreign C calls and native threading add their libraries explicitly; an unavailable capability
-  still requires an Valen implementation or an explicit target/application provider.
+  still requires a Valen implementation or an explicit target/application provider.
 - General capability manifests, non-Linux startup, injectable runtime hooks, and fully
   freestanding linking are **WIP**.
 - Additional architectures and operating systems remain tracked separately by issue #56.

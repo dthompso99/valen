@@ -38,7 +38,7 @@ After JavaScript changes, run `node --check` on the modified file. Native behavi
 - Mark designed, partial, or unavailable features as **WIP**.
 - Prefer a small compiling example over pseudocode.
 - Update the relevant focused reference when semantics change.
-- Keep active ticket status in Gitea; checklists are roadmap snapshots.
+- Keep active ticket status in the [issue tracker](https://gitea.hallrd.click/dthompson/valen/issues); checklists are roadmap snapshots.
 
 ## Change and ticket discipline
 

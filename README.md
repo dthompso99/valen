@@ -52,4 +52,4 @@ The supported native target is x86-64 Linux. Both generation 0 and the self-host
 
 The [freestanding profile](docs/freestanding.md) defines the language/runtime boundary for future kernel and embedded targets; freestanding code generation remains **WIP**.
 
-See [the roadmap](language_checklist.md) and the project’s Gitea issues for active work.
+See [the roadmap](language_checklist.md) and the [issue tracker](https://gitea.hallrd.click/dthompson/valen/issues) for active work.

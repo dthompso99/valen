@@ -151,7 +151,7 @@ The usual implementation order is:
 5. Lower target-independent IR.
 6. Implement runtime/backend behavior.
 7. Add a focused bootstrap test and, when supported by generation 1, a conformance fixture.
-8. Update docs and the tracked Gitea issue.
+8. Update the documentation and tracked issue.
 
 Do not duplicate a feature in generation 0 merely for symmetry. Do update generation 0 before using an otherwise unsupported feature in the compiler written in Valen.
 

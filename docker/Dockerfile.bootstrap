@@ -38,7 +38,7 @@ RUN apk update && apk add --no-cache build-base sqlite-dev
 WORKDIR /app
 COPY --from=stage2 /app/dist/valen .
 COPY --from=stage2 /app/dist/lib ./lib
-#for now, we'll use stage3 as a testing stage.
+# Exercise the packaged compiler and representative programs before publishing it.
 COPY examples/ ./examples/
 COPY native/ ./native/
 COPY scripts/build-sqlite-adapter.sh ./scripts/build-sqlite-adapter.sh

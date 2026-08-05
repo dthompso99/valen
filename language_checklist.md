@@ -2,7 +2,7 @@
 
 The bootstrap compiler proves the language can compile native programs. This roadmap begins with language semantics and ergonomics; optimization and additional machine targets come after the object and type models are stable.
 
-Active work is tracked in [Gitea issues](https://gitea.hallrd.click/dthompson/valen/issues?labels=1). The unchecked entries below are the roadmap snapshot from which those issues were created; update and close the corresponding Gitea issue as work progresses rather than maintaining status in two places.
+Active work is tracked in the [issue tracker](https://gitea.hallrd.click/dthompson/valen/issues?labels=1). The unchecked entries below are the roadmap snapshot from which those issues were created; update and close the corresponding issue as work progresses rather than maintaining status in two places.
 
 ## 1. Object model and contracts
 

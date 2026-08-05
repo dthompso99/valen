@@ -189,14 +189,14 @@ local label = if score >= 90 {
 }
 ```
 
-Enums and exhaustive matching remain **WIP**.
+Payload-free enums and exhaustive statement matching are described below. Associated values and expression-valued matching remain **WIP**.
 
 ## Arrays, strings, and generic objects
 
 Arrays are dynamically sized:
 
 ```valen
-local names = ["valen", "argon"]
+local names = ["valen", "compiler"]
 names.append("valen")
 local first = names[0]
 local count = names.length
@@ -289,7 +289,7 @@ The compact native grapheme segmenter keeps CRLF, combining-mark sequences, vari
 
 Double-quoted strings interpolate string and integer expressions with `${expression}`. Interpolation accepts full expressions and lowers through `StringBuilder`, so a string with several substitutions is built in linear time. Escape the dollar sign as `\${` to emit a literal interpolation marker. Single-quoted strings do not interpolate.
 
-```argon
+```valen
 local name = "Valen"
 local requests:i64 = 42
 local summary = "${name} handled ${requests} requests"

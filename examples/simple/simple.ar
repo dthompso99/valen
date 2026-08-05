@@ -1,13 +1,9 @@
-import System from 'libSystem.ar'
+import System from 'std/libSystem.ar'
 
-// double slash indicates the line is a comment, and can be stripped by the lexer
-
-// this structure will evolve as the language begins to take shape.
-
-// classes, or objects are denoted by {{ }}.  A class named entry is the default entry point
+// Objects use double braces. The object named entry is the program entry point.
 entry {{
-    // __ is the class entry point -- eventually receiving args
-    __() -> i64 {
+    // __ is the class entry point.
+    __() -> i32 {
         System.print(self.add(10,4))
         self.count()
         System.write("Finished\n")
