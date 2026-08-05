@@ -1,0 +1,9 @@
+import System from 'std/libSystem.ar'
+
+entry {{
+    __() -> i32 {
+        local value = System.parseInteger("42")
+        if !value.valid || value.value != 42 { return 1 }
+        return 0
+    }
+}}

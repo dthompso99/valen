@@ -87,6 +87,75 @@ export class ElfObject {
         this.relocations.push({section, offset, symbol, type, addend});
     }
 
+    static parse(input) {
+        const buffer = Buffer.from(input);
+        if (buffer.length < ELF_HEADER_SIZE || buffer.subarray(0, 4).toString('hex') !== '7f454c46' ||
+            buffer[4] !== 2 || buffer[5] !== 1 || buffer.readUInt16LE(16) !== 1 || buffer.readUInt16LE(18) !== 62) {
+            throw new Error('Unsupported compiled-library object');
+        }
+        const headerOffset = Number(buffer.readBigUInt64LE(40));
+        const headerSize = buffer.readUInt16LE(58), count = buffer.readUInt16LE(60), nameIndex = buffer.readUInt16LE(62);
+        if (headerSize !== SECTION_HEADER_SIZE || headerOffset + count * headerSize > buffer.length || nameIndex >= count) {
+            throw new Error('Malformed compiled-library section table');
+        }
+        const headers = Array.from({length: count}, (_, index) => {
+            const offset = headerOffset + index * headerSize;
+            return {nameOffset: buffer.readUInt32LE(offset), type: buffer.readUInt32LE(offset + 4),
+                flags: Number(buffer.readBigUInt64LE(offset + 8)), offset: Number(buffer.readBigUInt64LE(offset + 24)),
+                size: Number(buffer.readBigUInt64LE(offset + 32)), link: buffer.readUInt32LE(offset + 40),
+                info: buffer.readUInt32LE(offset + 44), alignment: Number(buffer.readBigUInt64LE(offset + 48)),
+                entrySize: Number(buffer.readBigUInt64LE(offset + 56))};
+        });
+        const bytes = header => {
+            if (header.type === SHT.NOBITS) return Buffer.alloc(0);
+            if (header.offset + header.size > buffer.length) throw new Error('Malformed compiled-library section');
+            return buffer.subarray(header.offset, header.offset + header.size);
+        };
+        const stringAt = (table, offset) => {
+            if (offset < 0 || offset >= table.length) throw new Error('Malformed compiled-library string table');
+            const end = table.indexOf(0, offset);
+            if (end < 0) throw new Error('Malformed compiled-library string table');
+            return table.subarray(offset, end).toString();
+        };
+        const sectionNames = bytes(headers[nameIndex]);
+        headers.forEach(header => { header.name = stringAt(sectionNames, header.nameOffset); });
+        const object = new ElfObject();
+        headers.forEach((header, index) => {
+            if (index === 0 || [SHT.SYMTAB, SHT.STRTAB, SHT.RELA].includes(header.type)) return;
+            const section = object.addSection(header.name, bytes(header), {type: header.type === SHT.NOBITS ? 'NOBITS' : 'PROGBITS',
+                flags: header.flags, alignment: header.alignment || 1});
+            if (header.type === SHT.NOBITS) section.size = header.size;
+        });
+        const symbolHeader = headers.find(header => header.type === SHT.SYMTAB);
+        const symbols = [null];
+        if (symbolHeader) {
+            const table = bytes(symbolHeader), strings = bytes(headers[symbolHeader.link]);
+            if (symbolHeader.entrySize !== 24 || table.length % 24 !== 0) throw new Error('Malformed compiled-library symbol table');
+            for (let offset = 24; offset < table.length; offset += 24) {
+                const info = table[offset + 4], sectionIndex = table.readUInt16LE(offset + 6);
+                const name = stringAt(strings, table.readUInt32LE(offset));
+                const symbol = {name, section: sectionIndex === 0 ? null : headers[sectionIndex]?.name,
+                    value: Number(table.readBigUInt64LE(offset + 8)), size: Number(table.readBigUInt64LE(offset + 16)),
+                    binding: info >> 4 === 1 ? 'GLOBAL' : info >> 4 === 2 ? 'WEAK' : 'LOCAL',
+                    type: (info & 15) === 1 ? 'OBJECT' : (info & 15) === 2 ? 'FUNC' : (info & 15) === 3 ? 'SECTION' : 'NOTYPE'};
+                if (!symbol.name) symbol.name = `$section.${offset / 24}`;
+                object.addSymbol(symbol.name, symbol);
+                symbols.push(symbol);
+            }
+        }
+        for (const header of headers.filter(item => item.type === SHT.RELA)) {
+            const table = bytes(header);
+            if (header.entrySize !== 24 || table.length % 24 !== 0 || !headers[header.info]) throw new Error('Malformed compiled-library relocation table');
+            for (let offset = 0; offset < table.length; offset += 24) {
+                const info = table.readBigUInt64LE(offset + 8), symbol = symbols[Number(info >> 32n)];
+                if (!symbol) throw new Error('Malformed compiled-library relocation symbol');
+                object.addRelocation(headers[header.info].name, Number(table.readBigUInt64LE(offset)), symbol.name,
+                    Number(info & 0xffffffffn), Number(table.readBigInt64LE(offset + 16)));
+            }
+        }
+        return object;
+    }
+
     build() {
         const userSections = this.sections.map(section => ({...section}));
         const sectionIndexes = new Map(userSections.map((section, index) => [section.name, index + 1]));

@@ -1,5 +1,6 @@
 import fs from 'fs';
 import {spawnSync} from 'child_process';
+import path from 'node:path';
 import {fileURLToPath} from 'url';
 import {IrGenerator} from './ir.js';
 import {X86_64Backend} from './x86-64.js';
@@ -9,10 +10,13 @@ import {ModuleLoader} from './module-loader.js';
 import {SemanticAnalyzer} from './semantic.js';
 import {ModuleInterface, ModuleInterfaceCache} from './module-interface.js';
 import {LibraryMetadata} from './library-metadata.js';
+import {ElfObject} from './elf.js';
+
+const defaultSysroot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../lib/valen/current/x86_64-linux');
 
 export class Compiler {
     emitLibrary(sourcePath, objectPath, version, {sourceRoot, optimizationLevel = 1} = {}) {
-        const graph = new ModuleLoader(sourceRoot ? {sourceRoot} : {}).load(sourcePath);
+        const graph = new ModuleLoader({sourceRoot, sysroot: process.env.VALEN_SYSROOT ?? defaultSysroot}).load(sourcePath);
         const semantic = new SemanticAnalyzer().analyzeModules(graph);
         if (!semantic.success) throw new Error(semantic.diagnostics.map(item => item.message).join('\n'));
         const entry = graph.entry;
@@ -20,9 +24,13 @@ export class Compiler {
         if (libraries.length !== 1) throw new Error('A compiled library source must declare exactly one public library');
         const artifact = ModuleInterface.create(entry);
         const ir = new IrGenerator().generate(semantic);
-        const assembly = new X86_64Backend().generate(ir, {optimizationLevel, moduleId: entry.id, includeRuntime: false});
+        const assembly = new X86_64Backend().generate(ir, {optimizationLevel, moduleId: entry.id, includeRuntime: false, includeModuleMetadata: true});
         const object = new X86Assembler().assemble(assembly);
         fs.writeFileSync(objectPath, object);
+        fs.writeFileSync(`${objectPath}.vmi`, ModuleInterface.serialize(artifact, new Map(artifact.imports.map(item => {
+            const imported = [...graph.modules.values()].find(module => module.id === item.moduleId);
+            return [item.moduleId, ModuleInterface.create(imported).interfaceFingerprint];
+        }))));
         const dependencies = artifact.imports.map(item => {
             const imported = [...graph.modules.values()].find(module => module.id === item.moduleId);
             return {name: item.name, interfaceFingerprint: ModuleInterface.create(imported).interfaceFingerprint};
@@ -35,14 +43,14 @@ export class Compiler {
     }
 
     emitObject(sourcePath, objectPath, {assemblyPath = `${objectPath}.s`, sourceRoot, optimizationLevel = 1} = {}) {
-        const graph = new ModuleLoader(sourceRoot ? {sourceRoot} : {}).load(sourcePath);
+        const graph = new ModuleLoader({sourceRoot, sysroot: process.env.VALEN_SYSROOT ?? defaultSysroot}).load(sourcePath);
         new ModuleInterfaceCache(process.env.VALEN_CACHE_PATH ?? process.env.ARGON_CACHE_PATH,
             process.env.VALEN_CACHE_TRACE != null || process.env.ARGON_CACHE_TRACE != null).prepare(graph);
         const ir = new IrGenerator().generate(new SemanticAnalyzer().analyzeModules(graph));
         const assembly = new X86_64Backend().generate(ir, {optimizationLevel});
         fs.writeFileSync(assemblyPath, assembly);
         fs.writeFileSync(objectPath, new X86Assembler().assemble(assembly));
-        return {ir, assembly, assemblyPath, objectPath};
+        return {ir, assembly, assemblyPath, objectPath, graph};
     }
 
     compile(sourcePath, outputPath, {assemblyPath = `${outputPath}.s`, objectPath = `${outputPath}.o`, sourceRoot, linker = 'auto', optimizationLevel = 1} = {}) {
@@ -59,12 +67,17 @@ export class Compiler {
                 });
                 return new X86Assembler().assembleObject(assembly);
             }) : [new X86Assembler().assembleObject(emitted.assembly)];
+            for (const module of emitted.graph.modules.values()) {
+                if (module.compiledArtifact) objects.push(ElfObject.parse(fs.readFileSync(module.compiledArtifact.objectPath)));
+            }
             fs.writeFileSync(outputPath, new ElfLinker().linkObjects(objects));
             fs.chmodSync(outputPath, 0o755);
             return {...emitted, outputPath, linker: 'native'};
         }
+        const compiledObjects = [...emitted.graph.modules.values()].filter(module => module.compiledArtifact)
+            .map(module => module.compiledArtifact.objectPath);
         const libraries = ir.foreignLibraries.map(library => `-l${library}`);
-        const result = spawnSync('cc', ['-nostdlib', '-no-pie', objectPath, '-o', outputPath, ...libraries], {encoding: 'utf8'});
+        const result = spawnSync('cc', ['-nostdlib', '-no-pie', objectPath, ...compiledObjects, '-o', outputPath, ...libraries], {encoding: 'utf8'});
         if (result.error) throw result.error;
         if (result.status !== 0) throw new Error(result.stderr || `cc exited with status ${result.status}`);
         return {...emitted, outputPath, linker};

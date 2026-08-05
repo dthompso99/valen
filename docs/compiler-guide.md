@@ -53,8 +53,9 @@ program. The whole-program cache remains the faster path for an exact warm build
 The interface and chunk formats are internal, versioned compiler artifacts, not a stable Valen ABI.
 Deleting the cache directory is always safe.
 
-The installed standard library will use the same modular static-object direction through a
-compiler-relative sysroot. Static linking remains permanently supported; optional shared-library
+The installed standard library uses the same modular static-object direction through a
+compiler-relative sysroot. Verified `.vmi`, `.vmeta`, and `.o` artifacts suppress implementation
+lowering and feed the selected object directly into the static link. Static linking remains permanently supported; optional shared-library
 distribution waits for a versioned Valen ABI. Generic packages additionally retain a template
 representation for cross-module specialization. See the [standard library architecture](standard-library.md).
 

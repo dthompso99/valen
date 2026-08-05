@@ -168,8 +168,9 @@ library X86_64 {{
         member optimize:bool
         member emissionModule:string?
         member includeRuntime:bool
+        member includeModuleMetadata:bool
 
-        __(program:Ir.Program, optimizationLevel:i64=1, emissionModule:string?=null, includeRuntime:bool=true) -> void {
+        __(program:Ir.Program, optimizationLevel:i64=1, emissionModule:string?=null, includeRuntime:bool=true, includeModuleMetadata:bool=false) -> void {
             self.program = program
             self.writer = new Writer()
             self.functionSymbols = new Array<FunctionSymbol>(0)
@@ -201,6 +202,7 @@ library X86_64 {{
             self.optimize = optimizationLevel == 1
             self.emissionModule = emissionModule
             self.includeRuntime = includeRuntime
+            self.includeModuleMetadata = includeModuleMetadata
         }
 
         generate() -> string {
@@ -209,6 +211,7 @@ library X86_64 {{
             self.scanProgram()
             self.writer.line(".intel_syntax noprefix")
             self.writer.line(".text")
+            if self.includeRuntime { self.moduleRuntimeExports() }
             local index:i64 = 0
             while index < self.program.externals.length {
                 if self.program.externals[index].foreignLibrary != null { self.writer.line(".extern " + self.program.externals[index].runtimeName) }
@@ -223,6 +226,7 @@ library X86_64 {{
             }
             self.writer.optimize = false
             if !self.includeRuntime {
+                if self.includeModuleMetadata { self.structuralTypeRuntime(); self.gcTraceFunctionsForModule(); self.typeDataForModule() }
                 self.localTrapRuntime()
                 self.stringData()
                 self.floatData()
@@ -270,7 +274,11 @@ library X86_64 {{
             return false
         }
 
-        emits(function:Ir.Function) -> bool { return self.emissionModule == null || function.modulePath == self.emissionModule! }
+        emits(function:Ir.Function) -> bool {
+            local index:i64 = 0
+            while index < self.program.compiledModules.length { if function.modulePath == self.program.compiledModules[index] { return false }; index = index + 1 }
+            return self.emissionModule == null || function.modulePath == self.emissionModule!
+        }
 
         localTrapRuntime() -> void {
             self.writer.line(".Ldivision_by_zero_error:"); self.writer.line("    mov edi, 73"); self.writer.line("    jmp .Lmodule_runtime_error")
@@ -2048,15 +2056,29 @@ library X86_64 {{
             self.writer.line("    mov rax, QWORD PTR [r14+16]")
             self.writer.line("    mov rax, QWORD PTR [rax+r8*8]")
             self.writer.line("    mov r10, QWORD PTR [rax+8]")
+            self.writer.line("    mov rsi, QWORD PTR [rax]")
+            self.writer.line("    cmp r10, 0")
+            self.writer.line("    je .Llink_normal_library")
+            self.writer.line("    cmp BYTE PTR [rsi], 64")
+            self.writer.line("    jne .Llink_normal_library")
+            self.writer.line("    sub rsp, r10")
+            self.writer.line("    lea rdi, [rsp]")
+            self.writer.line("    inc rsi")
+            self.writer.line("    mov rcx, r10")
+            self.writer.line("    dec rcx")
+            self.writer.line("    rep movsb")
+            self.writer.line("    mov BYTE PTR [rsp+r10-1], 0")
+            self.writer.line("    jmp .Llink_store_input")
+            self.writer.line(".Llink_normal_library:")
             self.writer.line("    lea rcx, [r10+3]")
             self.writer.line("    sub rsp, rcx")
             self.writer.line("    mov BYTE PTR [rsp], 45")
             self.writer.line("    mov BYTE PTR [rsp+1], 108")
-            self.writer.line("    mov rsi, QWORD PTR [rax]")
             self.writer.line("    lea rdi, [rsp+2]")
             self.writer.line("    mov rcx, r10")
             self.writer.line("    rep movsb")
             self.writer.line("    mov BYTE PTR [rsp+r10+2], 0")
+            self.writer.line(".Llink_store_input:")
             self.writer.line("    mov QWORD PTR [r15+r8*8+48], rsp")
             self.writer.line("    inc r8")
             self.writer.line("    jmp .Llink_library_loop")
@@ -2875,6 +2897,40 @@ library X86_64 {{
                 self.arraySliceFunction(arrays[index])
                 index = index + 1
             }
+        }
+
+        structuralTypeRuntime() -> void {
+            local index:i64 = 0
+            while index < self.program.types.length {
+                local typeNode = self.program.types[index]
+                if self.emissionModule == null || typeNode.modulePath == self.emissionModule! {
+                    self.objectEqualityFunction(typeNode); self.objectHashFunction(typeNode); self.objectCopyFunction(typeNode)
+                }
+                index = index + 1
+            }
+            local arrays = self.structuralArrayTypes(); index = 0
+            while index < arrays.length { self.arrayEqualityFunction(arrays[index]); self.arrayHashFunction(arrays[index]); self.arrayCopyFunction(arrays[index]); self.arraySliceFunction(arrays[index]); index = index + 1 }
+        }
+
+        moduleRuntimeExports() -> void {
+            local names = ["valen_alloc", "valen_array_address", "valen_array_append", "valen_array_new", "valen_builder_append_string", "valen_builder_build", "valen_gc_alloc", "valen_gc_array_new", "valen_gc_mark", "valen_gc_root_pop", "valen_gc_root_push", "valen_gc_roots", "valen_gc_safepoint", "valen_gc_workers", "valen_integer_to_string", "valen_object_copy", "valen_object_equal", "valen_object_hash", "valen_string_address", "valen_string_concat", "valen_string_copy_context", "valen_string_equal_context", "valen_string_hash_context", "valen_string_slice"]
+            for name in names { self.writer.line(".globl " + name) }
+        }
+
+        gcTraceFunctionsForModule() -> void {
+            local original = self.program.types
+            local selected = new Array<ref Ir.Type>(0)
+            local index:i64 = 0
+            while index < original.length { if self.emissionModule == null || original[index].modulePath == self.emissionModule! { selected.append(original[index]) }; index = index + 1 }
+            self.program.types = selected; self.gcTraceFunctions(); self.program.types = original
+        }
+
+        typeDataForModule() -> void {
+            local original = self.program.types
+            local selected = new Array<ref Ir.Type>(0)
+            local index:i64 = 0
+            while index < original.length { if self.emissionModule == null || original[index].modulePath == self.emissionModule! { selected.append(original[index]) }; index = index + 1 }
+            self.program.types = selected; self.typeData(); self.program.types = original
         }
 
         structuralCoreRuntime() -> void {

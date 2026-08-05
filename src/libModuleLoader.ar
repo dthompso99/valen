@@ -24,6 +24,9 @@ library ModuleLoading {{
         member program:Ast.Program
         member imports:Array<ModuleImport>
         member loading:bool
+        member compiledObjectPath:string?
+        member compiledMetadataPath:string?
+        member compiledInterfacePath:string?
 
         __(path:string, owningRoot:string, source:Compiler.SourceFile, program:Ast.Program) -> void {
             self.path = path
@@ -32,6 +35,9 @@ library ModuleLoading {{
             self.program = program
             self.imports = new Array<ModuleImport>(0)
             self.loading = true
+            self.compiledObjectPath = null
+            self.compiledMetadataPath = null
+            self.compiledInterfacePath = null
         }
 
         hasImport(name:string) -> bool {
@@ -84,12 +90,14 @@ library ModuleLoading {{
     ModuleLoader {{
         member sourceRoot:string
         member libraryPath:string?
+        member sysroot:string?
         member modules:Array<Module>
         member diagnostics:Diagnostics.DiagnosticBag
 
-        __(sourceRoot:string, libraryPath:string?=null) -> void {
+        __(sourceRoot:string, libraryPath:string?=null, sysroot:string?=null) -> void {
             self.sourceRoot = self.normalizePath(sourceRoot)
             self.libraryPath = libraryPath
+            self.sysroot = sysroot
             self.modules = new Array<Module>(0)
             self.diagnostics = new Diagnostics.DiagnosticBag()
         }
@@ -146,6 +154,7 @@ library ModuleLoading {{
                 index = index + 1
             }
             loaded.loading = false
+            self.attachCompiledArtifact(loaded)
             return loaded
         }
 
@@ -169,6 +178,21 @@ library ModuleLoading {{
             if self.hasParentSegment(specifier) {
                 self.diagnostics.add(new Diagnostics.Diagnostic(Diagnostics.DiagnosticSeverity.Error, "Library import '" + specifier + "' cannot contain '..'", span)); return null
             }
+            if self.sysroot != null {
+                local sourceRoot = self.normalizePath(self.sysroot! + "/source")
+                if self.within(sourceRoot, importer.path) {
+                    local sibling = self.normalizePath(System.resolvePath(self.sourceRoot, importer.path, "./" + specifier))
+                    if self.within(sourceRoot, sibling) { if Compiler.loadSource(sibling) != null { return new ResolvedImport(sibling, sourceRoot) } }
+                }
+            }
+            if self.starts(specifier, "std/") && self.sysroot != null {
+                local root = self.normalizePath(self.sysroot! + "/source")
+                local candidate = self.normalizePath(root + "/" + specifier)
+                if !self.within(root, candidate) {
+                    self.diagnostics.add(new Diagnostics.Diagnostic(Diagnostics.DiagnosticSeverity.Error, "Standard-library import '" + specifier + "' escapes sysroot '" + root + "'", span)); return null
+                }
+                if Compiler.loadSource(candidate) != null { return new ResolvedImport(candidate, root) }
+            }
             local searched = ""
             if self.libraryPath != null {
                 local paths = self.libraryPath!
@@ -183,6 +207,11 @@ library ModuleLoading {{
                             local candidate = root + "/" + specifier
                             if searched.length > 0 { searched = searched + ", " }; searched = searched + candidate
                             if Compiler.loadSource(candidate) != null { return new ResolvedImport(candidate, root) }
+                            if self.starts(specifier, "std/") {
+                                local legacyCandidate = root + "/" + specifier.slice(4, specifier.length - 4)
+                                searched = searched + ", " + legacyCandidate
+                                if Compiler.loadSource(legacyCandidate) != null { return new ResolvedImport(legacyCandidate, root) }
+                            }
                         }
                         start = index + 1
                     }
@@ -255,6 +284,22 @@ library ModuleLoading {{
                 index = index + 1
             }
             return null
+        }
+
+        attachCompiledArtifact(module:Module) -> void {
+            if self.sysroot == null { return }
+            local sourceRoot = self.normalizePath(self.sysroot! + "/source")
+            if !self.within(sourceRoot, module.path) { return }
+            local relative = module.path.slice(sourceRoot.length + 1, module.path.length - sourceRoot.length - 1)
+            if relative.length < 3 || relative.slice(relative.length - 3, 3) != ".ar" { return }
+            local base = relative.slice(0, relative.length - 3)
+            local objectPath = self.normalizePath(self.sysroot! + "/objects/" + base + ".o")
+            local metadataPath = self.normalizePath(self.sysroot! + "/metadata/" + base + ".o.vmeta")
+            local interfacePath = self.normalizePath(self.sysroot! + "/interfaces/" + base + ".vmi")
+            if Compiler.loadSource(objectPath) == null || Compiler.loadSource(metadataPath) == null || Compiler.loadSource(interfacePath) == null { return }
+            module.compiledObjectPath = objectPath
+            module.compiledMetadataPath = metadataPath
+            module.compiledInterfacePath = interfacePath
         }
 
         report(path:string, message:string, span:Compiler.SourceSpan?) -> void {

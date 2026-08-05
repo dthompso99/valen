@@ -20,14 +20,25 @@ library ModuleInterfaces {{
     Builder {{
         create(module:ModuleLoading.Module) -> Artifact {
             local output = new StringBuilder()
-            output.append("module|"); output.append(module.path); output.append("\n")
+            local modulePath = self.stableModulePath(module.path)
+            output.append("module|"); output.append(modulePath); output.append("\n")
             local index:i64 = 0
             while index < module.program.declarations.length {
                 self.declaration(output, module.program.declarations[index], "")
                 index = index + 1
             }
             local summary = output.build()
-            return new Artifact(module.path, self.hash(module.source.content), self.hash(summary), summary)
+            return new Artifact(modulePath, self.hash(module.source.content), self.hash(summary), summary)
+        }
+
+        stableModulePath(path:string) -> string {
+            local marker = "/source/"
+            local index:i64 = 0
+            while index + marker.length <= path.length {
+                if path.slice(index, marker.length) == marker { return "/" + path.slice(index + marker.length, path.length - index - marker.length) }
+                index = index + 1
+            }
+            return path
         }
 
         declaration(output:StringBuilder, declaration:Ast.Declaration, prefix:string) -> void {

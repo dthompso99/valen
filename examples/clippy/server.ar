@@ -1,8 +1,8 @@
-import Network from 'libNetwork.ar'
-import EventLoop from 'libEventLoop.ar'
-import System from 'libSystem.ar'
-import Http from 'libHttp.ar'
-import WebSocket from 'libWebSocket.ar'
+import Network from 'std/libNetwork.ar'
+import EventLoop from 'std/libEventLoop.ar'
+import System from 'std/libSystem.ar'
+import Http from 'std/libHttp.ar'
+import WebSocket from 'std/libWebSocket.ar'
 import Page from './libPage.ar'
 
 Client {{

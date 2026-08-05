@@ -4,25 +4,32 @@ WORKDIR /app
 COPY bootstrap/package.json ./
 RUN npm install --omit=dev
 COPY bootstrap/ ./
+COPY bootstrap/ ./bootstrap/
 COPY src/ ./src/
 COPY lib/ ./lib/
+COPY scripts/package-stdlib.mjs ./scripts/package-stdlib.mjs
 ENV VALEN_LIBRARY_PATH=/app/lib
 
 RUN mkdir dist
 RUN ["node", "compiler.js", "src/valen.ar", "dist/valen"]
+RUN ["node", "scripts/package-stdlib.mjs", "--output", "/app/dist/lib/valen"]
 CMD ["ls", "-l", "dist/valen"]
 
-FROM alpine:3.20 AS stage2
+FROM node:20-alpine AS stage2
 RUN apk update && apk add --no-cache build-base
 WORKDIR /app
 COPY --from=bootstrap /app/dist/valen .
+COPY --from=bootstrap /app/dist/lib ./lib
 RUN chmod +x valen
 COPY src/ ./src/
 COPY lib/ ./lib/
+COPY scripts/package-stdlib.mjs ./scripts/package-stdlib.mjs
 
 ENV VALEN_LIBRARY_PATH=/app/lib
+ENV VALEN_SYSROOT=/app/lib/valen/current/x86_64-linux
 RUN mkdir dist
 RUN ["./valen", "src/valen.ar", "-o", "dist/valen"]
+RUN ["node", "scripts/package-stdlib.mjs", "--compiler", "/app/dist/valen", "--output", "/app/dist/lib/valen"]
 RUN ls -al dist
 
 
@@ -30,6 +37,7 @@ FROM alpine:3.20 AS stage3
 RUN apk update && apk add --no-cache build-base sqlite-dev
 WORKDIR /app
 COPY --from=stage2 /app/dist/valen .
+COPY --from=stage2 /app/dist/lib ./lib
 #for now, we'll use stage3 as a testing stage.
 COPY examples/ ./examples/
 COPY native/ ./native/
@@ -38,6 +46,7 @@ COPY bootstrap/test/fixtures/native-tests.ar ./tests/native-tests.ar
 COPY bootstrap/test/fixtures/native-tests-failing.ar ./tests/native-tests-failing.ar
 COPY lib/ ./lib/
 ENV VALEN_LIBRARY_PATH=/app/lib
+ENV VALEN_SYSROOT=/app/lib/valen/current/x86_64-linux
 ENV LIBRARY_PATH=/app/build/native
 ENV LD_LIBRARY_PATH=/app/build/native
 RUN mkdir dist
@@ -48,6 +57,7 @@ RUN ["dist/simple"]
 RUN ["./valen", "examples/nested/nested.ar", "-o", "dist/nested"]
 RUN ["dist/nested"]
 RUN ["./valen", "examples/sqlite-native/server.ar", "-o", "dist/sqlite-service"]
+RUN ["./valen", "examples/clippy/server.ar", "-o", "dist/clippy"]
 RUN ["./valen", "tests/native-tests.ar", "-o", "dist/native-tests"]
 RUN ["dist/native-tests"]
 RUN ["./valen", "tests/native-tests-failing.ar", "-o", "dist/native-tests-failing"]

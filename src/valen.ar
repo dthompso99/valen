@@ -114,19 +114,28 @@ entry {{
         }
         local libraryPath = System.environmentVariable("VALEN_LIBRARY_PATH")
         if libraryPath == null { libraryPath = System.environmentVariable("ARGON_LIBRARY_PATH") }
-        local loader = new ModuleLoading.ModuleLoader(sourceRoot, libraryPath)
+        local sysroot = System.environmentVariable("VALEN_SYSROOT")
+        if sysroot == null {
+            local executable = arguments[0]
+            if executable.length > 0 {
+                if executable[0] != 47 { executable = cwd! + "/" + executable }
+                sysroot = self.directoryName(executable) + "/../lib/valen/current/x86_64-linux"
+            }
+        }
+        local loader = new ModuleLoading.ModuleLoader(sourceRoot, libraryPath, sysroot)
         local graph = loader.load(sourcePath!)
         if graph.diagnostics.hasErrors() {
             Diagnostics.write(graph.diagnostics)
             return 65
         }
+        if !self.validateCompiledArtifacts(graph) { return 65 }
         local cache = new CompilerCache.Cache(optimizationLevel)
         if cache.enabled() { cache.prepareInterfaces(graph) }
         if outputPath != null && cache.enabled() {
             local cached = cache.load(graph)
             if cached != null {
                 if emitObjectOnly { return self.emitObject(cached!.assembly, outputPath!) }
-                local cachedLinkResult = self.link(cached!.assembly, outputPath!, cached!.libraries, linkerMode)
+                local cachedLinkResult = self.link(cached!.assembly, outputPath!, cached!.libraries, linkerMode, null, graph)
                 if cachedLinkResult != 0 {
                     System.writeError("valen: linker exited with status ")
                     System.writeError(cachedLinkResult.toString())
@@ -147,7 +156,7 @@ entry {{
         if outputPath != null && !emitObjectOnly && graph.modules.length > 1 && graph.entry != null { emissionModule = graph.entry!.path }
         local generator = new Ir.Generator(analysis, emissionModule)
         local ir = generator.generate()
-        if emissionModule != null && (linkerMode == "system" || ir.foreignLibraries.length > 0) {
+        if emissionModule != null && (linkerMode == "system" || ir.foreignLibraries.length > 0 || ir.compiledModules.length > 0) {
             emissionModule = null
             generator = new Ir.Generator(analysis)
             ir = generator.generate()
@@ -207,7 +216,7 @@ entry {{
             declarationIndex = declarationIndex + 1
         }
         if libraryName == null { System.writeError("valen: compiled library source must declare exactly one library\n"); return 65 }
-        local backend = new X86_64.Backend(ir, optimizationLevel, graph.entry!.path, false)
+        local backend = new X86_64.Backend(ir, optimizationLevel, graph.entry!.path, false, true)
         local assembler = new X86Object.Assembler(); local structured = assembler.assembleObject(backend.generate())
         if structured == null { System.writeError("valen: native library object encoder failed: "); System.writeError(assembler.error); System.writeError("\n"); return 69 }
         local object = structured!.build()
@@ -224,7 +233,53 @@ entry {{
         local metadata = codec.create(libraryName!, version, artifact.interfaceFingerprint.toString(), artifact.implementationFingerprint.toString(), object, dependencies)
         if metadata == null { System.writeError("valen: "); System.writeError(codec.error); System.writeError("\n"); return 64 }
         if !codec.write(objectPath + ".vmeta", metadata!) { System.writeError("valen: "); System.writeError(codec.error); System.writeError("\n"); return 74 }
+        if !self.writeAssembly(objectPath + ".vmi", artifact.summary) { return 74 }
         return 0
+    }
+
+    validateCompiledArtifacts(graph:ModuleLoading.ModuleGraph) -> bool {
+        local builder = new ModuleInterfaces.Builder()
+        local moduleIndex:i64 = 0
+        while moduleIndex < graph.modules.length {
+            local module = graph.modules[moduleIndex]
+            if module.compiledObjectPath != null {
+                local objectSource = Compiler.loadSource(module.compiledObjectPath!)
+                local metadataSource = Compiler.loadSource(module.compiledMetadataPath!)
+                local interfaceSource = Compiler.loadSource(module.compiledInterfacePath!)
+                if objectSource == null || metadataSource == null || interfaceSource == null {
+                    System.writeError("valen: installed library artifact disappeared while loading '"); System.writeError(module.path); System.writeError("'\n"); return false
+                }
+                local codec = new LibraryMetadata.Codec(); local metadata = codec.parse(metadataSource!.content)
+                if metadata == null { System.writeError("valen: invalid installed library metadata for '"); System.writeError(module.path); System.writeError("': "); System.writeError(codec.error); System.writeError("\n"); return false }
+                local artifact = builder.create(module)
+                if artifact.interfaceFingerprint.toString() != metadata!.interfaceFingerprint || interfaceSource!.content != artifact.summary {
+                    System.writeError("valen: installed library interface does not match source for '"); System.writeError(module.path); System.writeError("'\n"); return false
+                }
+                if codec.hashString(objectSource!.content).toString() != metadata!.objectFingerprint {
+                    System.writeError("valen: installed library object fingerprint does not match metadata for '"); System.writeError(module.path); System.writeError("'\n"); return false
+                }
+                local dependencyIndex:i64 = 0
+                while dependencyIndex < metadata!.dependencies.length {
+                    local dependency = metadata!.dependencies[dependencyIndex]
+                    local found:bool = false
+                    local importIndex:i64 = 0
+                    while importIndex < module.imports.length {
+                        local imported = module.imports[importIndex]
+                        if imported.name == dependency.name {
+                            found = true
+                            if builder.create(imported.loadedModule).interfaceFingerprint.toString() != dependency.interfaceFingerprint {
+                                System.writeError("valen: installed library dependency interface mismatch for '"); System.writeError(dependency.name); System.writeError("'\n"); return false
+                            }
+                        }
+                        importIndex = importIndex + 1
+                    }
+                    if !found { System.writeError("valen: installed library metadata names missing dependency '"); System.writeError(dependency.name); System.writeError("'\n"); return false }
+                    dependencyIndex = dependencyIndex + 1
+                }
+            }
+            moduleIndex = moduleIndex + 1
+        }
+        return true
     }
 
     validateCompiledLibrary(path:string) -> i32 {
@@ -250,10 +305,21 @@ entry {{
         local object = structured!.build()
         local inputPath = outputPath + ".o"
         if !self.writeObject(inputPath, object) { return 74 }
-        local nativeLink:bool = linkerMode == "native" || (linkerMode == "auto" && libraries.length == 0)
+        local linkInputs = new Array<string>(0)
+        local libraryIndex:i64 = 0
+        while libraryIndex < libraries.length { linkInputs.append(libraries[libraryIndex]); libraryIndex = libraryIndex + 1 }
+        if graph != null {
+            local compiledIndex:i64 = 0
+            while compiledIndex < graph!.modules.length {
+                local compiledModule = graph!.modules[compiledIndex]
+                if compiledModule.compiledObjectPath != null { linkInputs.append("@" + compiledModule.compiledObjectPath!) }
+                compiledIndex = compiledIndex + 1
+            }
+        }
+        local nativeLink:bool = linkerMode == "native" || (linkerMode == "auto" && linkInputs.length == 0)
         if nativeLink {
-            if libraries.length > 0 {
-                System.writeError("valen: native linker cannot resolve foreign libraries; use --linker system\n")
+            if linkInputs.length > 0 {
+                System.writeError("valen: native linker cannot resolve external object inputs or foreign libraries; use --linker system\n")
                 return 69
             }
             local linker = new Linking.Linker()
@@ -294,7 +360,7 @@ entry {{
             if System.makeExecutable(outputPath) != 0 { System.writeError("valen: could not make output executable; OS error "); System.writeError(System.lastError().toString()); System.writeError("\n"); return 74 }
             return 0
         }
-        return System.link(inputPath, outputPath, libraries)
+        return System.link(inputPath, outputPath, linkInputs)
     }
 
     writeObject(path:string, object:Array<u8>) -> bool {
@@ -329,6 +395,15 @@ entry {{
             return false
         }
         return true
+    }
+
+    directoryName(path:string) -> string {
+        local last:i64 = -1
+        local index:i64 = 0
+        while index < path.length { if path[index] == 47 { last = index }; index = index + 1 }
+        if last < 0 { return "." }
+        if last == 0 { return "/" }
+        return path.slice(0, last)
     }
 
     writeUsage() -> void {

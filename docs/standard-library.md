@@ -39,10 +39,23 @@ The compiler resolves `std/...` imports from its own trusted sysroot without req
 continues to locate additional libraries anywhere on the filesystem and may explicitly override
 non-core packages when the build policy permits it.
 
+The current installed module names retain their transition-era filenames, such as
+`std/libSystem.ar` and `std/libHttp.ar`. Stable capability-oriented names are still **WIP**. Build a
+sysroot with either generation 0 or a native compiler:
+
+```sh
+node scripts/package-stdlib.mjs --output dist/lib/valen
+node scripts/package-stdlib.mjs --compiler ./valen --output dist/lib/valen
+```
+
+Set `VALEN_SYSROOT` to select a nonstandard installation. Otherwise the native compiler searches
+relative to itself at `../lib/valen/current/x86_64-linux`.
+
 Installed modules carry a `.vmi` public interface, a relocatable `.o` implementation, and `.vmeta`
 compatibility, dependency, target, and integrity information. Source ships alongside these artifacts
-for diagnostics, debugging, and rebuilding, but ordinary non-generic consumers should not need to
-parse implementation source.
+for diagnostics, interface validation, debugging, and rebuilding. Source-free interface hydration is
+still **WIP**; ordinary consumers already omit verified implementation bodies from IR and link the
+installed object instead.
 
 ## Static and shared policy
 

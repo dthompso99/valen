@@ -19,7 +19,17 @@ node bootstrap/compiler.js src/valen.ar valen
 
 This uses the JavaScript generation-0 compiler to build the compiler written in Valen.
 
-Tell the compiler where the standard source libraries live:
+Build the installed static standard library beside a local compiler:
+
+```sh
+node scripts/package-stdlib.mjs --compiler ./valen --output dist/lib/valen
+export VALEN_SYSROOT="$PWD/dist/lib/valen/current/x86_64-linux"
+```
+
+Programs can then use imports such as `std/libSystem.ar`. A distributed compiler finds the
+versioned sysroot relative to its executable. `VALEN_SYSROOT` selects a different installation.
+
+Tell the compiler where additional source libraries live:
 
 ```sh
 export VALEN_LIBRARY_PATH="$PWD/lib"
@@ -79,7 +89,7 @@ To stop at a relocatable ELF object without selecting a linker:
 Save this as `hello.ar`:
 
 ```valen
-import System from 'libSystem.ar'
+import System from 'std/libSystem.ar'
 
 entry {{
     __() -> i32 {
@@ -115,7 +125,8 @@ The repository also contains a multi-stage bootstrap build:
 docker build -f docker/Dockerfile.bootstrap -t valen:test .
 ```
 
-It builds the native compiler in successive stages and runs representative programs. Packaging a general-purpose compiler image is **WIP**.
+It builds the native compiler and its versioned static standard-library sysroot in successive stages,
+then runs representative programs. The tested `stage3` image is also published as `valen-builder`.
 
 The self-contained native output can also run in an otherwise empty container:
 

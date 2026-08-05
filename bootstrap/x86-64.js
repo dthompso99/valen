@@ -3,11 +3,12 @@ import {prepareIr} from './ir-validation.js';
 const argumentRegisters = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9'];
 
 export class X86_64Backend {
-    generate(program, {optimizationLevel = 1, moduleId = null, includeRuntime = true} = {}) {
+    generate(program, {optimizationLevel = 1, moduleId = null, includeRuntime = true, includeModuleMetadata = false} = {}) {
         if (![0, 1].includes(optimizationLevel)) throw new Error(`Unsupported optimization level '-O${optimizationLevel}'`);
         this.optimize = optimizationLevel === 1;
         prepareIr(program, {optimize: this.optimize, requireEntry: includeRuntime});
         this.program = program;
+        this.emittedTypes = moduleId === null ? program.types : program.types.filter(type => type.moduleId === moduleId);
         this.functionSymbols = new Map();
         this.fieldOffsets = new Map();
         this.typeSizes = new Map();
@@ -16,7 +17,9 @@ export class X86_64Backend {
         this.runtimeLabel = 0;
         this.moduleId = moduleId;
         this.includeRuntime = includeRuntime;
-        const emittedFunctions = moduleId === null ? program.functions : program.functions.filter(fn => fn.moduleId === moduleId);
+        const compiledModules = new Set(program.compiledModules ?? []);
+        const emittedFunctions = (moduleId === null ? program.functions : program.functions.filter(fn => fn.moduleId === moduleId))
+            .filter(fn => !compiledModules.has(fn.moduleId));
 
         for (const type of program.types) {
             let offset = 16;
@@ -101,13 +104,17 @@ export class X86_64Backend {
         ].some(symbol => runtimeSymbols.has(symbol));
 
         const lines = ['.intel_syntax noprefix', '.text'];
+        if (includeRuntime) for (const symbol of this.moduleRuntimeExports()) lines.push(`.globl ${symbol}`);
         if (runtimeSymbols.has('valen_Operations_threadStart')) lines.push('.extern pthread_create', '.extern pthread_join');
         for (const external of program.externals) {
             if (external.foreignLibrary) lines.push(`.extern ${external.runtimeSymbol}`);
         }
         for (const fn of emittedFunctions) lines.push(...this.generateFunction(fn));
         if (!includeRuntime) {
-            lines.push(...this.moduleTrapRuntime(), ...this.stringData(), ...this.floatData(), ...this.floatConversionData(), '.section .note.GNU-stack,"",@progbits');
+            if (includeModuleMetadata) lines.push(...this.structuralTypeRuntime(), ...this.gcTraceFunctions(this.emittedTypes),
+                ...this.gcArrayTraceFunctions(), ...this.typeData(this.emittedTypes));
+            lines.push(...this.moduleTrapRuntime(), ...this.stringData(), ...this.floatData(), ...this.floatConversionData(),
+                '.section .note.GNU-stack,"",@progbits');
             return `${lines.join('\n')}\n`;
         }
         lines.push(...this.generateMain());
@@ -1082,6 +1089,26 @@ export class X86_64Backend {
         return lines;
     }
 
+    structuralTypeRuntime() {
+        const lines = [];
+        for (const type of this.emittedTypes) {
+            lines.push(...this.objectEqualityFunction(type), ...this.objectHashFunction(type), ...this.objectCopyFunction(type));
+        }
+        for (const type of this.structuralArrayTypes()) {
+            lines.push(...this.arrayEqualityFunction(type), ...this.arrayHashFunction(type), ...this.arrayCopyFunction(type), ...this.arraySliceFunction(type));
+        }
+        return lines;
+    }
+
+    moduleRuntimeExports() {
+        return ['valen_alloc', 'valen_array_address', 'valen_array_append', 'valen_array_new',
+            'valen_builder_append_string', 'valen_builder_build', 'valen_gc_alloc', 'valen_gc_array_new',
+            'valen_gc_mark', 'valen_gc_root_pop', 'valen_gc_root_push', 'valen_gc_roots',
+            'valen_gc_safepoint', 'valen_gc_workers', 'valen_integer_to_string', 'valen_object_copy',
+            'valen_object_equal', 'valen_object_hash', 'valen_string_address', 'valen_string_concat',
+            'valen_string_copy_context', 'valen_string_equal_context', 'valen_string_hash_context', 'valen_string_slice'];
+    }
+
     structuralArrayTypes() {
         const types = new Set();
         const add = type => {
@@ -1322,9 +1349,9 @@ export class X86_64Backend {
         return hash.toString();
     }
 
-    typeData() {
+    typeData(types = this.program.types) {
         const lines = ['.section .data', '.align 8'];
-        for (const type of this.program.types) {
+        for (const type of types) {
             lines.push(`${this.typeLabel(type.name)}:`, type.base ? `    .quad ${this.typeLabel(type.base)}` : '    .quad 0',
                 `    .quad ${this.contractListLabel(type.name)}`,
                 `    .quad ${this.objectEqualityLabel(type.name)}`,
@@ -1332,7 +1359,7 @@ export class X86_64Backend {
                 `    .quad ${this.objectCopyLabel(type.name)}`);
             for (const method of type.virtualMethods ?? []) lines.push(`    .quad ${this.functionSymbols.get(method.target)}`);
         }
-        for (const type of this.program.types) {
+        for (const type of types) {
             lines.push(`${this.contractListLabel(type.name)}:`, `    .quad ${(type.contracts ?? []).length}`);
             for (const contract of type.contracts ?? []) {
                 lines.push(`    .quad ${this.typeLabel(contract.name)}`, `    .quad ${this.contractTableLabel(type.name, contract.name)}`);
@@ -2014,15 +2041,29 @@ export class X86_64Backend {
             '    mov rax, QWORD PTR [r14+16]',
             '    mov rax, QWORD PTR [rax+r8*8]',
             '    mov r10, QWORD PTR [rax+8]',
+            '    mov rsi, QWORD PTR [rax]',
+            '    cmp r10, 0',
+            '    je .Llink_normal_library',
+            '    cmp BYTE PTR [rsi], 64',
+            '    jne .Llink_normal_library',
+            '    sub rsp, r10',
+            '    lea rdi, [rsp]',
+            '    inc rsi',
+            '    mov rcx, r10',
+            '    dec rcx',
+            '    rep movsb',
+            '    mov BYTE PTR [rsp+r10-1], 0',
+            '    jmp .Llink_store_input',
+            '.Llink_normal_library:',
             '    lea rcx, [r10+3]',
             '    sub rsp, rcx',
             '    mov BYTE PTR [rsp], 45',
             '    mov BYTE PTR [rsp+1], 108',
-            '    mov rsi, QWORD PTR [rax]',
             '    lea rdi, [rsp+2]',
             '    mov rcx, r10',
             '    rep movsb',
             '    mov BYTE PTR [rsp+r10+2], 0',
+            '.Llink_store_input:',
             '    mov QWORD PTR [r15+r8*8+48], rsp',
             '    inc r8',
             '    jmp .Llink_library_loop',
@@ -2259,9 +2300,9 @@ export class X86_64Backend {
         ];
     }
 
-    gcTraceFunctions() {
+    gcTraceFunctions(types = this.program.types) {
         const lines = [];
-        for (const type of this.program.types) {
+        for (const type of types) {
             lines.push(`${this.gcTraceLabel(type.name)}:`, '    push rbx', '    mov rbx, rdi');
             for (const field of type.fields) {
                 if (field.ownership === 'member-weak' || !this.isManagedReferenceType(field.type)) continue;

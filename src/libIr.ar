@@ -180,6 +180,7 @@ library Ir {{
         member referencedTypes:Array<string>
         member externals:Array<ref ExternalFunction>
         member foreignLibraries:Array<string>
+        member compiledModules:Array<string>
         member entry:string?
 
         __() -> void {
@@ -188,6 +189,7 @@ library Ir {{
             self.functionDeclarations = new Array<ref Function>(0)
             self.referencedTypes = new Array<string>(0)
             self.externals = new Array<ref ExternalFunction>(0)
+            self.compiledModules = new Array<string>(0)
             self.foreignLibraries = new Array<string>(0)
             self.entry = null
         }
@@ -367,6 +369,7 @@ library Ir {{
         generate() -> ref Program {
             local moduleIndex:i64 = 0
             while moduleIndex < self.analysis.graph.modules.length {
+                if self.analysis.graph.modules[moduleIndex].compiledObjectPath != null { self.program.compiledModules.append(self.analysis.graph.modules[moduleIndex].path) }
                 self.currentModulePath = self.analysis.graph.modules[moduleIndex].path
                 local declarations = self.analysis.graph.modules[moduleIndex].program.declarations
                 local index:i64 = 0

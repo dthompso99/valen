@@ -14,6 +14,7 @@ export class IrGenerator {
             functions: [],
             externals: [],
             foreignLibraries: [],
+            compiledModules: [],
             entry: null
         };
 
@@ -21,6 +22,7 @@ export class IrGenerator {
             ? [...semanticResult.modules.values()]
             : [{id: '<program>', program: semanticResult.program}];
         const programs = modules.map(module => module.program);
+        this.program.compiledModules = modules.filter(module => module.compiledArtifact).map(module => module.id);
 
         this.contractTypes = new Set();
         for (const program of programs) {
