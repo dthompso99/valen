@@ -1,0 +1,7 @@
+entry {{
+    __() -> i32 {
+        local text = "🙂"
+        text.codePointAt(1)
+        return 1
+    }
+}}

@@ -1,0 +1,20 @@
+entry {{
+    __() -> i32 {
+        local text = "hé🙂"
+        if text.codePointLength != 3 { return 1 }
+        if text.codePointAt(0) != 104 || text.codePointAt(1) != 233 || text.codePointAt(2) != 128578 { return 2 }
+
+        local boundaries = "A¢߿ࠀ￿"
+        if boundaries.codePointLength != 5 { return 3 }
+        if boundaries.codePointAt(0) != 65 || boundaries.codePointAt(1) != 162 { return 4 }
+        if boundaries.codePointAt(2) != 2047 || boundaries.codePointAt(3) != 2048 { return 5 }
+        if boundaries.codePointAt(4) != 65535 { return 6 }
+
+        local invalid = new Array<u8>(0)
+        invalid.append(255)
+        local replacement = invalid.toString()
+        if replacement.codePointLength != 1 || replacement.codePointAt(0) != 65533 { return 7 }
+        if "".codePointLength != 0 { return 8 }
+        return 0
+    }
+}}

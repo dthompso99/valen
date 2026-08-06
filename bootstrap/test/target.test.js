@@ -317,3 +317,19 @@ test('bootstrap compiler copies between AArch64 strings and byte arrays', t => {
     assert.match(result.assembly, /\.Lstring_to_bytes_copy:/);
     assert.match(result.assembly, /\.Lbytes_to_string_copy:/);
 });
+
+test('bootstrap compiler decodes UTF-8 code points on AArch64', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-codepoints-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-codepoints.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'codepoints'), {target: 'aarch64-linux'});
+    const boundsSource = fileURLToPath(new URL('fixtures/aarch64-codepoint-bounds.ar', import.meta.url));
+    const bounds = new Compiler().compile(boundsSource, path.join(directory, 'codepoint-bounds'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'codepoints')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /bl valen_string_codepoint_length/);
+    assert.match(result.assembly, /bl valen_string_codepoint_at/);
+    assert.match(result.assembly, /valen_utf8_decode:/);
+    assert.match(result.assembly, /\.Lutf8_decode_four:/);
+    assert.match(bounds.assembly, /\.Lcodepoint_at_error:[\s\S]*b \.Larray_bounds_error/);
+});
