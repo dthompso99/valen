@@ -458,6 +458,24 @@ test('bootstrap compiler emits foundational AArch64 file operations and error st
     assert.match(result.assembly, /valen_System_openRead:[\s\S]*mov x8, #56/);
     assert.match(result.assembly, /valen_System_read:[\s\S]*mov x8, #63/);
     assert.match(result.assembly, /valen_System_writeFile:[\s\S]*mov x8, #64/);
+    assert.match(result.assembly, /valen_System_writeBytes:[\s\S]*mov x8, #64/);
+    assert.match(result.assembly, /valen_System_sync:[\s\S]*mov x8, #82/);
     assert.match(result.assembly, /valen_System_close:[\s\S]*mov x8, #57/);
+    assert.match(result.assembly, /valen_System_replaceFile:[\s\S]*mov x8, #38/);
+    assert.match(result.assembly, /valen_System_removeFile:[\s\S]*mov x8, #35/);
+    assert.match(result.assembly, /valen_System_makeExecutable:[\s\S]*mov x8, #53/);
     assert.match(result.assembly, /valen_System_lastError:[\s\S]*valen_filesystem_error/);
+});
+
+test('bootstrap compiler preserves and exposes AArch64 process state', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-process-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-process.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'process'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'process')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /_start:[\s\S]*valen_process_argc[\s\S]*valen_process_argv[\s\S]*valen_process_envp/);
+    assert.match(result.assembly, /valen_System_arguments:[\s\S]*valen_array_new/);
+    assert.match(result.assembly, /valen_System_currentDirectory:[\s\S]*mov x8, #17/);
+    assert.match(result.assembly, /valen_System_environmentVariable:[\s\S]*\.Lsystem_environment_compare:/);
 });

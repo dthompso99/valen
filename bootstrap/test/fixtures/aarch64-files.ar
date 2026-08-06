@@ -3,7 +3,12 @@ library System {{
     native openWrite(path:string) -> File?
     native read(file:File, count:i64) -> string?
     native writeFile(file:File, input:string) -> i64
+    native writeBytes(file:File, input:Array<u8>) -> i64
+    native sync(file:File) -> i64
     native close(own file:File) -> i64
+    native replaceFile(source:string, destination:string) -> i64
+    native removeFile(path:string) -> i64
+    native makeExecutable(path:string) -> i64
     native lastError() -> i64
 
     File {{ member descriptor:i64 }}
@@ -23,6 +28,22 @@ entry {{
         if System.close(input!) != 0 { return 6 }
         local missing = System.openRead("/tmp/valen-aarch64-files-missing")
         if missing != null || System.lastError() == 0 { return 7 }
+        local temporary = "/tmp/valen-aarch64-files.tmp"
+        local bytesOutput = System.openWrite(temporary)
+        if bytesOutput == null { return 8 }
+        local bytes = new Array<u8>(3)
+        bytes[0] = 97; bytes[1] = 98; bytes[2] = 99
+        if System.writeBytes(bytesOutput!, bytes) != 3 { return 9 }
+        if System.sync(bytesOutput!) != 0 { return 10 }
+        if System.close(bytesOutput!) != 0 { return 11 }
+        if System.replaceFile(temporary, path) != 0 { return 12 }
+        if System.makeExecutable(path) != 0 { return 13 }
+        local replaced = System.openRead(path)
+        if replaced == null { return 14 }
+        local replacedContents = System.read(replaced!, 8)
+        if replacedContents == null || replacedContents! != "abc" { return 15 }
+        if System.close(replaced!) != 0 { return 16 }
+        if System.removeFile(path) != 0 { return 17 }
         return 0
     }
 }}

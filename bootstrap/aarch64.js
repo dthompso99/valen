@@ -11,7 +11,9 @@ export class AArch64Backend {
         const supportedRuntimeSymbols = new Set(['valen_System_collectGarbage', 'valen_System_print',
             'valen_System_write', 'valen_System_writeError', 'valen_System_exit', 'valen_System_openRead',
             'valen_System_openWrite', 'valen_System_read', 'valen_System_writeFile', 'valen_System_close',
-            'valen_System_lastError']);
+            'valen_System_lastError', 'valen_System_arguments', 'valen_System_currentDirectory',
+            'valen_System_environmentVariable', 'valen_System_enableProcessArena', 'valen_System_writeBytes',
+            'valen_System_sync', 'valen_System_replaceFile', 'valen_System_removeFile', 'valen_System_makeExecutable']);
         this.program = program;
         this.runtimeLabel = 0;
         this.fieldOffsets = new Map();
@@ -398,7 +400,11 @@ export class AArch64Backend {
         const entry = this.program.functions.find(fn => fn.name === this.program.entry);
         if (!entry) throw new Error('Program has no entry.__ method');
         const entryType = this.program.types.find(type => type.name === entry.owner);
-        const lines = ['.globl _start', '.type _start, %function', '_start:', '    sub sp, sp, #16',
+        const lines = ['.globl _start', '.type _start, %function', '_start:', '    add x9, sp, #0',
+            '    ldr x10, [x9, #0]', ...this.address('x11', 'valen_process_argc'), '    str x10, [x11, #0]',
+            '    add x12, x9, #8', ...this.address('x11', 'valen_process_argv'), '    str x12, [x11, #0]',
+            '    add x13, x10, #1', '    lsl x13, x13, #3', '    add x13, x12, x13',
+            ...this.address('x11', 'valen_process_envp'), '    str x13, [x11, #0]', '    sub sp, sp, #16',
             ...this.constant('x0', this.typeSizes.get(entry.owner) ?? 16),
             ...this.address('x1', this.gcTypeTraceLabel(entry.owner)), ...this.gcTypeWeakAddress('x2', entry.owner),
             ...this.constant('x3', 0), '    bl valen_gc_alloc',
@@ -854,11 +860,22 @@ export class AArch64Backend {
         if (this.runtimeSymbols.has('valen_System_openWrite')) lines.push(...this.systemOpenRuntime('valen_System_openWrite', 577));
         if (this.runtimeSymbols.has('valen_System_read')) lines.push(...this.systemReadRuntime());
         if (this.runtimeSymbols.has('valen_System_writeFile')) lines.push(...this.systemFileWriteRuntime());
+        if (this.runtimeSymbols.has('valen_System_writeBytes')) lines.push(...this.systemFileWriteRuntime(true));
         if (this.runtimeSymbols.has('valen_System_close')) lines.push(...this.systemCloseRuntime());
+        if (this.runtimeSymbols.has('valen_System_sync')) lines.push(...this.systemSyncRuntime());
         if (this.runtimeSymbols.has('valen_System_lastError')) lines.push(
             '.globl valen_System_lastError', '.type valen_System_lastError, %function', 'valen_System_lastError:',
             ...this.address('x9', 'valen_filesystem_error'), '    ldr x0, [x9, #0]', '    ret',
             '.size valen_System_lastError, .-valen_System_lastError', '');
+        if (this.runtimeSymbols.has('valen_System_arguments')) lines.push(...this.systemArgumentsRuntime());
+        if (this.runtimeSymbols.has('valen_System_currentDirectory')) lines.push(...this.systemCurrentDirectoryRuntime());
+        if (this.runtimeSymbols.has('valen_System_environmentVariable')) lines.push(...this.systemEnvironmentRuntime());
+        if (this.runtimeSymbols.has('valen_System_enableProcessArena')) lines.push(
+            '.globl valen_System_enableProcessArena', '.type valen_System_enableProcessArena, %function',
+            'valen_System_enableProcessArena:', '    ret',
+            '.size valen_System_enableProcessArena, .-valen_System_enableProcessArena', '');
+        if (['valen_System_replaceFile', 'valen_System_removeFile', 'valen_System_makeExecutable']
+            .some(symbol => this.runtimeSymbols.has(symbol))) lines.push(...this.systemPathRuntime());
         return lines;
     }
 
@@ -901,19 +918,20 @@ export class AArch64Backend {
             '.size valen_System_read, .-valen_System_read', ''];
     }
 
-    systemFileWriteRuntime() {
-        return ['.globl valen_System_writeFile', '.type valen_System_writeFile, %function',
-            'valen_System_writeFile:', '    ldr x9, [x0, #0]', '    ldr x10, [x1, #0]',
-            '    ldr x11, [x1, #8]', '    mov x12, #0', '.Lsystem_file_write_next:',
-            '    cbz x11, .Lsystem_file_write_done', '    mov x0, x9', '    mov x1, x10', '    mov x2, x11',
+    systemFileWriteRuntime(bytes = false) {
+        const symbol = bytes ? 'valen_System_writeBytes' : 'valen_System_writeFile';
+        const prefix = bytes ? '.Lsystem_file_write_bytes' : '.Lsystem_file_write';
+        return [`.globl ${symbol}`, `.type ${symbol}, %function`, `${symbol}:`, '    ldr x9, [x0, #0]',
+            `    ldr x10, [x1, #${bytes ? 16 : 0}]`, `    ldr x11, [x1, #${bytes ? 0 : 8}]`,
+            '    mov x12, #0', `${prefix}_next:`, `    cbz x11, ${prefix}_done`,
+            '    mov x0, x9', '    mov x1, x10', '    mov x2, x11',
             '    mov x8, #64', '    svc #0', '    mov x13, #-4', '    cmp x0, x13',
-            '    b.eq .Lsystem_file_write_next', '    cmp x0, #0', '    b.lt .Lsystem_file_write_error',
+            `    b.eq ${prefix}_next`, '    cmp x0, #0', `    b.lt ${prefix}_error`,
             '    add x12, x12, x0', '    add x10, x10, x0', '    sub x11, x11, x0',
-            '    b .Lsystem_file_write_next', '.Lsystem_file_write_done:', ...this.clearFilesystemError(),
-            '    mov x0, x12', '    ret', '.Lsystem_file_write_error:', '    neg x13, x0',
-            ...this.storeFilesystemError('x13'), '    cbnz x12, .Lsystem_file_write_partial', '    ret',
-            '.Lsystem_file_write_partial:', '    mov x0, x12', '    ret',
-            '.size valen_System_writeFile, .-valen_System_writeFile', ''];
+            `    b ${prefix}_next`, `${prefix}_done:`, ...this.clearFilesystemError(),
+            '    mov x0, x12', '    ret', `${prefix}_error:`, '    neg x13, x0',
+            ...this.storeFilesystemError('x13'), `    cbnz x12, ${prefix}_partial`, '    ret',
+            `${prefix}_partial:`, '    mov x0, x12', '    ret', `.size ${symbol}, .-${symbol}`, ''];
     }
 
     systemCloseRuntime() {
@@ -924,9 +942,122 @@ export class AArch64Backend {
             '.size valen_System_close, .-valen_System_close', ''];
     }
 
+    systemSyncRuntime() {
+        return ['.globl valen_System_sync', '.type valen_System_sync, %function', 'valen_System_sync:',
+            '    ldr x0, [x0, #0]', '    mov x8, #82', '    svc #0', '    cmp x0, #0',
+            '    b.lt .Lsystem_sync_error', ...this.clearFilesystemError(), '    ret', '.Lsystem_sync_error:',
+            '    neg x10, x0', ...this.storeFilesystemError('x10'), '    ret',
+            '.size valen_System_sync, .-valen_System_sync', ''];
+    }
+
+    systemPathRuntime() {
+        const lines = ['.type valen_path_cstring, %function', 'valen_path_cstring:', '    sub sp, sp, #48',
+            '    str x30, [sp, #40]', '    ldr x9, [x0, #0]', '    str x9, [sp, #0]', '    ldr x9, [x0, #8]',
+            '    str x9, [sp, #8]', '    add x0, x9, #1', '    bl valen_alloc', '    mov x4, x0',
+            '    ldr x1, [sp, #0]', '    ldr x2, [sp, #8]', '    mov x3, x0', '.Lpath_cstring_copy:',
+            '    cbz x2, .Lpath_cstring_done', '    ldrb w5, [x1, #0]', '    strb w5, [x3, #0]',
+            '    add x1, x1, #1', '    add x3, x3, #1', '    sub x2, x2, #1',
+            '    b .Lpath_cstring_copy', '.Lpath_cstring_done:', '    mov x5, #0', '    strb w5, [x3, #0]',
+            '    mov x0, x4', '    ldr x30, [sp, #40]', '    add sp, sp, #48', '    ret',
+            '.size valen_path_cstring, .-valen_path_cstring', ''];
+        if (this.runtimeSymbols.has('valen_System_replaceFile')) lines.push(
+            '.globl valen_System_replaceFile', '.type valen_System_replaceFile, %function',
+            'valen_System_replaceFile:', '    sub sp, sp, #48', '    str x30, [sp, #40]', '    str x1, [sp, #0]',
+            '    bl valen_path_cstring', '    str x0, [sp, #8]', '    ldr x0, [sp, #0]',
+            '    bl valen_path_cstring', '    mov x3, x0', '    mov x0, #-100', '    ldr x1, [sp, #8]',
+            '    mov x2, #-100', '    mov x8, #38', '    svc #0', '    cmp x0, #0',
+            '    b.lt .Lsystem_replace_error', ...this.clearFilesystemError(), '    b .Lsystem_replace_done',
+            '.Lsystem_replace_error:', '    neg x10, x0', ...this.storeFilesystemError('x10'),
+            '.Lsystem_replace_done:', '    ldr x30, [sp, #40]', '    add sp, sp, #48', '    ret',
+            '.size valen_System_replaceFile, .-valen_System_replaceFile', '');
+        if (this.runtimeSymbols.has('valen_System_removeFile')) lines.push(...this.systemSinglePathRuntime(
+            'valen_System_removeFile', 35, ['    mov x1, x0', '    mov x0, #-100', '    mov x2, #0']));
+        if (this.runtimeSymbols.has('valen_System_makeExecutable')) lines.push(...this.systemSinglePathRuntime(
+            'valen_System_makeExecutable', 53, ['    mov x1, x0', '    mov x0, #-100', '    mov x2, #493']));
+        return lines;
+    }
+
+    systemSinglePathRuntime(symbol, syscall, setup) {
+        const error = `.L${symbol}_error`, done = `.L${symbol}_done`;
+        return [`.globl ${symbol}`, `.type ${symbol}, %function`, `${symbol}:`, '    sub sp, sp, #16',
+            '    str x30, [sp, #8]', '    bl valen_path_cstring', ...setup, `    mov x8, #${syscall}`,
+            '    svc #0', '    cmp x0, #0', `    b.lt ${error}`, ...this.clearFilesystemError(), `    b ${done}`,
+            `${error}:`, '    neg x10, x0', ...this.storeFilesystemError('x10'), `${done}:`,
+            '    ldr x30, [sp, #8]', '    add sp, sp, #16', '    ret', `.size ${symbol}, .-${symbol}`, ''];
+    }
+
     clearFilesystemError() { return [...this.address('x9', 'valen_filesystem_error'), '    str xzr, [x9, #0]']; }
     storeFilesystemError(register) {
         return [...this.address('x9', 'valen_filesystem_error'), `    str ${register}, [x9, #0]`];
+    }
+
+    systemArgumentsRuntime() {
+        const arrayType = 'Array<string>';
+        return ['.globl valen_System_arguments', '.type valen_System_arguments, %function',
+            'valen_System_arguments:', '    sub sp, sp, #80', '    str x30, [sp, #72]',
+            ...this.address('x9', 'valen_process_argc'), '    ldr x9, [x9, #0]', '    str x9, [sp, #0]',
+            ...this.address('x9', 'valen_process_argv'), '    ldr x9, [x9, #0]', '    str x9, [sp, #8]',
+            '    mov x0, #8', '    ldr x1, [sp, #0]', ...this.address('x2', this.gcArrayTraceLabel(arrayType)),
+            '    mov x3, #0', '    bl valen_array_new', '    str x0, [sp, #16]', '    str xzr, [sp, #24]',
+            '.Lsystem_arguments_next:', '    ldr x9, [sp, #24]', '    ldr x10, [sp, #0]',
+            '    cmp x9, x10', '    b.cs .Lsystem_arguments_done', '    ldr x10, [sp, #8]',
+            '    lsl x11, x9, #3', '    add x10, x10, x11', '    ldr x10, [x10, #0]', '    str x10, [sp, #32]',
+            '    mov x11, #0', '.Lsystem_arguments_length:', '    ldrb w12, [x10, #0]',
+            '    cbz x12, .Lsystem_arguments_allocate', '    add x10, x10, #1', '    add x11, x11, #1',
+            '    b .Lsystem_arguments_length', '.Lsystem_arguments_allocate:', '    str x11, [sp, #40]',
+            '    mov x0, x11', '    bl valen_string_new', '    str x0, [sp, #48]', '    ldr x12, [x0, #0]',
+            '    ldr x10, [sp, #32]', '    ldr x11, [sp, #40]', '.Lsystem_arguments_copy:',
+            '    cbz x11, .Lsystem_arguments_store', '    ldrb w13, [x10, #0]', '    strb w13, [x12, #0]',
+            '    add x10, x10, #1', '    add x12, x12, #1', '    sub x11, x11, #1',
+            '    b .Lsystem_arguments_copy', '.Lsystem_arguments_store:', '    ldr x9, [sp, #16]',
+            '    ldr x9, [x9, #16]', '    ldr x10, [sp, #24]', '    lsl x10, x10, #3', '    add x9, x9, x10',
+            '    ldr x10, [sp, #48]', '    str x10, [x9, #0]', '    ldr x9, [sp, #24]', '    add x9, x9, #1',
+            '    str x9, [sp, #24]', '    b .Lsystem_arguments_next', '.Lsystem_arguments_done:',
+            '    ldr x0, [sp, #16]', '    ldr x30, [sp, #72]', '    add sp, sp, #80', '    ret',
+            '.size valen_System_arguments, .-valen_System_arguments', ''];
+    }
+
+    systemCurrentDirectoryRuntime() {
+        return ['.globl valen_System_currentDirectory', '.type valen_System_currentDirectory, %function',
+            'valen_System_currentDirectory:', '    sub sp, sp, #48', '    str x30, [sp, #40]',
+            '    mov x0, #4096', '    bl valen_string_new', '    str x0, [sp, #0]', '    ldr x0, [x0, #0]',
+            '    mov x1, #4096', '    mov x8, #17', '    svc #0', '    cmp x0, #0',
+            '    b.lt .Lsystem_current_directory_error', '    ldr x9, [sp, #0]', '    ldr x10, [x9, #0]',
+            '    mov x11, #0', '.Lsystem_current_directory_length:', '    ldrb w12, [x10, #0]',
+            '    cbz x12, .Lsystem_current_directory_done', '    add x10, x10, #1', '    add x11, x11, #1',
+            '    b .Lsystem_current_directory_length', '.Lsystem_current_directory_done:', '    str x11, [x9, #8]',
+            ...this.clearFilesystemError(), '    ldr x0, [sp, #0]', '    b .Lsystem_current_directory_return',
+            '.Lsystem_current_directory_error:', '    neg x10, x0', ...this.storeFilesystemError('x10'),
+            '    mov x0, #0', '.Lsystem_current_directory_return:', '    ldr x30, [sp, #40]',
+            '    add sp, sp, #48', '    ret', '.size valen_System_currentDirectory, .-valen_System_currentDirectory', ''];
+    }
+
+    systemEnvironmentRuntime() {
+        return ['.globl valen_System_environmentVariable', '.type valen_System_environmentVariable, %function',
+            'valen_System_environmentVariable:', '    sub sp, sp, #64', '    str x30, [sp, #56]',
+            '    ldr x9, [x0, #0]', '    str x9, [sp, #0]', '    ldr x9, [x0, #8]', '    str x9, [sp, #8]',
+            ...this.address('x9', 'valen_process_envp'), '    ldr x9, [x9, #0]', '    str x9, [sp, #16]',
+            '.Lsystem_environment_next:', '    ldr x9, [sp, #16]', '    ldr x10, [x9, #0]',
+            '    cbz x10, .Lsystem_environment_missing', '    ldr x11, [sp, #0]', '    ldr x12, [sp, #8]',
+            '    mov x13, #0', '.Lsystem_environment_compare:', '    cmp x13, x12',
+            '    b.eq .Lsystem_environment_name_end', '    ldrb w14, [x10, #0]', '    ldrb w15, [x11, #0]',
+            '    cmp x14, x15', '    b.ne .Lsystem_environment_advance', '    add x10, x10, #1',
+            '    add x11, x11, #1', '    add x13, x13, #1', '    b .Lsystem_environment_compare',
+            '.Lsystem_environment_name_end:', '    ldrb w14, [x10, #0]', '    cmp x14, #61',
+            '    b.ne .Lsystem_environment_advance', '    add x10, x10, #1', '    str x10, [sp, #24]',
+            '    mov x11, #0', '.Lsystem_environment_length:', '    ldrb w12, [x10, #0]',
+            '    cbz x12, .Lsystem_environment_allocate', '    add x10, x10, #1', '    add x11, x11, #1',
+            '    b .Lsystem_environment_length', '.Lsystem_environment_allocate:', '    str x11, [sp, #32]',
+            '    mov x0, x11', '    bl valen_string_new', '    str x0, [sp, #40]', '    ldr x12, [x0, #0]',
+            '    ldr x10, [sp, #24]', '    ldr x11, [sp, #32]', '.Lsystem_environment_copy:',
+            '    cbz x11, .Lsystem_environment_found', '    ldrb w13, [x10, #0]', '    strb w13, [x12, #0]',
+            '    add x10, x10, #1', '    add x12, x12, #1', '    sub x11, x11, #1',
+            '    b .Lsystem_environment_copy', '.Lsystem_environment_found:', '    ldr x0, [sp, #40]',
+            '    b .Lsystem_environment_return', '.Lsystem_environment_advance:', '    ldr x9, [sp, #16]',
+            '    add x9, x9, #8', '    str x9, [sp, #16]', '    b .Lsystem_environment_next',
+            '.Lsystem_environment_missing:', '    mov x0, #0', '.Lsystem_environment_return:',
+            '    ldr x30, [sp, #56]', '    add sp, sp, #64', '    ret',
+            '.size valen_System_environmentVariable, .-valen_System_environmentVariable', ''];
     }
 
     call(instruction, dynamic) {
@@ -1211,7 +1342,9 @@ export class AArch64Backend {
         return ['.section .data', '.align 8', '.globl valen_gc_roots', 'valen_gc_roots:', '    .quad 0',
             '.globl valen_gc_heap', 'valen_gc_heap:', '    .quad 0', '.globl valen_gc_bytes',
             'valen_gc_bytes:', '    .quad 0', '.globl valen_gc_threshold', 'valen_gc_threshold:',
-            '    .quad 1048576', '.globl valen_filesystem_error', 'valen_filesystem_error:', '    .quad 0', '.text'];
+            '    .quad 1048576', '.globl valen_filesystem_error', 'valen_filesystem_error:', '    .quad 0',
+            '.globl valen_process_argc', 'valen_process_argc:', '    .quad 0', '.globl valen_process_argv',
+            'valen_process_argv:', '    .quad 0', '.globl valen_process_envp', 'valen_process_envp:', '    .quad 0', '.text'];
     }
 
     typeLabel(typeName) { return `.Lvalen_type_${this.mangle(typeName)}`; }

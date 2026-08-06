@@ -63,7 +63,9 @@
   strings, byte arrays, and individual bytes, produce immutable snapshots, and support interpolation.
   Freestanding console output, signed-integer printing, process exit, garbage collection, and foundational
   open/read/write/close filesystem operations with error reporting are available as native facilities.
-  Remaining filesystem mutation, process-environment, networking, threading, foreign calls, and
+  Linux process arguments, current-directory discovery, and environment lookup are also available.
+  Byte-array writes, synchronization, atomic replacement, removal, and executable permissions complete the
+  compiler-facing filesystem mutation surface. Networking, threading, foreign calls, and
   self-hosting remain WIP on AArch64.
 - x86-64 Linux executables own their `_start` adapter, link without an implicit C runtime, and
   reject target-native symbols that the backend cannot provide.

@@ -1,0 +1,21 @@
+library System {{
+    native arguments() -> Array<string>
+    native currentDirectory() -> string?
+    native environmentVariable(name:string) -> string?
+    native enableProcessArena() -> void
+}}
+
+entry {{
+    __() -> i64 {
+        System.enableProcessArena()
+        local arguments = System.arguments()
+        if arguments.length != 3 { return 1 }
+        if arguments[1] != "alpha" || arguments[2] != "βeta" { return 2 }
+        local current = System.currentDirectory()
+        if current == null || current!.length == 0 { return 3 }
+        local value = System.environmentVariable("VALEN_ARM_ENV")
+        if value == null || value! != "works" { return 4 }
+        if System.environmentVariable("VALEN_ARM_MISSING") != null { return 5 }
+        return 0
+    }
+}}
