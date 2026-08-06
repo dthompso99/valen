@@ -223,3 +223,23 @@ test('bootstrap compiler emits fixed-size AArch64 arrays with checked indexing',
     assert.match(bounds.assembly, /b\.cs \.Larray_bounds_error/);
     assert.match(bounds.assembly, /mov x0, #70/);
 });
+
+test('bootstrap compiler grows and compacts AArch64 arrays', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-array-capacity-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-array-capacity.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'capacity'), {target: 'aarch64-linux'});
+    const negativeSource = fileURLToPath(new URL('fixtures/array-reserve-negative.ar', import.meta.url));
+    const negative = new Compiler().compile(negativeSource, path.join(directory, 'negative'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'capacity')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /bl valen_array_append/);
+    assert.match(result.assembly, /bl valen_array_reserve/);
+    assert.match(result.assembly, /bl valen_array_shrink_to_fit/);
+    assert.match(result.assembly, /\.Larray_resize_copy:/);
+    assert.match(result.assembly, /strb w1, \[x5, #0\]/);
+    assert.match(result.assembly, /strh w1, \[x5, #0\]/);
+    assert.match(result.assembly, /str w1, \[x5, #0\]/);
+    assert.match(result.assembly, /str x1, \[x5, #0\]/);
+    assert.match(negative.assembly, /b\.lt \.Larray_bounds_error/);
+});

@@ -140,6 +140,9 @@ export class AArch64Backend {
             case 'array_length':
                 return [...this.load(instruction.array, 'x9'), '    ldr x9, [x9, #0]',
                     `    str x9, ${this.temp(instruction.result)}`];
+            case 'array_capacity':
+                return [...this.load(instruction.array, 'x9'), '    ldr x9, [x9, #8]',
+                    `    str x9, ${this.temp(instruction.result)}`];
             case 'array_load': {
                 if (instruction.elementOwnership === 'weak') throw new Error('aarch64-linux bootstrap backend does not yet support weak array elements');
                 return [...this.load(instruction.array, 'x0'), ...this.load(instruction.index, 'x1'),
@@ -160,6 +163,15 @@ export class AArch64Backend {
                     `    ${this.storeMnemonic(instruction.elementType)} ${this.valueRegister('x9', instruction.elementType)}, [x0, #0]`);
                 return lines;
             }
+            case 'array_append':
+                return [...this.load(instruction.array, 'x0'), ...this.load(instruction.value, 'x1'),
+                    ...this.constant('x2', this.sizeOf(instruction.elementType)), '    bl valen_array_append'];
+            case 'array_reserve':
+                return [...this.load(instruction.array, 'x0'), ...this.load(instruction.capacity, 'x1'),
+                    ...this.constant('x2', this.sizeOf(instruction.elementType)), '    bl valen_array_reserve'];
+            case 'array_shrink':
+                return [...this.load(instruction.array, 'x0'), ...this.constant('x1', this.sizeOf(instruction.elementType)),
+                    '    bl valen_array_shrink_to_fit'];
             case 'call':
                 return this.call(instruction, false);
             case 'virtual_call':
@@ -297,7 +309,39 @@ export class AArch64Backend {
             '.type valen_array_address, %function', 'valen_array_address:', '    cbz x0, .Larray_bounds_error',
             '    cmp x1, #0', '    b.lt .Larray_bounds_error', '    ldr x3, [x0, #0]', '    cmp x1, x3',
             '    b.cs .Larray_bounds_error', '    mul x1, x1, x2', '    ldr x0, [x0, #16]', '    add x0, x0, x1',
-            '    ret', '.size valen_array_address, .-valen_array_address', ''];
+            '    ret', '.size valen_array_address, .-valen_array_address', '', '.globl valen_array_reserve',
+            '.type valen_array_reserve, %function', 'valen_array_reserve:', '    cmp x1, #0',
+            '    b.lt .Larray_bounds_error', '    ldr x3, [x0, #8]', '    cmp x1, x3', '    b.ls .Larray_resize_return',
+            '    b .Larray_resize', '.size valen_array_reserve, .-valen_array_reserve', '',
+            '.globl valen_array_shrink_to_fit', '.type valen_array_shrink_to_fit, %function',
+            'valen_array_shrink_to_fit:', '    mov x2, x1', '    ldr x1, [x0, #0]', '    ldr x3, [x0, #8]',
+            '    cmp x1, x3', '    b.eq .Larray_resize_return', '.Larray_resize:', '    sub sp, sp, #64',
+            '    str x30, [sp, #56]', '    str x0, [sp, #0]', '    str x1, [sp, #8]', '    str x2, [sp, #16]',
+            '    mul x3, x1, x2', '    udiv x4, x3, x2', '    cmp x4, x1', '    b.ne .Larray_bounds_error',
+            '    mov x0, x3', '    cbnz x0, .Larray_resize_allocate', '    mov x0, #1', '.Larray_resize_allocate:',
+            '    bl valen_alloc', '    str x0, [sp, #24]', '    ldr x3, [sp, #0]', '    ldr x4, [x3, #16]',
+            '    mov x5, x0', '    ldr x6, [x3, #0]', '    ldr x7, [sp, #16]', '    mul x6, x6, x7',
+            '.Larray_resize_copy:', '    cbz x6, .Larray_resize_copy_done', '    ldrb w7, [x4, #0]',
+            '    strb w7, [x5, #0]', '    add x4, x4, #1', '    add x5, x5, #1', '    sub x6, x6, #1',
+            '    b .Larray_resize_copy', '.Larray_resize_copy_done:', '    ldr x0, [sp, #0]', '    ldr x1, [sp, #8]',
+            '    ldr x2, [sp, #24]', '    str x1, [x0, #8]', '    str x2, [x0, #16]', '    ldr x30, [sp, #56]',
+            '    add sp, sp, #64', '.Larray_resize_return:', '    ret',
+            '.size valen_array_shrink_to_fit, .-valen_array_shrink_to_fit', '', '.globl valen_array_append',
+            '.type valen_array_append, %function', 'valen_array_append:', '    sub sp, sp, #48',
+            '    str x30, [sp, #40]', '    str x0, [sp, #0]', '    str x1, [sp, #8]', '    str x2, [sp, #16]',
+            '    ldr x3, [x0, #0]', '    str x3, [sp, #24]', '    ldr x4, [x0, #8]', '    cmp x3, x4',
+            '    b.cc .Larray_append_store', '    cmp x4, #4', '    b.ge .Larray_append_double', '    mov x1, #4',
+            '    b .Larray_append_grow', '.Larray_append_double:', '    add x1, x4, x4', '    cmp x1, x4',
+            '    b.cc .Larray_bounds_error', '.Larray_append_grow:', '    bl valen_array_reserve',
+            '.Larray_append_store:', '    ldr x0, [sp, #0]', '    ldr x1, [sp, #8]', '    ldr x2, [sp, #16]',
+            '    ldr x3, [sp, #24]', '    mul x4, x3, x2', '    ldr x5, [x0, #16]', '    add x5, x5, x4',
+            '    cmp x2, #1', '    b.eq .Larray_append_store_1', '    cmp x2, #2', '    b.eq .Larray_append_store_2',
+            '    cmp x2, #4', '    b.eq .Larray_append_store_4', '    str x1, [x5, #0]', '    b .Larray_append_done',
+            '.Larray_append_store_1:', '    strb w1, [x5, #0]', '    b .Larray_append_done',
+            '.Larray_append_store_2:', '    strh w1, [x5, #0]', '    b .Larray_append_done',
+            '.Larray_append_store_4:', '    str w1, [x5, #0]', '.Larray_append_done:', '    add x3, x3, #1',
+            '    str x3, [x0, #0]', '    ldr x30, [sp, #40]', '    add sp, sp, #48', '    ret',
+            '.size valen_array_append, .-valen_array_append', ''];
     }
 
     call(instruction, dynamic) {
