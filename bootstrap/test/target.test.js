@@ -350,3 +350,16 @@ test('bootstrap compiler segments Unicode graphemes on AArch64', t => {
     assert.match(result.assembly, /\.Lgrapheme_extend_modifier:/);
     assert.match(bounds.assembly, /\.Lgrapheme_at_error:[\s\S]*b \.Larray_bounds_error/);
 });
+
+test('bootstrap compiler formats signed and unsigned AArch64 integers', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-integer-formatting-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-integer-formatting.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'integer-formatting'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'integer-formatting')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /bl valen_integer_to_string/);
+    assert.match(result.assembly, /\.Linteger_string_digits:/);
+    assert.match(result.assembly, /udiv x7, x4, x6/);
+    assert.match(result.assembly, /\.Linteger_string_copy:/);
+});

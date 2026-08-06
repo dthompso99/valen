@@ -34,7 +34,8 @@ export class AArch64Backend {
         }
         const lines = ['.text'];
         for (const fn of functions) lines.push(...this.generateFunction(fn));
-        if (includeRuntime) lines.push(...this.generateStart(), ...this.allocationRuntime(), ...this.arrayRuntime(), ...this.stringRuntime());
+        if (includeRuntime) lines.push(...this.generateStart(), ...this.allocationRuntime(), ...this.arrayRuntime(),
+            ...this.stringRuntime(), ...this.builderRuntime());
         lines.push('.Larray_bounds_error:', '    mov x0, #70', '    mov x8, #93', '    svc #0',
             '.Ldivision_by_zero_error:', '    mov x0, #73', '    mov x8, #93', '    svc #0',
             '.Loptional_unwrap_error:', '    mov x0, #71', '    mov x8, #93', '    svc #0',
@@ -232,6 +233,9 @@ export class AArch64Backend {
             case 'bytes_to_string':
                 return [...this.load(instruction.value, 'x0'), '    bl valen_bytes_to_string',
                     `    str x0, ${this.temp(instruction.result)}`];
+            case 'integer_to_string':
+                return [...this.load(instruction.value, 'x0'), ...this.constant('x1', this.isUnsigned(instruction.integerType) ? 0 : 1),
+                    '    bl valen_integer_to_string', `    str x0, ${this.temp(instruction.result)}`];
             case 'call':
                 return this.call(instruction, false);
             case 'virtual_call':
@@ -628,6 +632,26 @@ export class AArch64Backend {
             '    strb w4, [x2, #0]', '    add x1, x1, #1', '    add x2, x2, #1', '    sub x3, x3, #1',
             '    b .Lbytes_to_string_copy', '.Lbytes_to_string_done:', '    ldr x0, [sp, #16]', '    ldr x30, [sp, #40]',
             '    add sp, sp, #48', '    ret', '.size valen_bytes_to_string, .-valen_bytes_to_string', ''];
+    }
+
+    builderRuntime() {
+        return ['.globl valen_integer_to_string', '.type valen_integer_to_string, %function',
+            'valen_integer_to_string:', '    sub sp, sp, #64', '    str x30, [sp, #56]', '    str x0, [sp, #0]',
+            '    str x1, [sp, #8]', '    mov x0, #21', '    bl valen_string_new', '    str x0, [sp, #16]',
+            '    ldr x2, [x0, #0]', '    add x2, x2, #21', '    mov x3, x2', '    ldr x4, [sp, #0]',
+            '    str xzr, [sp, #24]', '    ldr x5, [sp, #8]', '    cbz x5, .Linteger_string_magnitude',
+            '    cmp x4, #0', '    b.ge .Linteger_string_magnitude', '    neg x4, x4', '    mov x5, #1',
+            '    str x5, [sp, #24]', '.Linteger_string_magnitude:', '    mov x6, #10',
+            '.Linteger_string_digits:', '    udiv x7, x4, x6', '    mul x8, x7, x6', '    sub x8, x4, x8',
+            '    add x8, x8, #48', '    sub x2, x2, #1', '    strb w8, [x2, #0]', '    mov x4, x7',
+            '    cbnz x4, .Linteger_string_digits', '    ldr x5, [sp, #24]', '    cbz x5, .Linteger_string_done',
+            '    sub x2, x2, #1', '    mov x5, #45', '    strb w5, [x2, #0]', '.Linteger_string_done:',
+            '    sub x4, x3, x2', '    ldr x0, [sp, #16]', '    str x4, [x0, #8]', '    ldr x3, [x0, #0]',
+            '.Linteger_string_copy:', '    cbz x4, .Linteger_string_copy_done', '    ldrb w5, [x2, #0]',
+            '    strb w5, [x3, #0]', '    add x2, x2, #1', '    add x3, x3, #1', '    sub x4, x4, #1',
+            '    b .Linteger_string_copy', '.Linteger_string_copy_done:', '    ldr x0, [sp, #16]',
+            '    ldr x30, [sp, #56]', '    add sp, sp, #64', '    ret',
+            '.size valen_integer_to_string, .-valen_integer_to_string', ''];
     }
 
     call(instruction, dynamic) {

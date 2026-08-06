@@ -1,0 +1,12 @@
+entry {{
+    __() -> i32 {
+        if (0).toString() != "0" || (-12).toString() != "-12" { return 1 }
+        if (-128 as i8).toString() != "-128" || (255 as u8).toString() != "255" { return 2 }
+        if (-32768 as i16).toString() != "-32768" || (65535 as u16).toString() != "65535" { return 3 }
+        if (-2147483648 as i32).toString() != "-2147483648" { return 4 }
+        if (4294967295 as u32).toString() != "4294967295" { return 5 }
+        if (-9223372036854775808).toString() != "-9223372036854775808" { return 6 }
+        if ((0 as u64) - 1).toString() != "18446744073709551615" { return 7 }
+        return 0
+    }
+}}

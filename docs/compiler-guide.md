@@ -48,9 +48,9 @@ source -> tokens -> AST -> module graph -> semantic symbols
   deep-copy slices of owned managed elements await structural copy hooks. UTF-8 string literals use the
   common 24-byte data/length/capacity layout; the initial runtime provides byte length/indexing, equality,
   concatenation, copied byte slicing, copied conversion between strings and `Array<u8>`, validated UTF-8
-  code-point length/index operations, and the same initial grapheme segmentation rules as x86-64. It is
-  the cross-compilation foothold for the full runtime and self-hosted backend, not yet a general AArch64
-  language target.
+  code-point length/index operations, the same initial grapheme segmentation rules as x86-64, and decimal
+  formatting for every signed and unsigned integer width. It is the cross-compilation foothold for the full
+  runtime and self-hosted backend, not yet a general AArch64 language target.
 
 Native executable builds can reuse validated backend artifacts by setting
 `VALEN_CACHE_PATH` to an existing writable directory. Cache keys include every loaded module's

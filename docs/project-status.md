@@ -53,7 +53,8 @@
   conversion to and from byte arrays. Unicode code-point length/index operations decode validated UTF-8
   and replace malformed bytes. Grapheme length/index operations share the x86-64 rules for combining
   marks, variation selectors, emoji modifiers, ZWJ sequences, regional-indicator pairs, and CRLF.
-  Builders/interpolation, native facilities, and self-hosting remain WIP on AArch64.
+  Decimal formatting covers every signed and unsigned integer width. Builders/interpolation, native
+  facilities, and self-hosting remain WIP on AArch64.
 - x86-64 Linux executables own their `_start` adapter, link without an implicit C runtime, and
   reject target-native symbols that the backend cannot provide.
 - **WIP:** general freestanding capability manifests, runtime hooks, and non-Linux code generation
