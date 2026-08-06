@@ -1,0 +1,1 @@
+./valen src/valen.ar -o valen-aarch64 -O0 --target aarch64-linux
