@@ -1,0 +1,34 @@
+Printable {{
+    print() -> i64 { return 1 }
+}}
+
+Report implements Printable {{
+    print() -> i64 { return 9 }
+    reportOnly() -> i64 { return 4 }
+}}
+
+Other implements Printable {{
+    print() -> i64 { return 6 }
+}}
+
+Services {{
+    invoke(value:Printable) -> i64 { return value.print() }
+}}
+
+entry {{
+    __() -> i32 {
+        local report = new Report()
+        local printable:Printable = report
+        if printable.print() != 9 { return 1 }
+        if !(printable is Printable) { return 2 }
+        if !(printable is Report) { return 3 }
+        local recovered:Report? = printable as Report?
+        if recovered == null { return 4 }
+        if recovered!.reportOnly() != 4 { return 5 }
+        local wrong:Other? = printable as Other?
+        if wrong != null { return 6 }
+        local services = new Services()
+        if services.invoke(report) != 9 { return 7 }
+        return 0
+    }
+}}

@@ -184,3 +184,23 @@ test('bootstrap compiler emits AArch64 type descriptors and virtual dispatch', t
     assert.match(result.assembly, /ldr x9, \[x9, #56\]/);
     assert.match(result.assembly, /blr x9/);
 });
+
+test('bootstrap compiler emits AArch64 contract dispatch and checked type relationships', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-contracts-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const contractSource = fileURLToPath(new URL('fixtures/aarch64-contracts.ar', import.meta.url));
+    const contractResult = new Compiler().compile(contractSource, path.join(directory, 'contracts'), {target: 'aarch64-linux'});
+    const subtypeSource = fileURLToPath(new URL('fixtures/subtypes.ar', import.meta.url));
+    const subtypeResult = new Compiler().compile(subtypeSource, path.join(directory, 'subtypes'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'contracts')).readUInt16LE(18), 183);
+    assert.match(contractResult.assembly, /\.Lcontract_call_\d+:/);
+    assert.match(contractResult.assembly, /ldr x11, \[x11, #0\]/);
+    assert.match(contractResult.assembly, /blr x11/);
+    assert.match(contractResult.assembly, /_contracts:\n    \.quad 1/);
+    assert.match(contractResult.assembly, /_as___valen_/);
+    assert.match(subtypeResult.assembly, /\.Ltype_test_\d+:/);
+    assert.match(subtypeResult.assembly, /ldr x12, \[x11, #8\]/);
+    assert.match(subtypeResult.assembly, /mov x0, x9/);
+    assert.match(subtypeResult.assembly, /cbz x9, \.Loptional_unwrap_error/);
+});

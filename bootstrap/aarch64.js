@@ -10,6 +10,7 @@ export class AArch64Backend {
         prepareIr(program, {optimize: optimizationLevel === 1, requireEntry: includeRuntime});
         if (program.externals.length) throw new Error('aarch64-linux bootstrap backend does not yet support native or foreign calls');
         this.program = program;
+        this.runtimeLabel = 0;
         this.fieldOffsets = new Map();
         this.typeSizes = new Map();
         for (const type of program.types) {
@@ -31,6 +32,7 @@ export class AArch64Backend {
         for (const fn of functions) lines.push(...this.generateFunction(fn));
         if (includeRuntime) lines.push(...this.generateStart(), ...this.allocationRuntime());
         lines.push('.Ldivision_by_zero_error:', '    mov x0, #73', '    mov x8, #93', '    svc #0',
+            '.Loptional_unwrap_error:', '    mov x0, #71', '    mov x8, #93', '    svc #0',
             '.Lcontract_dispatch_error:', '    mov x0, #75', '    mov x8, #93', '    svc #0',
             '.Lfloat_conversion_error:', '    mov x0, #76', '    mov x8, #93', '    svc #0', '');
         lines.push(...this.typeData(this.emittedTypes));
@@ -131,6 +133,14 @@ export class AArch64Backend {
                 return this.call(instruction, false);
             case 'virtual_call':
                 return this.call(instruction, true);
+            case 'contract_call':
+                return this.contractCall(instruction);
+            case 'type_test':
+            case 'checked_cast':
+                return this.typeRelationship(instruction);
+            case 'unwrap':
+                return [...this.load(instruction.value, 'x9'), '    cbz x9, .Loptional_unwrap_error',
+                    `    str x9, ${this.temp(instruction.result)}`];
             case 'convert':
                 return this.convert(instruction);
             case 'jump':
@@ -242,14 +252,7 @@ export class AArch64Backend {
     }
 
     call(instruction, dynamic) {
-        const lines = [];
-        for (const location of this.argumentLocations(instruction.arguments)) {
-            if (location.kind === 'stack') lines.push(...this.load(location.value, 'x9'),
-                `    str x9, [sp, #${location.stackIndex * 8}]`);
-            else if (location.kind === 'float') lines.push(...this.load(location.value, 'x9'),
-                `    fmov ${location.value.type === 'f32' ? 's' : 'd'}${location.register}, ${location.value.type === 'f32' ? 'w9' : 'x9'}`);
-            else lines.push(...this.load(location.value, location.register));
-        }
+        const lines = this.loadCallArguments(instruction.arguments);
         if (dynamic) {
             if (!Number.isInteger(instruction.slot) || instruction.slot < 0) throw new Error('aarch64-linux virtual call has no dispatch slot');
             lines.push('    ldr x9, [x0, #0]', '    cbz x9, .Lcontract_dispatch_error',
@@ -259,6 +262,57 @@ export class AArch64Backend {
             if (!target) throw new Error(`aarch64-linux bootstrap backend has no function symbol for '${instruction.target}'`);
             lines.push(`    bl ${target}`);
         }
+        lines.push(...this.storeCallResult(instruction));
+        return lines;
+    }
+
+    contractCall(instruction) {
+        if (!Number.isInteger(instruction.slot) || instruction.slot < 0) throw new Error('aarch64-linux contract call has no dispatch slot');
+        const id = this.runtimeLabel++;
+        const loop = `.Lcontract_call_${id}`;
+        const found = `.Lcontract_found_${id}`;
+        const lines = [...this.load(instruction.arguments[0], 'x9'), '    cbz x9, .Lcontract_dispatch_error',
+            '    ldr x10, [x9, #0]', '    cbz x10, .Lcontract_dispatch_error', '    ldr x10, [x10, #8]',
+            '    ldr x11, [x10, #0]', '    add x10, x10, #8', ...this.address('x12', this.typeLabel(instruction.contractType)),
+            `${loop}:`, '    cbz x11, .Lcontract_dispatch_error', '    ldr x13, [x10, #0]', '    cmp x13, x12',
+            `    b.eq ${found}`, '    add x10, x10, #16', '    sub x11, x11, #1', `    b ${loop}`, `${found}:`,
+            '    ldr x11, [x10, #8]', `    ldr x11, [x11, #${instruction.slot * 8}]`,
+            '    cbz x11, .Lcontract_dispatch_error', ...this.loadCallArguments(instruction.arguments), '    blr x11',
+            ...this.storeCallResult(instruction)];
+        return lines;
+    }
+
+    typeRelationship(instruction) {
+        const id = this.runtimeLabel++;
+        const loop = `.Ltype_test_${id}`;
+        const scan = `.Ltype_contract_${id}`;
+        const next = `.Ltype_next_${id}`;
+        const match = `.Ltype_match_${id}`;
+        const done = `.Ltype_done_${id}`;
+        return [...this.load(instruction.value, 'x9'), '    mov x0, #0', `    cbz x9, ${done}`,
+            '    ldr x11, [x9, #0]', ...this.address('x10', this.typeLabel(instruction.targetType)), `${loop}:`,
+            `    cbz x11, ${done}`, '    cmp x11, x10', `    b.eq ${match}`, '    ldr x12, [x11, #8]',
+            '    ldr x13, [x12, #0]', '    add x12, x12, #8', `${scan}:`, `    cbz x13, ${next}`,
+            '    ldr x14, [x12, #0]', '    cmp x14, x10', `    b.eq ${match}`, '    add x12, x12, #16',
+            '    sub x13, x13, #1', `    b ${scan}`, `${next}:`, '    ldr x11, [x11, #0]', `    b ${loop}`,
+            `${match}:`, instruction.op === 'type_test' ? '    mov x0, #1' : '    mov x0, x9', `${done}:`,
+            `    str x0, ${this.temp(instruction.result)}`];
+    }
+
+    loadCallArguments(arguments_) {
+        const lines = [];
+        for (const location of this.argumentLocations(arguments_)) {
+            if (location.kind === 'stack') lines.push(...this.load(location.value, 'x9'),
+                `    str x9, [sp, #${location.stackIndex * 8}]`);
+            else if (location.kind === 'float') lines.push(...this.load(location.value, 'x9'),
+                `    fmov ${location.value.type === 'f32' ? 's' : 'd'}${location.register}, ${location.value.type === 'f32' ? 'w9' : 'x9'}`);
+            else lines.push(...this.load(location.value, location.register));
+        }
+        return lines;
+    }
+
+    storeCallResult(instruction) {
+        const lines = [];
         if (instruction.result && this.isFloat(instruction.type)) lines.push(
             `    fmov ${instruction.type === 'f32' ? 'w9' : 'x9'}, ${instruction.type === 'f32' ? 's0' : 'd0'}`,
             `    str x9, ${this.temp(instruction.result)}`);
@@ -308,7 +362,7 @@ export class AArch64Backend {
     outgoingStackSize(fn) {
         let slots = 0;
         for (const instruction of fn.blocks.flatMap(block => block.instructions)) {
-            if (instruction.op !== 'call' && instruction.op !== 'virtual_call') continue;
+            if (!['call', 'virtual_call', 'contract_call'].includes(instruction.op)) continue;
             slots = Math.max(slots, this.argumentLocations(instruction.arguments).filter(location => location.kind === 'stack').length);
         }
         return this.align(slots * 8, 16);
@@ -337,14 +391,31 @@ export class AArch64Backend {
         const lines = ['.section .data', '.align 8'];
         for (const type of types) {
             lines.push(`${this.typeLabel(type.name)}:`, type.base ? `    .quad ${this.typeLabel(type.base)}` : '    .quad 0',
-                '    .quad 0', '    .quad 0', '    .quad 0', '    .quad 0');
-            for (const method of type.virtualMethods ?? []) lines.push(`    .quad ${this.symbols.get(method.target)}`);
+                `    .quad ${this.contractListLabel(type.name)}`, '    .quad 0', '    .quad 0', '    .quad 0');
+            for (const method of type.virtualMethods ?? []) lines.push(`    .quad ${this.requireFunction(method.target)}`);
+        }
+        for (const type of types) {
+            lines.push(`${this.contractListLabel(type.name)}:`, `    .quad ${(type.contracts ?? []).length}`);
+            for (const contract of type.contracts ?? []) lines.push(
+                `    .quad ${this.typeLabel(contract.name)}`, `    .quad ${this.contractTableLabel(type.name, contract.name)}`);
+            for (const contract of type.contracts ?? []) {
+                lines.push(`${this.contractTableLabel(type.name, contract.name)}:`);
+                for (const method of contract.methods) lines.push(`    .quad ${this.requireFunction(method.target)}`);
+            }
         }
         lines.push('.text');
         return lines;
     }
 
     typeLabel(typeName) { return `.Lvalen_type_${this.mangle(typeName)}`; }
+    contractListLabel(typeName) { return `${this.typeLabel(typeName)}_contracts`; }
+    contractTableLabel(typeName, contractName) { return `${this.typeLabel(typeName)}_as_${this.mangle(contractName)}`; }
+
+    requireFunction(target) {
+        const symbol = this.symbols.get(target);
+        if (!symbol) throw new Error(`aarch64-linux bootstrap backend has no function symbol for '${target}'`);
+        return symbol;
+    }
 
     normalize(register, type) {
         if (!type || this.isFloat(type)) return [];

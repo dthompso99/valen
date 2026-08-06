@@ -39,8 +39,10 @@ source -> tokens -> AST -> module graph -> semantic symbols
   numeric conversions. Direct calls follow the AAPCS64 integer, floating-register, and overflow-stack
   argument classes. Basic objects use the common 16-byte header and packed field layout, with zeroed
   allocation and constructor lowering. Their headers point to ABI-compatible type descriptors whose
-  method slots drive inherited and overridden virtual dispatch. It is the cross-compilation foothold
-  for the full runtime and self-hosted backend, not yet a general AArch64 language target.
+  method slots drive inherited and overridden virtual dispatch. Descriptor-owned contract lists and method
+  tables provide contract-typed dispatch, while base and contract walks implement runtime type tests and
+  checked reference casts. It is the cross-compilation foothold for the full runtime and self-hosted backend,
+  not yet a general AArch64 language target.
 
 Native executable builds can reuse validated backend artifacts by setting
 `VALEN_CACHE_PATH` to an existing writable directory. Cache keys include every loaded module's
