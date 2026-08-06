@@ -382,3 +382,18 @@ test('bootstrap compiler builds immutable strings and interpolation on AArch64',
     assert.match(interpolation.assembly, /bl valen_builder_append_string/);
     assert.match(interpolation.assembly, /bl valen_builder_build/);
 });
+
+test('bootstrap compiler invalidates weak AArch64 fields and array elements', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-weak-references-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/weak-reference.ar', import.meta.url));
+    const field = new Compiler().compile(source, path.join(directory, 'weak-field'), {target: 'aarch64-linux'});
+    const collectionSource = fileURLToPath(new URL('fixtures/collection-ownership.ar', import.meta.url));
+    const collection = new Compiler().compile(collectionSource, path.join(directory, 'weak-array'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'weak-field')).readUInt16LE(18), 183);
+    assert.match(field.assembly, /\.Lweak_field_live_/);
+    assert.match(field.assembly, /ldr x10, \[x9, #8\]/);
+    assert.match(collection.assembly, /\.Lweak_array_live_/);
+    assert.doesNotMatch(collection.assembly, /does not yet support weak/);
+});

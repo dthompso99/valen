@@ -47,8 +47,9 @@
   relationships. Arrays use the common 40-byte header and support allocation, length and capacity, checked
   indexing, replacement, append, insert, remove, reserve, and shrink-to-fit across scalar and reference-sized
   elements. The generation-0 allocator currently retains replaced buffers as anonymous mappings for process
-  lifetime. Copied slices support value elements and explicit reference aliases; deep-copy slices of owned
-  managed elements and weak-element slices remain WIP with structural hooks and tracing GC. AArch64 strings
+  lifetime. Weak object fields and weak array elements/slices observe explicit destruction through the
+  common liveness word. Copied slices support value elements, explicit reference aliases, and weak aliases;
+  deep-copy slices of owned managed elements remain WIP with structural hooks and tracing GC. AArch64 strings
   support UTF-8 literals, byte length and indexing, equality, concatenation, copied byte slices, and copied
   conversion to and from byte arrays. Unicode code-point length/index operations decode validated UTF-8
   and replace malformed bytes. Grapheme length/index operations share the x86-64 rules for combining

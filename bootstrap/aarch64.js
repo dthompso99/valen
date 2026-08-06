@@ -16,7 +16,6 @@ export class AArch64Backend {
         for (const type of program.types) {
             let offset = 16, alignment = 1;
             for (const field of type.fields) {
-                if (field.ownership === 'member-weak') throw new Error('aarch64-linux bootstrap backend does not yet support weak object fields');
                 const size = this.sizeOf(field.type), fieldAlignment = Math.min(size, 8);
                 offset = this.align(offset, fieldAlignment);
                 this.fieldOffsets.set(field.symbol, {offset, type: field.type, ownership: field.ownership});
@@ -107,8 +106,11 @@ export class AArch64Backend {
                 return [...this.load(instruction.value, 'x9'), `    str x9, ${this.named(instruction.name)}`];
             case 'load_field': {
                 const field = this.requireField(instruction.field);
-                return [...this.load(instruction.object, 'x9'), `    ${this.loadMnemonic(field.type)} ${this.valueRegister('x9', field.type)}, [x9, #${field.offset}]`,
-                    ...this.normalize('x9', field.type), `    str x9, ${this.temp(instruction.result)}`];
+                const lines = [...this.load(instruction.object, 'x9'),
+                    `    ${this.loadMnemonic(field.type)} ${this.valueRegister('x9', field.type)}, [x9, #${field.offset}]`];
+                if (field.ownership === 'member-weak') lines.push(...this.weakLoad('x9', 'field'));
+                lines.push(...this.normalize('x9', field.type), `    str x9, ${this.temp(instruction.result)}`);
+                return lines;
             }
             case 'store_field': {
                 const field = this.requireField(instruction.field);
@@ -152,14 +154,14 @@ export class AArch64Backend {
                 return [...this.load(instruction.array, 'x9'), '    ldr x9, [x9, #8]',
                     `    str x9, ${this.temp(instruction.result)}`];
             case 'array_load': {
-                if (instruction.elementOwnership === 'weak') throw new Error('aarch64-linux bootstrap backend does not yet support weak array elements');
-                return [...this.load(instruction.array, 'x0'), ...this.load(instruction.index, 'x1'),
+                const lines = [...this.load(instruction.array, 'x0'), ...this.load(instruction.index, 'x1'),
                     ...this.constant('x2', this.sizeOf(instruction.elementType)), '    bl valen_array_address',
-                    `    ${this.loadMnemonic(instruction.elementType)} ${this.valueRegister('x9', instruction.elementType)}, [x0, #0]`,
-                    ...this.normalize('x9', instruction.elementType), `    str x9, ${this.temp(instruction.result)}`];
+                    `    ${this.loadMnemonic(instruction.elementType)} ${this.valueRegister('x9', instruction.elementType)}, [x0, #0]`];
+                if (instruction.elementOwnership === 'weak') lines.push(...this.weakLoad('x9', 'array'));
+                lines.push(...this.normalize('x9', instruction.elementType), `    str x9, ${this.temp(instruction.result)}`);
+                return lines;
             }
             case 'array_store': {
-                if (instruction.elementOwnership === 'weak') throw new Error('aarch64-linux bootstrap backend does not yet support weak array elements');
                 const lines = [...this.load(instruction.array, 'x0'), ...this.load(instruction.index, 'x1'),
                     ...this.constant('x2', this.sizeOf(instruction.elementType)), '    bl valen_array_address'];
                 const baseType = instruction.elementType?.endsWith('?') ? instruction.elementType.slice(0, -1) : instruction.elementType;
@@ -189,7 +191,6 @@ export class AArch64Backend {
                 return [...this.load(instruction.array, 'x0'), ...this.constant('x1', this.sizeOf(instruction.elementType)),
                     '    bl valen_array_shrink_to_fit'];
             case 'array_slice':
-                if (instruction.elementOwnership === 'weak') throw new Error('aarch64-linux bootstrap backend does not yet support weak array slices');
                 if (instruction.elementOwnership === 'owned' && this.isManagedReferenceType(instruction.elementType)) {
                     throw new Error('aarch64-linux bootstrap backend does not yet support deep-copying owned managed array slices');
                 }
@@ -764,6 +765,14 @@ export class AArch64Backend {
             `    str x9, ${this.temp(instruction.result)}`);
         else if (instruction.result) lines.push(...this.normalize('x0', instruction.type), `    str x0, ${this.temp(instruction.result)}`);
         return lines;
+    }
+
+    weakLoad(register, kind) {
+        const id = this.runtimeLabel++;
+        const live = `.Lweak_${kind}_live_${id}`;
+        const done = `.Lweak_${kind}_done_${id}`;
+        return [`    cbz ${register}, ${done}`, `    ldr x10, [${register}, #8]`, `    cbnz x10, ${live}`,
+            `    mov ${register}, #0`, `    b ${done}`, `${live}:`, `${done}:`];
     }
 
     load(value, register) {
