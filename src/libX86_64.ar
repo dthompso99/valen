@@ -62,18 +62,20 @@ library X86_64 {{
     Writer {{
         member builder:StringBuilder
         member optimize:bool
+        member previousLine:string
 
-        __() -> void { self.builder = new StringBuilder(); self.optimize = false }
+        __() -> void { self.builder = new StringBuilder(); self.optimize = false; self.previousLine = "" }
         line(value:string) -> void {
             if self.optimize {
                 if value == "    add rax, 0" || value == "    sub rax, 0" || value == "    shl rax, 0" || value == "    shr rax, 0" || value == "    sar rax, 0" || value == "    imul rax, 1" { return }
                 if self.redundantMove(value) { return }
+                if self.reverseMove(value) { return }
             }
-            self.builder.append(value); self.builder.appendByte(10)
+            self.builder.append(value); self.builder.appendByte(10); self.previousLine = value
         }
-        line2(first:string, second:string) -> void { self.builder.append(first); self.builder.append(second); self.builder.appendByte(10) }
-        line3(first:string, second:string, third:string) -> void { self.builder.append(first); self.builder.append(second); self.builder.append(third); self.builder.appendByte(10) }
-        lineInteger(prefix:string, value:i64, suffix:string="") -> void { self.builder.append(prefix); self.builder.append(value); self.builder.append(suffix); self.builder.appendByte(10) }
+        line2(first:string, second:string) -> void { self.builder.append(first); self.builder.append(second); self.builder.appendByte(10); self.previousLine = "" }
+        line3(first:string, second:string, third:string) -> void { self.builder.append(first); self.builder.append(second); self.builder.append(third); self.builder.appendByte(10); self.previousLine = "" }
+        lineInteger(prefix:string, value:i64, suffix:string="") -> void { self.builder.append(prefix); self.builder.append(value); self.builder.append(suffix); self.builder.appendByte(10); self.previousLine = "" }
         build() -> string { return self.builder.build() }
 
         redundantMove(value:string) -> bool {
@@ -85,6 +87,21 @@ library X86_64 {{
             local right = value.slice(comma + 2, value.length - comma - 2)
             if left != right { return false }
             return left == "rax" || left == "rbx" || left == "rcx" || left == "rdx" || left == "rsi" || left == "rdi" || left == "rbp" || left == "rsp" || left == "r8" || left == "r9" || left == "r10" || left == "r11" || left == "r12" || left == "r13" || left == "r14" || left == "r15"
+        }
+
+        reverseMove(value:string) -> bool {
+            if value.length < 14 || self.previousLine.length < 14 { return false }
+            if value.slice(0, 8) != "    mov " || self.previousLine.slice(0, 8) != "    mov " { return false }
+            local currentComma:i64 = 8
+            while currentComma < value.length && value[currentComma] != 44 { currentComma = currentComma + 1 }
+            local previousComma:i64 = 8
+            while previousComma < self.previousLine.length && self.previousLine[previousComma] != 44 { previousComma = previousComma + 1 }
+            if currentComma == value.length || previousComma == self.previousLine.length { return false }
+            local currentLeft = value.slice(8, currentComma - 8)
+            local currentRight = value.slice(currentComma + 2, value.length - currentComma - 2)
+            local previousLeft = self.previousLine.slice(8, previousComma - 8)
+            local previousRight = self.previousLine.slice(previousComma + 2, self.previousLine.length - previousComma - 2)
+            return currentLeft == previousRight && currentRight == previousLeft
         }
     }}
 
@@ -130,14 +147,21 @@ library X86_64 {{
         member name:string
         member start:i64
         member end:i64
+        member uses:i64
         member registerName:string
-        __(name:string, start:i64) -> void { self.name = name; self.start = start; self.end = start; self.registerName = "" }
+        __(name:string, start:i64) -> void { self.name = name; self.start = start; self.end = start; self.uses = 0; self.registerName = "" }
     }}
 
     Immediate {{
         member name:string
         member value:i64
         __(name:string, value:i64) -> void { self.name = name; self.value = value }
+    }}
+
+    DivisionMagic {{
+        member multiplier:i64
+        member shift:i64
+        __(multiplier:i64, shift:i64) -> void { self.multiplier = multiplier; self.shift = shift }
     }}
 
     Backend {{
@@ -508,7 +532,7 @@ library X86_64 {{
                 while index < instructions.length {
                     local instruction = instructions[index]
                     if instruction.result != null {
-                        local allocation = self.findAllocation(instruction.result!.name)
+                        local allocation = self.findAllocation("temp:" + instruction.result!.name)
                         if self.findImmediate(instruction.result!.name) == null {
                             if allocation == null || allocation!.registerName.length == 0 { self.reserve("temp:" + instruction.result!.name, instruction.result!.typeName) }
                         }
@@ -520,7 +544,7 @@ library X86_64 {{
                 blockIndex = blockIndex + 1
             }
             local registerIndex:i64 = 0
-            while registerIndex < 4 {
+            while registerIndex < 5 {
                 local registerName = self.allocationRegister(registerIndex)
                 if self.usesAllocationRegister(registerName) { self.reserve("save:" + registerName, "") }
                 registerIndex = registerIndex + 1
@@ -552,7 +576,7 @@ library X86_64 {{
                 clearOffset = clearOffset + 8
             }
             registerIndex = 0
-            while registerIndex < 4 {
+            while registerIndex < 5 {
                 local registerName = self.allocationRegister(registerIndex)
                 if self.usesAllocationRegister(registerName) { self.writer.line("    mov " + self.slot("save:" + registerName) + ", " + registerName) }
                 registerIndex = registerIndex + 1
@@ -566,7 +590,7 @@ library X86_64 {{
             local stackIndex:i64 = 0
             while parameterIndex < function.parameters.length {
                 local parameter = function.parameters[parameterIndex]
-                local destination = self.slot("name:" + parameter.name)
+                local destination = self.named(parameter.name)
                 if self.isFloat(parameter.typeName) && xmmIndex < 8 {
                     if parameter.typeName == "f32" { self.writer.line("    movd eax, xmm" + xmmIndex.toString()) } else { self.writer.line("    movq rax, xmm" + xmmIndex.toString()) }
                     self.writer.line("    mov " + destination + ", rax")
@@ -594,7 +618,19 @@ library X86_64 {{
                 local index:i64 = 0
                 while index < block.instructions.length {
                     local instruction = block.instructions[index]
-                    if instruction.op == "jump" || instruction.op == "branch" {
+                    local fused:bool = false
+                    if self.optimize && instruction.op == "binary" && instruction.operator != null && instruction.operator! == "/" && index + 3 < block.instructions.length {
+                        if self.generateRemainderSequence(function, block, index) { index = index + 4; fused = true }
+                    }
+                    if self.optimize && instruction.op == "binary" && instruction.operator != null && self.comparisonOperator(instruction.operator!) && !self.isFloat(instruction.first!.typeName) && index + 1 < block.instructions.length {
+                        local branch = block.instructions[index + 1]
+                        if branch.op == "branch" && !self.branchHasBackedge(function, blockIndex, branch) && branch.first != null && branch.first!.kind == "temporary" && instruction.result != null && branch.first!.name == instruction.result!.name && self.temporaryUseCount(function, instruction.result!.name) == 1 {
+                            self.generateComparisonBranch(instruction, branch)
+                            index = index + 2
+                            fused = true
+                        }
+                    }
+                    if !fused && (instruction.op == "jump" || instruction.op == "branch") {
                         local targetIndex:i64 = 0
                         while targetIndex < function.blocks.length && function.blocks[targetIndex].label != instruction.target! { targetIndex = targetIndex + 1 }
                         local backedge = targetIndex <= blockIndex
@@ -603,10 +639,16 @@ library X86_64 {{
                             while targetIndex < function.blocks.length && function.blocks[targetIndex].label != instruction.alternateTarget! { targetIndex = targetIndex + 1 }
                             if targetIndex <= blockIndex { backedge = true }
                         }
-                        if backedge { self.writer.line("    call valen_gc_safepoint") }
+                        if backedge && self.hasRuntime("valen_Operations_threadStart") {
+                            local label = self.nextLabel; self.nextLabel = self.nextLabel + 1
+                            local done = ".Lgc_safepoint_fast_" + label.toString()
+                            self.writer.line("    cmp QWORD PTR [rip+valen_gc_workers], 0")
+                            self.writer.line("    je " + done)
+                            self.writer.line("    call valen_gc_safepoint")
+                            self.writer.line(done + ":")
+                        }
                     }
-                    self.generateInstruction(instruction, endLabel)
-                    index = index + 1
+                    if !fused { self.generateInstruction(instruction, endLabel); index = index + 1 }
                 }
                 blockIndex = blockIndex + 1
             }
@@ -615,7 +657,7 @@ library X86_64 {{
             self.writer.lineInteger("    mov rcx, QWORD PTR [rbp-", rootRecordOffset, "]"); self.writer.line("    mov QWORD PTR [rip+valen_gc_roots], rcx"); self.writer.line2("    jmp ", rootPopDone)
             self.writer.line2(rootPopSlow, ":"); self.writer.line("    sub rsp, 16"); self.writer.line("    mov QWORD PTR [rsp], rax"); self.writer.lineInteger("    lea rdi, [rbp-", rootRecordOffset, "]"); self.writer.line("    call valen_gc_root_pop"); self.writer.line("    mov rax, QWORD PTR [rsp]"); self.writer.line("    add rsp, 16"); self.writer.line2(rootPopDone, ":")
             registerIndex = 0
-            while registerIndex < 4 {
+            while registerIndex < 5 {
                 local registerName = self.allocationRegister(registerIndex)
                 if self.usesAllocationRegister(registerName) { self.writer.line("    mov " + registerName + ", " + self.slot("save:" + registerName)) }
                 registerIndex = registerIndex + 1
@@ -1076,9 +1118,21 @@ library X86_64 {{
                 else { self.writer.line("    sar rax, " + shift) }
             }
             if operator == "/" {
-                self.writer.line("    test rcx, rcx")
-                self.writer.line("    jz .Ldivision_by_zero_error")
-                if self.isUnsigned(instruction.first!.typeName) { self.writer.line("    xor edx, edx"); self.writer.line("    div rcx") } else { self.writer.line("    cqo"); self.writer.line("    idiv rcx") }
+                if immediate != null {
+                    if immediate!.value == 0 { self.writer.line("    jmp .Ldivision_by_zero_error") }
+                    else {
+                        if self.isUnsigned(instruction.first!.typeName) {
+                            self.writer.line("    mov rcx, " + immediate!.value.toString()); self.writer.line("    xor edx, edx"); self.writer.line("    div rcx")
+                        } else {
+                            if immediate!.value == -1 { self.writer.line("    mov rcx, -1"); self.writer.line("    cqo"); self.writer.line("    idiv rcx") }
+                            else { self.generateSignedConstantDivision(immediate!.value) }
+                        }
+                    }
+                } else {
+                    self.writer.line("    test rcx, rcx")
+                    self.writer.line("    jz .Ldivision_by_zero_error")
+                    if self.isUnsigned(instruction.first!.typeName) { self.writer.line("    xor edx, edx"); self.writer.line("    div rcx") } else { self.writer.line("    cqo"); self.writer.line("    idiv rcx") }
+                }
             }
             if operator == "==" || operator == "!=" || operator == "===" || operator == "!==" || operator == "<" || operator == "<=" || operator == ">" || operator == ">=" {
                 self.writer.line("    cmp rax, " + operand)
@@ -1087,6 +1141,113 @@ library X86_64 {{
             }
             self.normalize("rax", instruction.typeName!)
             self.storeResult(instruction, "rax")
+        }
+
+        generateComparisonBranch(comparison:Ir.Instruction, branch:Ir.Instruction) -> void {
+            self.load(comparison.first!, "rax")
+            local immediate = self.findImmediate(comparison.second!.name)
+            local operand = "rcx"
+            if immediate == null { self.load(comparison.second!, "rcx") } else { operand = immediate!.value.toString() }
+            self.writer.line("    cmp rax, " + operand)
+            self.writer.line("    " + self.branchCondition(comparison.operator!, self.isUnsigned(comparison.first!.typeName)) + " " + self.blockLabel(branch.target!))
+            self.writer.line2("    jmp ", self.blockLabel(branch.alternateTarget!))
+        }
+
+        generateRemainderSequence(function:Ir.Function, block:Ir.Block, index:i64) -> bool {
+            local division = block.instructions[index]
+            local constant = block.instructions[index + 1]
+            local multiplication = block.instructions[index + 2]
+            local subtraction = block.instructions[index + 3]
+            if division.result == null || division.second == null || constant.result == null || multiplication.result == null || multiplication.first == null || multiplication.second == null || subtraction.result == null || subtraction.first == null || subtraction.second == null { return false }
+            if constant.op != "constant" || multiplication.op != "binary" || multiplication.operator == null || multiplication.operator! != "*" || subtraction.op != "binary" || subtraction.operator == null || subtraction.operator! != "-" { return false }
+            if multiplication.first!.kind != "temporary" || multiplication.first!.name != division.result!.name || subtraction.second!.kind != "temporary" || subtraction.second!.name != multiplication.result!.name { return false }
+            if multiplication.second!.kind != "temporary" || multiplication.second!.name != constant.result!.name { return false }
+            if self.temporaryUseCount(function, division.result!.name) != 1 || self.temporaryUseCount(function, multiplication.result!.name) != 1 { return false }
+            local divisor = self.findImmediate(division.second!.name)
+            local multiplier = self.findImmediate(multiplication.second!.name)
+            if divisor == null || multiplier == null || divisor!.value == 0 || divisor!.value == -1 || divisor!.value != multiplier!.value { return false }
+            if self.isUnsigned(division.first!.typeName) || self.isFloat(division.first!.typeName) || !self.equivalentValues(block, division.first!, subtraction.first!, index) { return false }
+            self.load(division.first!, "rax")
+            self.generateSignedConstantDivision(divisor!.value)
+            self.writer.line("    imul rax, " + divisor!.value.toString())
+            self.writer.line("    mov rcx, rax")
+            self.load(subtraction.first!, "rax")
+            self.writer.line("    sub rax, rcx")
+            self.normalize("rax", subtraction.typeName!)
+            self.storeResult(subtraction, "rax")
+            return true
+        }
+
+        equivalentValues(block:Ir.Block, first:Ir.Value, second:Ir.Value, before:i64) -> bool {
+            if first.kind != "temporary" || second.kind != "temporary" { return false }
+            if first.name == second.name { return true }
+            local firstLocal:string? = null
+            local secondLocal:string? = null
+            local firstDefinition:i64 = -1
+            local secondDefinition:i64 = -1
+            local index:i64 = 0
+            while index < before {
+                local instruction = block.instructions[index]
+                if instruction.op == "load_local" && instruction.result != null && instruction.name != null {
+                    if instruction.result!.name == first.name { firstLocal = instruction.name!; firstDefinition = index }
+                    if instruction.result!.name == second.name { secondLocal = instruction.name!; secondDefinition = index }
+                }
+                index = index + 1
+            }
+            if firstLocal == null || secondLocal == null || firstLocal! != secondLocal! { return false }
+            local lower = firstDefinition; local upper = secondDefinition
+            if lower > upper { lower = secondDefinition; upper = firstDefinition }
+            index = lower + 1
+            while index < upper {
+                local instruction = block.instructions[index]
+                if instruction.op == "store_local" && instruction.name != null && instruction.name! == firstLocal! { return false }
+                index = index + 1
+            }
+            return true
+        }
+
+        generateSignedConstantDivision(divisor:i64) -> void {
+            if divisor == 1 { return }
+            local magic = self.signedDivisionMagic(divisor)
+            self.writer.line("    mov r11, rax")
+            self.writer.line("    mov rcx, " + magic.multiplier.toString())
+            self.writer.line("    imul rcx")
+            if divisor > 0 && magic.multiplier < 0 { self.writer.line("    add rdx, r11") }
+            if divisor < 0 && magic.multiplier > 0 { self.writer.line("    sub rdx, r11") }
+            self.writer.line("    mov rax, rdx")
+            if magic.shift > 0 { self.writer.line("    sar rax, " + magic.shift.toString()) }
+            self.writer.line("    mov rcx, rax")
+            self.writer.line("    sar rcx, 63")
+            self.writer.line("    sub rax, rcx")
+        }
+
+        signedDivisionMagic(divisor:i64) -> DivisionMagic {
+            local absolute = divisor as u64
+            if divisor < 0 { absolute = (0 - divisor) as u64 }
+            local two63:u64 = (1 as u64) << 63
+            local divisorBits = divisor as u64
+            local t = two63 + (divisorBits >> 63)
+            local remainder = t - (t / absolute) * absolute
+            local anc = t - 1 - remainder
+            local p:i64 = 63
+            local q1 = two63 / anc
+            local r1 = two63 - q1 * anc
+            local q2 = two63 / absolute
+            local r2 = two63 - q2 * absolute
+            local delta:u64 = 0
+            local searching:bool = true
+            while searching {
+                p = p + 1
+                q1 = q1 * 2; r1 = r1 * 2
+                if r1 >= anc { q1 = q1 + 1; r1 = r1 - anc }
+                q2 = q2 * 2; r2 = r2 * 2
+                if r2 >= absolute { q2 = q2 + 1; r2 = r2 - absolute }
+                delta = absolute - r2
+                searching = q1 < delta || (q1 == delta && r1 == 0)
+            }
+            local multiplier = (q2 + 1) as i64
+            if divisor < 0 { multiplier = 0 - multiplier }
+            return new DivisionMagic(multiplier, p - 64)
         }
 
         generateFloatBinary(instruction:Ir.Instruction) -> void {
@@ -3249,6 +3410,31 @@ library X86_64 {{
         allocateRegisters(function:Ir.Function) -> void {
             self.allocations = new Array<Allocation>(0)
             self.allocationIndex = new StringIndex()
+            local parameterIndex:i64 = 0
+            while parameterIndex < function.parameters.length {
+                local parameter = function.parameters[parameterIndex]
+                if !self.isManagedReferenceType(parameter.typeName) {
+                    local allocation = new Allocation("name:" + parameter.name, 0)
+                    self.allocations.append(allocation); self.allocationIndex.set(allocation.name, self.allocations.length - 1)
+                }
+                parameterIndex = parameterIndex + 1
+            }
+            local localBlockIndex:i64 = 0
+            while localBlockIndex < function.blocks.length {
+                local localInstructionIndex:i64 = 0
+                while localInstructionIndex < function.blocks[localBlockIndex].instructions.length {
+                    local localInstruction = function.blocks[localBlockIndex].instructions[localInstructionIndex]
+                    if localInstruction.op == "declare_local" && localInstruction.name != null && localInstruction.typeName != null {
+                        local key = "name:" + localInstruction.name!
+                        if self.findAllocation(key) == null && !self.isManagedReferenceType(localInstruction.typeName!) {
+                            local allocation = new Allocation(key, 0)
+                            self.allocations.append(allocation); self.allocationIndex.set(allocation.name, self.allocations.length - 1)
+                        }
+                    }
+                    localInstructionIndex = localInstructionIndex + 1
+                }
+                localBlockIndex = localBlockIndex + 1
+            }
             local position:i64 = 0
             local blockIndex:i64 = 0
             while blockIndex < function.blocks.length {
@@ -3256,7 +3442,7 @@ library X86_64 {{
                 while instructionIndex < function.blocks[blockIndex].instructions.length {
                     local instruction = function.blocks[blockIndex].instructions[instructionIndex]
                     if instruction.result != null {
-                        if self.findImmediate(instruction.result!.name) == null && !self.isManagedReferenceType(instruction.result!.typeName) { local allocation = new Allocation(instruction.result!.name, position); self.allocations.append(allocation); self.allocationIndex.set(allocation.name, self.allocations.length - 1) }
+                        if self.findImmediate(instruction.result!.name) == null && !self.isManagedReferenceType(instruction.result!.typeName) { local allocation = new Allocation("temp:" + instruction.result!.name, position); self.allocations.append(allocation); self.allocationIndex.set(allocation.name, self.allocations.length - 1) }
                     }
                     self.recordAllocationUse(instruction.first, position)
                     self.recordAllocationUse(instruction.second, position)
@@ -3271,13 +3457,21 @@ library X86_64 {{
                 }
                 blockIndex = blockIndex + 1
             }
+            local namedIndex:i64 = 0
+            while namedIndex < self.allocations.length {
+                local named = self.allocations[namedIndex]
+                if named.name.length >= 5 && named.name.slice(0, 5) == "name:" { named.end = position }
+                namedIndex = namedIndex + 1
+            }
             local allocationIndex:i64 = 0
+            local namedRegisters:i64 = 0
             while allocationIndex < self.allocations.length {
                 local allocation = self.allocations[allocationIndex]
-                if allocation.end > allocation.start {
+                local namedAllocation = allocation.name.length >= 5 && allocation.name.slice(0, 5) == "name:"
+                if allocation.end > allocation.start && (!namedAllocation || namedRegisters < 2) {
                     local registerIndex:i64 = 0
                     local assigned:bool = false
-                    while registerIndex < 4 && !assigned {
+                    while registerIndex < 5 && !assigned {
                         local candidate = self.allocationRegister(registerIndex)
                         local available:bool = true
                         local priorIndex:i64 = 0
@@ -3289,6 +3483,7 @@ library X86_64 {{
                         if available { allocation.registerName = candidate; assigned = true }
                         registerIndex = registerIndex + 1
                     }
+                    if namedAllocation && assigned { namedRegisters = namedRegisters + 1 }
                 }
                 allocationIndex = allocationIndex + 1
             }
@@ -3341,7 +3536,23 @@ library X86_64 {{
         }
 
         immediateOperator(operator:string) -> bool {
-            return operator == "+" || operator == "-" || operator == "*" || operator == "&" || operator == "|" || operator == "^" || operator == "<<" || operator == ">>" || operator == "==" || operator == "!=" || operator == "===" || operator == "!==" || operator == "<" || operator == "<=" || operator == ">" || operator == ">="
+            return operator == "+" || operator == "-" || operator == "*" || operator == "/" || operator == "&" || operator == "|" || operator == "^" || operator == "<<" || operator == ">>" || operator == "==" || operator == "!=" || operator == "===" || operator == "!==" || operator == "<" || operator == "<=" || operator == ">" || operator == ">="
+        }
+
+        temporaryUseCount(function:Ir.Function, name:string) -> i64 {
+            local allocation = self.findAllocation("temp:" + name)
+            if allocation == null { return 0 }
+            return allocation!.uses
+        }
+
+        branchHasBackedge(function:Ir.Function, currentBlock:i64, branch:Ir.Instruction) -> bool {
+            local blockIndex:i64 = 0
+            while blockIndex < function.blocks.length {
+                local label = function.blocks[blockIndex].label
+                if label == branch.target! || label == branch.alternateTarget! { if blockIndex <= currentBlock { return true } }
+                blockIndex = blockIndex + 1
+            }
+            return false
         }
 
         findImmediate(name:string) -> ref Immediate? {
@@ -3352,15 +3563,16 @@ library X86_64 {{
 
         recordAllocationUse(value:Ir.Value?, position:i64) -> void {
             if value == null || value!.kind != "temporary" { return }
-            local allocation = self.findAllocation(value!.name)
-            if allocation != null { if position > allocation!.end { allocation!.end = position } }
+            local allocation = self.findAllocation("temp:" + value!.name)
+            if allocation != null { allocation!.uses = allocation!.uses + 1; if position > allocation!.end { allocation!.end = position } }
         }
 
         allocationRegister(index:i64) -> string {
             if index == 0 { return "r12" }
             if index == 1 { return "r13" }
             if index == 2 { return "r14" }
-            return "r15"
+            if index == 3 { return "r15" }
+            return "rbx"
         }
 
         usesAllocationRegister(registerName:string) -> bool {
@@ -3415,9 +3627,13 @@ library X86_64 {{
         }
 
         slot(key:string) -> string { return "QWORD PTR [rbp-" + self.findSlot(key)!.offset.toString() + "]" }
-        named(name:string) -> string { return self.slot("name:" + name) }
+        named(name:string) -> string {
+            local allocation = self.findAllocation("name:" + name)
+            if allocation != null { if allocation!.registerName.length > 0 { return allocation!.registerName } }
+            return self.slot("name:" + name)
+        }
         temp(name:string) -> string {
-            local allocation = self.findAllocation(name)
+            local allocation = self.findAllocation("temp:" + name)
             if allocation != null { if allocation!.registerName.length > 0 { return allocation!.registerName } }
             return self.slot("temp:" + name)
         }
@@ -3558,6 +3774,18 @@ library X86_64 {{
             if operator == ">" { if unsigned { return "seta" }; return "setg" }
             if unsigned { return "setae" }
             return "setge"
+        }
+
+        comparisonOperator(operator:string) -> bool { return operator == "==" || operator == "!=" || operator == "===" || operator == "!==" || operator == "<" || operator == "<=" || operator == ">" || operator == ">=" }
+
+        branchCondition(operator:string, unsigned:bool) -> string {
+            if operator == "==" || operator == "===" { return "je" }
+            if operator == "!=" || operator == "!==" { return "jne" }
+            if operator == "<" { if unsigned { return "jb" }; return "jl" }
+            if operator == "<=" { if unsigned { return "jbe" }; return "jle" }
+            if operator == ">" { if unsigned { return "ja" }; return "jg" }
+            if unsigned { return "jae" }
+            return "jge"
         }
 
         isUnsigned(name:string) -> bool { return name == "u8" || name == "u16" || name == "u32" || name == "u64" || name == "bool" }

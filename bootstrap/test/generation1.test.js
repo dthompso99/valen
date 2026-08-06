@@ -297,6 +297,26 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             const unsupported = spawnSync(compilerPath, ['-O2', source], {encoding: 'utf8', env: environment, cwd: projectRoot});
             assert.equal(unsupported.status, 64);
             assert.match(unsupported.stderr, /unsupported optimization level '-O2'/);
+
+            const optimizerSource = path.join(projectRoot, 'bootstrap/test/fixtures/optimizer-runtime.ar');
+            for (const level of ['-O0', '-O1']) {
+                const executable = path.join(directory, `optimizer-runtime-${level.slice(2)}`);
+                const compile = spawnSync(compilerPath, [level, optimizerSource, '-o', executable], {
+                    encoding: 'utf8', env: environment, cwd: projectRoot
+                });
+                assert.equal(compile.status, 0, compile.stderr || compile.stdout);
+                assert.equal(spawnSync(executable).status, 0);
+            }
+            const emitted = spawnSync(compilerPath, ['-O1', optimizerSource], {
+                encoding: 'utf8', env: environment, cwd: projectRoot, maxBuffer: 16 * 1024 * 1024
+            });
+            assert.equal(emitted.status, 0, emitted.stderr);
+            const constructor = emitted.stdout.match(/\.globl (valen_fn_[^\n]+)\n\1:\n[\s\S]*?\1__return:/)?.[0];
+            assert.ok(constructor, 'could not isolate optimized entry constructor');
+            assert.match(constructor, /mov rcx, 2351776136887273513\n    imul rcx/);
+            assert.match(constructor, /cmp rax, 1000\n    jl .*__while_body_/);
+            assert.doesNotMatch(constructor, /idiv rcx/);
+            assert.doesNotMatch(constructor, /call valen_gc_safepoint/);
         });
 
         await t.test('native module resolution separates project and external library roots', () => {

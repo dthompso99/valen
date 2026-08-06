@@ -1,0 +1,26 @@
+entry {{
+    __() -> i32 {
+        local positive:i64 = 9876543210
+        local negative:i64 = -9876543210
+        if positive / 2 != 4938271605 { return 1 }
+        if negative / 3 != -3292181070 { return 2 }
+        if positive / 251 != 39348777 { return 3 }
+        if negative / -251 != 39348777 { return 4 }
+        local maximum:i64 = 9223372036854775807
+        local minimum:i64 = -9223372036854775807 - 1
+        if maximum / 3 != 3074457345618258602 { return 5 }
+        if minimum / 3 != -3074457345618258602 { return 6 }
+        if maximum / -251 != -36746502138863648 { return 7 }
+        if minimum / -251 != 36746502138863648 { return 8 }
+
+        local index:i64 = 0
+        local checksum:i64 = 0
+        while index < 1000 {
+            local value = index * 17
+            checksum = checksum + (value - ((value / 251) * 251))
+            index = index + 1
+        }
+        if checksum != 124666 { return 9 }
+        return 0
+    }
+}}
