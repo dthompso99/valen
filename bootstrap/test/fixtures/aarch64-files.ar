@@ -1,0 +1,28 @@
+library System {{
+    native openRead(path:string) -> File?
+    native openWrite(path:string) -> File?
+    native read(file:File, count:i64) -> string?
+    native writeFile(file:File, input:string) -> i64
+    native close(own file:File) -> i64
+    native lastError() -> i64
+
+    File {{ member descriptor:i64 }}
+}}
+
+entry {{
+    __() -> i64 {
+        local path = "/tmp/valen-aarch64-files"
+        local output = System.openWrite(path)
+        if output == null { return 1 }
+        if System.writeFile(output!, "file io") != 7 { return 2 }
+        if System.close(output!) != 0 { return 3 }
+        local input = System.openRead(path)
+        if input == null { return 4 }
+        local contents = System.read(input!, 64)
+        if contents == null || contents! != "file io" { return 5 }
+        if System.close(input!) != 0 { return 6 }
+        local missing = System.openRead("/tmp/valen-aarch64-files-missing")
+        if missing != null || System.lastError() == 0 { return 7 }
+        return 0
+    }
+}}

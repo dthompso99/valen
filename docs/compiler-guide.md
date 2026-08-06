@@ -51,7 +51,9 @@ source -> tokens -> AST -> module graph -> semantic symbols
   code-point length/index operations, the same initial grapheme segmentation rules as x86-64, decimal
   formatting for every signed and unsigned integer width, and capacity-growing string builders used by
   interpolation. It is the cross-compilation foothold for the full runtime and self-hosted backend, not yet
-  a general AArch64 language target. Weak object fields and weak array elements/slices observe the shared
+  a general AArch64 language target. Its first freestanding native facilities cover console/error output,
+  signed-integer printing, process exit, garbage collection, and foundational file I/O with explicit error state.
+  Weak object fields and weak array elements/slices observe the shared
   object liveness word and become null after explicit destruction. Managed object, array, and dynamic-string
   descriptors carry the common hidden 48-byte GC allocation prefix, and functions publish precise managed
   stack slots through linked root records. Cycle-safe marking follows generated object and managed-array trace

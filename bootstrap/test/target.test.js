@@ -434,3 +434,30 @@ test('bootstrap compiler collects AArch64 object graphs and clears weak referenc
     assert.match(result.assembly, /valen_gc_array_finalize:[\s\S]*mov x8, #215/);
     assert.match(result.assembly, /valen_string_finalize:[\s\S]*mov x8, #215/);
 });
+
+test('bootstrap compiler emits freestanding AArch64 console and process facilities', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-system-io-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-system-io.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'system-io'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'system-io')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /valen_System_write:[\s\S]*mov x0, #1[\s\S]*mov x8, #64/);
+    assert.match(result.assembly, /valen_System_writeError:[\s\S]*mov x0, #2[\s\S]*mov x8, #64/);
+    assert.match(result.assembly, /valen_System_print:[\s\S]*udiv x12, x9, x11/);
+    assert.match(result.assembly, /valen_System_exit:[\s\S]*mov x8, #93/);
+});
+
+test('bootstrap compiler emits foundational AArch64 file operations and error state', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-files-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-files.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'files'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'files')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /valen_System_openRead:[\s\S]*mov x8, #56/);
+    assert.match(result.assembly, /valen_System_read:[\s\S]*mov x8, #63/);
+    assert.match(result.assembly, /valen_System_writeFile:[\s\S]*mov x8, #64/);
+    assert.match(result.assembly, /valen_System_close:[\s\S]*mov x8, #57/);
+    assert.match(result.assembly, /valen_System_lastError:[\s\S]*valen_filesystem_error/);
+});

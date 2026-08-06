@@ -1,0 +1,15 @@
+library System {{
+    native print(input:i64) -> void
+    native write(input:string) -> void
+    native writeError(input:string) -> void
+    native exit(code:i32) -> void
+}}
+
+entry {{
+    __() -> i64 {
+        System.write("out\n")
+        System.writeError("err\n")
+        System.print(-9223372036854775808)
+        return 0
+    }
+}}
