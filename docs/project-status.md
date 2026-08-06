@@ -51,8 +51,9 @@
   managed elements and weak-element slices remain WIP with structural hooks and tracing GC. AArch64 strings
   support UTF-8 literals, byte length and indexing, equality, concatenation, copied byte slices, and copied
   conversion to and from byte arrays. Unicode code-point length/index operations decode validated UTF-8
-  and replace malformed bytes. Grapheme operations, builders/interpolation, native facilities, and
-  self-hosting remain WIP on AArch64.
+  and replace malformed bytes. Grapheme length/index operations share the x86-64 rules for combining
+  marks, variation selectors, emoji modifiers, ZWJ sequences, regional-indicator pairs, and CRLF.
+  Builders/interpolation, native facilities, and self-hosting remain WIP on AArch64.
 - x86-64 Linux executables own their `_start` adapter, link without an implicit C runtime, and
   reject target-native symbols that the backend cannot provide.
 - **WIP:** general freestanding capability manifests, runtime hooks, and non-Linux code generation

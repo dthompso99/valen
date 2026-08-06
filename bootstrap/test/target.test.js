@@ -333,3 +333,20 @@ test('bootstrap compiler decodes UTF-8 code points on AArch64', t => {
     assert.match(result.assembly, /\.Lutf8_decode_four:/);
     assert.match(bounds.assembly, /\.Lcodepoint_at_error:[\s\S]*b \.Larray_bounds_error/);
 });
+
+test('bootstrap compiler segments Unicode graphemes on AArch64', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-graphemes-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/unicode-strings.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'graphemes'), {target: 'aarch64-linux'});
+    const boundsSource = fileURLToPath(new URL('fixtures/unicode-index-bounds.ar', import.meta.url));
+    const bounds = new Compiler().compile(boundsSource, path.join(directory, 'grapheme-bounds'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'graphemes')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /bl valen_string_grapheme_length/);
+    assert.match(result.assembly, /bl valen_string_grapheme_at/);
+    assert.match(result.assembly, /valen_grapheme_next:/);
+    assert.match(result.assembly, /\.Lgrapheme_check_ri:/);
+    assert.match(result.assembly, /\.Lgrapheme_extend_modifier:/);
+    assert.match(bounds.assembly, /\.Lgrapheme_at_error:[\s\S]*b \.Larray_bounds_error/);
+});
