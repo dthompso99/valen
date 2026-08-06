@@ -10,8 +10,6 @@ on:
       - 'lib/**'
       - 'examples/**'
       - 'docker/**'
-      - 'benchmarks/**'
-      - 'scripts/benchmark.mjs'
       - '.gitea/workflows/bootstrap.yaml'
   pull_request:
     paths:
@@ -20,8 +18,6 @@ on:
       - 'lib/**'
       - 'examples/**'
       - 'docker/**'
-      - 'benchmarks/**'
-      - 'scripts/benchmark.mjs'
       - '.gitea/workflows/bootstrap.yaml'
   workflow_dispatch:
 
@@ -43,22 +39,6 @@ jobs:
       - name: Run bootstrap compiler tests
         working-directory: bootstrap
         run: npm test
-
-      - name: Benchmark compiler and generated code
-        run: node scripts/benchmark.mjs --generation2 --json benchmark-results.json --markdown benchmark-results.md --check-budgets
-
-      - name: Publish benchmark summary
-        if: always()
-        run: cat benchmark-results.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload benchmark results
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: valen-benchmark-results
-          path: |
-            benchmark-results.json
-            benchmark-results.md
 
       - name: Build and test bootstrap generations
         run: docker build --pull --target stage3 -t valen:test -f ./docker/Dockerfile.bootstrap .

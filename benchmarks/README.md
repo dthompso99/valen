@@ -1,46 +1,59 @@
-# Valen benchmarks
+# Valen comparative benchmarks
 
-Run the standard benchmark from the repository root:
+This directory contains manually invoked, cross-language benchmarks. They do not run in ordinary CI:
+performance results depend on hardware, host load, compiler versions, and thermal state, while some
+language toolchains are intentionally optional.
 
-```sh
-node scripts/benchmark.mjs
-```
-
-Produce CI artifacts and enforce resource ceilings:
+Run the complete locally available suite from the repository root:
 
 ```sh
-node scripts/benchmark.mjs \
-  --json benchmark-results.json \
-  --markdown benchmark-results.md \
-  --check-budgets
+node benchmarks/run.mjs
 ```
 
-The standard run measures:
-
-- generation-0/JavaScript compilation of the native generation-1 compiler
-- generation-1 compilation of a fixed Valen workload
-- relocatable object and executable sizes
-- median runtime and peak RSS of the Valen workload
-- the same workload compiled as C with `-O0` and `-O2`
-
-The C programs are comparison anchors, not claims that Valen should match C at its current maturity. `-O0` helps expose backend/code-generation overhead; `-O2` shows the scale of mature optimization work still available.
-
-Timing values are reported but do not fail CI because shared-runner speed varies. `budgets.json` contains deliberately generous peak-memory ceilings that catch runaway compiler behavior and OOM regressions without treating small machine differences as failures.
-
-## Generation 2
-
-Generation-2 compiler construction remains opt-in for local benchmark runs:
+Select languages, change the measured repetition count, or preserve a machine-readable result:
 
 ```sh
-node scripts/benchmark.mjs --generation2 --json generation2-results.json
+node benchmarks/run.mjs --languages valen,c,cpp,rust,go
+node benchmarks/run.mjs --repetitions 10
+node benchmarks/run.mjs --output benchmarks/results/local.json
 ```
 
-This records generation 1 building generation 2, then uses generation 2 to compile and execute the workload. CI enforces the supported 3.25 GiB peak-RSS ceiling; ordinary local runs omit it for speed.
+The runner discovers toolchains and reports unavailable languages as skipped. It uses one unmeasured
+warmup followed by the requested measured repetitions. Every implementation must produce the same
+deterministic output before its timing is accepted.
 
-## Benchmark rules
+## Current workload
 
-- Workloads must be deterministic and validate identical output across implementations.
-- A workload change is a benchmark-definition change and should be reviewed explicitly.
-- Results from different hardware are not directly comparable.
-- Performance claims should include commit, platform, CPU, and Node version from the JSON metadata.
-- Optimization tickets should record before/after results from the same machine.
+`integer-loop` performs one billion signed-integer iterations with multiplication, division, remainder
+reconstruction, accumulation, and a deterministic checksum. Its duration is long enough for process RSS
+sampling and reduces process-launch noise. It primarily measures instruction selection, register allocation,
+integer division, loop branches, and JIT warmup where applicable; it does not represent whole-application
+performance.
+
+The report records:
+
+- toolchain versions and exact host metadata
+- compilation time and peak compiler RSS
+- median, minimum, and maximum execution time
+- peak runtime RSS
+- primary artifact size
+- ELF dynamic dependencies
+- generation-0 preparation cost for the native Valen compiler
+
+Valen's self-contained executable size should not be compared naively with a dynamically linked executable.
+The dependency column makes that distinction visible. Java and Node artifact sizes similarly exclude their
+required runtimes.
+
+## Comparison policy
+
+- Treat C as the low-level native baseline, not an expected immediate tie.
+- Compare C++, Rust, Go, Java, and Node as distinct runtime and productivity models.
+- Keep equivalent algorithms recognizable across implementations.
+- Use idiomatic language facilities where removing them would make the comparison artificial.
+- Never compare results collected on different machines as if they were a speedup or regression.
+- Record before and after results on the same quiet host for optimization work.
+- Do not collapse unlike metrics into a single performance score.
+- Review workload changes as benchmark-definition changes.
+
+Expansion into object dispatch, allocation and garbage collection, strings, collections, file processing,
+startup, and sustained HTTP service behavior is tracked in [Gitea #94](https://gitea.hallrd.click/dthompson/valen/issues/94).

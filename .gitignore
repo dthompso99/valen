@@ -10,3 +10,4 @@
 /server
 /server.o
 /build
+/benchmarks/results/*.json

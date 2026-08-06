@@ -4,7 +4,7 @@
 
 int main(void) {
     volatile int64_t checksum = 0;
-    for (int64_t index = 0; index < 10000000; index++) {
+    for (int64_t index = 0; index < INT64_C(1000000000); index++) {
         int64_t value = index * 17;
         checksum += value - ((value / 251) * 251);
     }
