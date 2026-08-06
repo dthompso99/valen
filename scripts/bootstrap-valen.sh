@@ -10,7 +10,7 @@ trap cleanup EXIT
 echo "Bootstrapping Valen compiler..."
 node bootstrap/compiler.js src/valen.ar valen0
 echo "Compiling Generation 1 valen compiler..."
-./valen0 src/valen.ar -o valen1
+./valen0 src/valen.ar -o valen1 -O0
 echo "Compiling final valen compiler..."
-./valen1 src/valen.ar -o valen
+./valen1 src/valen.ar -o valen -O1
 echo "Cleaning up temporary files..."
