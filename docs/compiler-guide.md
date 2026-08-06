@@ -45,8 +45,10 @@ source -> tokens -> AST -> module graph -> semantic symbols
   capacity, width-correct loads and stores, checked indexing with runtime status 70, append, insert, remove,
   reserve, and shrink-to-fit. Buffer growth uses allocate-copy-update until tracing reclamation is available.
   Slices copy value elements into independent buffers and preserve aliases for explicit `ref` elements;
-  deep-copy slices of owned managed elements await structural copy hooks. It is the cross-compilation
-  foothold for the full runtime and self-hosted backend, not yet a general AArch64 language target.
+  deep-copy slices of owned managed elements await structural copy hooks. UTF-8 string literals use the
+  common 24-byte data/length/capacity layout; the initial runtime provides byte length/indexing, equality,
+  concatenation, and copied byte slicing. It is the cross-compilation foothold for the full runtime and
+  self-hosted backend, not yet a general AArch64 language target.
 
 Native executable builds can reuse validated backend artifacts by setting
 `VALEN_CACHE_PATH` to an existing writable directory. Cache keys include every loaded module's

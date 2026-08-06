@@ -64,8 +64,17 @@ export class AArch64Assembler {
             }
             if (line.startsWith('.quad ')) {
                 if (section !== '.data') throw new Error('AArch64 .quad is only supported in .data');
-                dataEntries.push({offset: dataOffset, value: line.slice(6).trim()});
+                dataEntries.push({offset: dataOffset, size: 8, value: line.slice(6).trim()});
                 dataOffset += 8;
+                continue;
+            }
+            if (line.startsWith('.byte ')) {
+                if (section !== '.data') throw new Error('AArch64 .byte is only supported in .data');
+                const values = line.slice(6).split(',').map(value => value.trim());
+                if (!values.length || values.some(value => !/^[0-9]+$/.test(value) || Number(value) > 255)) {
+                    throw new Error(`Invalid AArch64 byte data '${line}'`);
+                }
+                for (const value of values) dataEntries.push({offset: dataOffset++, size: 1, value});
                 continue;
             }
             if (section !== '.text') throw new Error(`Unsupported AArch64 data directive '${line}'`);
@@ -85,7 +94,8 @@ export class AArch64Assembler {
         }
         object.addText(text, 4);
         for (const entry of dataEntries) {
-            if (/^-?[0-9]+$/.test(entry.value)) data.writeBigUInt64LE(BigInt.asUintN(64, BigInt(entry.value)), entry.offset);
+            if (entry.size === 1) data.writeUInt8(Number(entry.value), entry.offset);
+            else if (/^-?[0-9]+$/.test(entry.value)) data.writeBigUInt64LE(BigInt.asUintN(64, BigInt(entry.value)), entry.offset);
             else object.addRelocation('.data', entry.offset, entry.value, 257, 0);
         }
         if (data.length) object.addData(data, dataAlignment);

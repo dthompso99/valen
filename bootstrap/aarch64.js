@@ -28,15 +28,19 @@ export class AArch64Backend {
         this.symbols = new Map(program.functions.map(fn => [fn.name, this.mangle(fn.name)]));
         this.emittedTypes = moduleId === null ? program.types : program.types.filter(type => type.moduleId === moduleId);
         const functions = moduleId === null ? program.functions : program.functions.filter(fn => fn.moduleId === moduleId);
+        this.stringLiterals = new Map();
+        for (const instruction of functions.flatMap(fn => fn.blocks.flatMap(block => block.instructions))) {
+            if (instruction.op === 'string_constant') this.internString(instruction.value);
+        }
         const lines = ['.text'];
         for (const fn of functions) lines.push(...this.generateFunction(fn));
-        if (includeRuntime) lines.push(...this.generateStart(), ...this.allocationRuntime(), ...this.arrayRuntime());
+        if (includeRuntime) lines.push(...this.generateStart(), ...this.allocationRuntime(), ...this.arrayRuntime(), ...this.stringRuntime());
         lines.push('.Larray_bounds_error:', '    mov x0, #70', '    mov x8, #93', '    svc #0',
             '.Ldivision_by_zero_error:', '    mov x0, #73', '    mov x8, #93', '    svc #0',
             '.Loptional_unwrap_error:', '    mov x0, #71', '    mov x8, #93', '    svc #0',
             '.Lcontract_dispatch_error:', '    mov x0, #75', '    mov x8, #93', '    svc #0',
             '.Lfloat_conversion_error:', '    mov x0, #76', '    mov x8, #93', '    svc #0', '');
-        lines.push(...this.typeData(this.emittedTypes));
+        lines.push(...this.typeData(this.emittedTypes), ...this.stringData());
         lines.push('.section .note.GNU-stack,"",@progbits');
         return `${lines.join('\n')}\n`;
     }
@@ -88,6 +92,9 @@ export class AArch64Backend {
                     `    str x9, ${this.temp(instruction.result)}`];
             case 'float_constant':
                 return [...this.floatConstant('x9', instruction.value, instruction.type),
+                    `    str x9, ${this.temp(instruction.result)}`];
+            case 'string_constant':
+                return [...this.address('x9', this.internString(instruction.value).descriptor),
                     `    str x9, ${this.temp(instruction.result)}`];
             case 'declare_local':
                 return instruction.value
@@ -188,6 +195,25 @@ export class AArch64Backend {
                 return [...this.load(instruction.array, 'x0'), ...this.load(instruction.start, 'x1'),
                     ...this.load(instruction.length, 'x2'), ...this.constant('x3', this.sizeOf(instruction.elementType)),
                     '    bl valen_array_slice', `    str x0, ${this.temp(instruction.result)}`];
+            case 'string_length':
+                return [...this.load(instruction.string, 'x9'), '    ldr x9, [x9, #8]',
+                    `    str x9, ${this.temp(instruction.result)}`];
+            case 'string_load':
+                return [...this.load(instruction.array, 'x0'), ...this.load(instruction.index, 'x1'),
+                    '    bl valen_string_address', '    ldrb w9, [x0, #0]', `    str x9, ${this.temp(instruction.result)}`];
+            case 'string_equal': {
+                const lines = [...this.load(instruction.left, 'x0'), ...this.load(instruction.right, 'x1'), '    bl valen_string_equal'];
+                if (instruction.negate) lines.push('    mov x9, #1', '    eor x0, x0, x9');
+                lines.push(`    str x0, ${this.temp(instruction.result)}`);
+                return lines;
+            }
+            case 'string_concat':
+                return [...this.load(instruction.left, 'x0'), ...this.load(instruction.right, 'x1'),
+                    '    bl valen_string_concat', `    str x0, ${this.temp(instruction.result)}`];
+            case 'string_slice':
+                return [...this.load(instruction.string, 'x0'), ...this.load(instruction.start, 'x1'),
+                    ...this.load(instruction.length, 'x2'), '    bl valen_string_slice',
+                    `    str x0, ${this.temp(instruction.result)}`];
             case 'call':
                 return this.call(instruction, false);
             case 'virtual_call':
@@ -408,6 +434,52 @@ export class AArch64Backend {
             '    add sp, sp, #64', '    ret', '.size valen_array_slice, .-valen_array_slice', ''];
     }
 
+    stringRuntime() {
+        return ['.globl valen_string_new', '.type valen_string_new, %function', 'valen_string_new:',
+            '    cmp x0, #0', '    b.lt .Larray_bounds_error', '    sub sp, sp, #32', '    str x30, [sp, #24]',
+            '    str x0, [sp, #0]', '    mov x0, #24', '    bl valen_alloc', '    str x0, [sp, #8]',
+            '    ldr x0, [sp, #0]', '    cbnz x0, .Lstring_new_allocate', '    mov x0, #1', '.Lstring_new_allocate:',
+            '    str x0, [sp, #16]', '    bl valen_alloc', '    mov x1, x0', '    ldr x0, [sp, #8]',
+            '    str x1, [x0, #0]', '    ldr x1, [sp, #0]', '    str x1, [x0, #8]', '    ldr x1, [sp, #16]',
+            '    str x1, [x0, #16]', '    ldr x30, [sp, #24]', '    add sp, sp, #32', '    ret',
+            '.size valen_string_new, .-valen_string_new', '', '.globl valen_string_address',
+            '.type valen_string_address, %function', 'valen_string_address:', '    cbz x0, .Larray_bounds_error',
+            '    cmp x1, #0', '    b.lt .Larray_bounds_error', '    ldr x2, [x0, #8]', '    cmp x1, x2',
+            '    b.cs .Larray_bounds_error', '    ldr x0, [x0, #0]', '    add x0, x0, x1', '    ret',
+            '.size valen_string_address, .-valen_string_address', '', '.globl valen_string_equal',
+            '.type valen_string_equal, %function', 'valen_string_equal:', '    cmp x0, x1',
+            '    b.eq .Lstring_equal_yes', '    ldr x2, [x0, #8]', '    ldr x3, [x1, #8]', '    cmp x2, x3',
+            '    b.ne .Lstring_equal_no', '    ldr x0, [x0, #0]', '    ldr x1, [x1, #0]',
+            '.Lstring_equal_loop:', '    cbz x2, .Lstring_equal_yes', '    ldrb w3, [x0, #0]', '    ldrb w4, [x1, #0]',
+            '    cmp x3, x4', '    b.ne .Lstring_equal_no', '    add x0, x0, #1', '    add x1, x1, #1',
+            '    sub x2, x2, #1', '    b .Lstring_equal_loop', '.Lstring_equal_yes:', '    mov x0, #1', '    ret',
+            '.Lstring_equal_no:', '    mov x0, #0', '    ret', '.size valen_string_equal, .-valen_string_equal', '',
+            '.globl valen_string_concat', '.type valen_string_concat, %function', 'valen_string_concat:',
+            '    ldr x2, [x0, #8]', '    ldr x3, [x1, #8]', '    add x4, x2, x3', '    cmp x4, x2',
+            '    b.cc .Larray_bounds_error', '    sub sp, sp, #64', '    str x30, [sp, #56]', '    str x0, [sp, #0]',
+            '    str x1, [sp, #8]', '    str x2, [sp, #16]', '    str x3, [sp, #24]', '    mov x0, x4',
+            '    bl valen_string_new', '    str x0, [sp, #32]', '    ldr x5, [x0, #0]', '    ldr x0, [sp, #0]',
+            '    ldr x4, [x0, #0]', '    ldr x2, [sp, #16]', '.Lstring_concat_left:',
+            '    cbz x2, .Lstring_concat_right_start', '    ldrb w6, [x4, #0]', '    strb w6, [x5, #0]',
+            '    add x4, x4, #1', '    add x5, x5, #1', '    sub x2, x2, #1', '    b .Lstring_concat_left',
+            '.Lstring_concat_right_start:', '    ldr x0, [sp, #8]', '    ldr x4, [x0, #0]', '    ldr x2, [sp, #24]',
+            '.Lstring_concat_right:', '    cbz x2, .Lstring_concat_done', '    ldrb w6, [x4, #0]',
+            '    strb w6, [x5, #0]', '    add x4, x4, #1', '    add x5, x5, #1', '    sub x2, x2, #1',
+            '    b .Lstring_concat_right', '.Lstring_concat_done:', '    ldr x0, [sp, #32]', '    ldr x30, [sp, #56]',
+            '    add sp, sp, #64', '    ret', '.size valen_string_concat, .-valen_string_concat', '',
+            '.globl valen_string_slice', '.type valen_string_slice, %function', 'valen_string_slice:',
+            '    cmp x1, #0', '    b.lt .Larray_bounds_error', '    cmp x2, #0', '    b.lt .Larray_bounds_error',
+            '    add x3, x1, x2', '    cmp x3, x1', '    b.cc .Larray_bounds_error', '    ldr x4, [x0, #8]',
+            '    cmp x3, x4', '    b.hi .Larray_bounds_error', '    sub sp, sp, #48', '    str x30, [sp, #40]',
+            '    str x0, [sp, #0]', '    str x1, [sp, #8]', '    str x2, [sp, #16]', '    mov x0, x2',
+            '    bl valen_string_new', '    str x0, [sp, #24]', '    ldr x3, [x0, #0]', '    ldr x0, [sp, #0]',
+            '    ldr x4, [x0, #0]', '    ldr x1, [sp, #8]', '    add x4, x4, x1', '    ldr x2, [sp, #16]',
+            '.Lstring_slice_copy:', '    cbz x2, .Lstring_slice_done', '    ldrb w5, [x4, #0]', '    strb w5, [x3, #0]',
+            '    add x4, x4, #1', '    add x3, x3, #1', '    sub x2, x2, #1', '    b .Lstring_slice_copy',
+            '.Lstring_slice_done:', '    ldr x0, [sp, #24]', '    ldr x30, [sp, #40]', '    add sp, sp, #48',
+            '    ret', '.size valen_string_slice, .-valen_string_slice', ''];
+    }
+
     call(instruction, dynamic) {
         const lines = this.loadCallArguments(instruction.arguments);
         if (dynamic) {
@@ -560,6 +632,25 @@ export class AArch64Backend {
                 for (const method of contract.methods) lines.push(`    .quad ${this.requireFunction(method.target)}`);
             }
         }
+        lines.push('.text');
+        return lines;
+    }
+
+    internString(value) {
+        if (this.stringLiterals.has(value)) return this.stringLiterals.get(value);
+        const index = this.stringLiterals.size;
+        const literal = {descriptor: `.Lvalen_string_${index}`, data: `.Lvalen_string_${index}_data`,
+            bytes: [...new TextEncoder().encode(value)]};
+        this.stringLiterals.set(value, literal);
+        return literal;
+    }
+
+    stringData() {
+        if (this.stringLiterals.size === 0) return [];
+        const lines = ['.section .data'];
+        for (const literal of this.stringLiterals.values()) lines.push('.align 8', `${literal.descriptor}:`,
+            `    .quad ${literal.data}`, `    .quad ${literal.bytes.length}`, '    .quad 0', `${literal.data}:`,
+            `    .byte ${literal.bytes.length ? literal.bytes.join(', ') : 0}`);
         lines.push('.text');
         return lines;
     }

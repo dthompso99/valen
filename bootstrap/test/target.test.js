@@ -68,6 +68,20 @@ caller:
         [{symbol: 'callee', type: 283}]);
 });
 
+test('integrated AArch64 encoder emits literal byte data', () => {
+    const object = new AArch64Assembler().assembleObject(`.section .data
+.align 8
+descriptor:
+    .quad bytes
+    .quad 3
+bytes:
+    .byte 104, 195, 169
+`);
+    const data = Buffer.from(object.sections.find(section => section.name === '.data').data);
+    assert.equal(data.subarray(16).toString('hex'), '68c3a9');
+    assert.ok(object.relocations.some(relocation => relocation.section === '.data' && relocation.type === 257));
+});
+
 test('integrated AArch64 encoder emits scalar floating-point instructions', () => {
     const object = new AArch64Assembler().assembleObject(`.text
 sample:
@@ -273,4 +287,20 @@ test('bootstrap compiler copies value and reference AArch64 array slices', t => 
     assert.match(result.assembly, /bl valen_array_slice/);
     assert.match(result.assembly, /\.Larray_slice_copy:/);
     assert.match(bounds.assembly, /b\.hi \.Larray_bounds_error/);
+});
+
+test('bootstrap compiler emits foundational UTF-8 AArch64 string operations', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-strings-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-strings.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'strings'), {target: 'aarch64-linux'});
+    const boundsSource = fileURLToPath(new URL('fixtures/aarch64-string-bounds.ar', import.meta.url));
+    const bounds = new Compiler().compile(boundsSource, path.join(directory, 'string-bounds'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'strings')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /\.byte 104, 195, 169, 240, 159, 153, 130/);
+    assert.match(result.assembly, /bl valen_string_equal/);
+    assert.match(result.assembly, /bl valen_string_concat/);
+    assert.match(result.assembly, /bl valen_string_slice/);
+    assert.match(bounds.assembly, /b\.cs \.Larray_bounds_error/);
 });
