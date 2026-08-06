@@ -39,7 +39,8 @@
   programs with full-width constants, conversions, checked division, loops, direct calls, and scalar
   floating-point arithmetic and comparisons into internally encoded, internally linked static ELF
   executables. Float-to-integer conversions reject NaN and out-of-range values with runtime status 76.
-  Object layouts, GC, strings, native facilities, and self-hosting remain x86-64-only.
+  Direct calls support AAPCS64 integer, floating, and overflow stack arguments. Object layouts, GC,
+  strings, native facilities, and self-hosting remain x86-64-only.
 - x86-64 Linux executables own their `_start` adapter, link without an implicit C runtime, and
   reject target-native symbols that the backend cannot provide.
 - **WIP:** general freestanding capability manifests, runtime hooks, and non-Linux code generation

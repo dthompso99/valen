@@ -136,3 +136,17 @@ test('bootstrap compiler cross-compiles scalar AArch64 floating point', t => {
         assert.match(failing.assembly, /b\.ge \.Lfloat_conversion_error|b\.vs \.Lfloat_conversion_error/);
     }
 });
+
+test('bootstrap compiler uses AAPCS64 stack argument slots after register exhaustion', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-args-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-stack-arguments.ar', import.meta.url));
+    const output = path.join(directory, 'stack-arguments');
+    const result = new Compiler().compile(source, output, {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(output).readUInt16LE(18), 183);
+    assert.match(result.assembly, /ldr x9, \[x29, #16\]/);
+    assert.match(result.assembly, /ldr x9, \[x29, #48\]/);
+    assert.match(result.assembly, /str x9, \[sp, #0\]/);
+    assert.match(result.assembly, /str x9, \[sp, #32\]/);
+});

@@ -1,0 +1,12 @@
+entry {{
+    overflow(a:i64, b:i64, c:i64, d:i64, e:i64, f:i64, g:i64, h:i64, i:i64, j:i64, fa:f64, fb:f64, fc:f64, fd:f64, fe:f64, ff:f64, fg:f64, fh:f64, fi:f64, fj:f64) -> f64 {
+        local integerTail = h + i + j
+        return (integerTail as f64) + fi + fj
+    }
+
+    __() -> i32 {
+        local result = self.overflow(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5)
+        if result != 45.0 { return 1 }
+        return 0
+    }
+}}

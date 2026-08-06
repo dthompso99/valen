@@ -25,4 +25,5 @@ register class. Overflow arguments use eight-byte stack slots in source order.
 `f32` and `f64` results are returned in `xmm0`. The same convention applies at
 the C FFI boundary. The generation-0 AArch64 backend similarly uses the independent
 AAPCS64 `s0`/`d0` through `s7`/`d7` floating register bank and returns floating
-results in `s0` or `d0`; stack-passed AArch64 arguments and its C FFI remain **WIP**.
+results in `s0` or `d0`. Internal calls place register-overflow arguments in aligned
+eight-byte stack slots in source order; the AArch64 C FFI remains **WIP**.

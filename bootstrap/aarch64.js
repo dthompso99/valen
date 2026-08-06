@@ -27,23 +27,30 @@ export class AArch64Backend {
     generateFunction(fn) {
         this.fn = fn;
         this.slots = new Map();
-        let slotCount = 0;
-        const reserve = key => { if (!this.slots.has(key)) this.slots.set(key, slotCount++ * 8); };
+        this.outgoingSize = this.outgoingStackSize(fn);
+        let slotOffset = this.outgoingSize;
+        const reserve = key => {
+            if (!this.slots.has(key)) {
+                this.slots.set(key, slotOffset);
+                slotOffset += 8;
+            }
+        };
         for (const parameter of fn.parameters) reserve(`name:${parameter.name}`);
         for (const instruction of fn.blocks.flatMap(block => block.instructions)) {
             if (instruction.result) reserve(`temp:${instruction.result}`);
             if (instruction.op === 'declare_local' || instruction.op === 'store_local') reserve(`name:${instruction.name}`);
         }
-        const frameSize = this.align(slotCount * 8, 16);
-        if (frameSize > 4080) throw new Error(`aarch64-linux bootstrap backend function '${fn.displayName}' needs an unsupported large stack frame`);
+        const frameSize = this.align(slotOffset, 16);
+        if (frameSize > 4064) throw new Error(`aarch64-linux bootstrap backend function '${fn.displayName}' needs an unsupported large stack frame`);
         const total = frameSize + 16;
         const symbol = this.symbols.get(fn.name);
         const end = `${symbol}__return`;
         const lines = [`.globl ${symbol}`, `.type ${symbol}, %function`, `${symbol}:`, `    sub sp, sp, #${total}`,
             `    str x29, [sp, #${frameSize}]`, `    str x30, [sp, #${frameSize + 8}]`, `    add x29, sp, #${frameSize}`];
         for (const location of this.argumentLocations(fn.parameters)) {
-            if (location.kind === 'stack') throw new Error('aarch64-linux bootstrap backend does not yet support stack-passed arguments');
-            if (location.kind === 'float') lines.push(
+            if (location.kind === 'stack') lines.push(`    ldr x9, [x29, #${16 + location.stackIndex * 8}]`,
+                `    str x9, ${this.named(location.value.name)}`);
+            else if (location.kind === 'float') lines.push(
                 `    fmov ${location.value.type === 'f32' ? 'w9' : 'x9'}, ${location.value.type === 'f32' ? 's' : 'd'}${location.register}`,
                 `    str x9, ${this.named(location.value.name)}`);
             else lines.push(`    str ${location.register}, ${this.named(location.value.name)}`);
@@ -91,8 +98,9 @@ export class AArch64Backend {
             case 'virtual_call': {
                 const lines = [];
                 for (const location of this.argumentLocations(instruction.arguments)) {
-                    if (location.kind === 'stack') throw new Error('aarch64-linux bootstrap backend does not yet support stack-passed arguments');
-                    if (location.kind === 'float') lines.push(...this.load(location.value, 'x9'),
+                    if (location.kind === 'stack') lines.push(...this.load(location.value, 'x9'),
+                        `    str x9, [sp, #${location.stackIndex * 8}]`);
+                    else if (location.kind === 'float') lines.push(...this.load(location.value, 'x9'),
                         `    fmov ${location.value.type === 'f32' ? 's' : 'd'}${location.register}, ${location.value.type === 'f32' ? 'w9' : 'x9'}`);
                     else lines.push(...this.load(location.value, location.register));
                 }
@@ -231,7 +239,7 @@ export class AArch64Backend {
     }
 
     argumentLocations(values) {
-        let general = 0, floating = 0;
+        let general = 0, floating = 0, stack = 0;
         return values.map(value => {
             if (this.isFloat(value.type) && floating < floatArgumentRegisters.length) {
                 return {kind: 'float', register: floatArgumentRegisters[floating++], value};
@@ -239,8 +247,17 @@ export class AArch64Backend {
             if (!this.isFloat(value.type) && general < argumentRegisters.length) {
                 return {kind: 'general', register: argumentRegisters[general++], value};
             }
-            return {kind: 'stack', value};
+            return {kind: 'stack', stackIndex: stack++, value};
         });
+    }
+
+    outgoingStackSize(fn) {
+        let slots = 0;
+        for (const instruction of fn.blocks.flatMap(block => block.instructions)) {
+            if (instruction.op !== 'call' && instruction.op !== 'virtual_call') continue;
+            slots = Math.max(slots, this.argumentLocations(instruction.arguments).filter(location => location.kind === 'stack').length);
+        }
+        return this.align(slots * 8, 16);
     }
 
     normalize(register, type) {
