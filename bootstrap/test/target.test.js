@@ -166,3 +166,21 @@ test('bootstrap compiler lays out and constructs basic AArch64 objects', t => {
     assert.match(result.assembly, /str x10, \[x9, #24\]/);
     assert.match(result.assembly, /mov x0, #72/);
 });
+
+test('bootstrap compiler emits AArch64 type descriptors and virtual dispatch', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-dispatch-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/inheritance.ar', import.meta.url));
+    const output = path.join(directory, 'inheritance');
+    const result = new Compiler().compile(source, output, {target: 'aarch64-linux'});
+    const object = ElfObject.parse(fs.readFileSync(result.objectPath));
+
+    assert.ok(object.sections.some(section => section.name === '.data'));
+    assert.ok(object.relocations.some(relocation => relocation.section === '.data' && relocation.type === 257));
+    assert.ok(object.relocations.some(relocation => relocation.section === '.text' && relocation.type === 275));
+    assert.ok(object.relocations.some(relocation => relocation.section === '.text' && relocation.type === 277));
+    assert.match(result.assembly, /ldr x9, \[x9, #40\]/);
+    assert.match(result.assembly, /ldr x9, \[x9, #48\]/);
+    assert.match(result.assembly, /ldr x9, \[x9, #56\]/);
+    assert.match(result.assembly, /blr x9/);
+});

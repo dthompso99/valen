@@ -37,42 +37,77 @@ export class AArch64Assembler {
         const globals = new Set();
         const externals = new Set();
         const instructions = [];
-        let offset = 0;
+        const dataEntries = [];
+        let section = '.text', textOffset = 0, dataOffset = 0, dataAlignment = 1;
         for (const raw of source.split('\n')) {
             const line = raw.trim();
-            if (!line || line.startsWith('.type ') || line.startsWith('.size ') || line.startsWith('.section ') || line === '.text') continue;
+            if (!line || line.startsWith('.type ') || line.startsWith('.size ')) continue;
+            if (line === '.text') { section = '.text'; continue; }
+            if (line === '.data' || line === '.section .data') { section = '.data'; continue; }
+            if (line.startsWith('.section ')) { section = null; continue; }
             if (line.startsWith('.globl ')) { globals.add(line.slice(7).trim()); continue; }
             if (line.startsWith('.extern ')) { externals.add(line.slice(8).trim()); continue; }
+            if (line.startsWith('.align ')) {
+                if (section !== '.data') continue;
+                const alignment = Number(line.slice(7).trim());
+                if (!Number.isInteger(alignment) || alignment < 1) throw new Error(`Invalid AArch64 data alignment '${line}'`);
+                dataOffset = Math.ceil(dataOffset / alignment) * alignment;
+                dataAlignment = Math.max(dataAlignment, alignment);
+                continue;
+            }
             if (line.endsWith(':')) {
                 const name = line.slice(0, -1);
                 if (labels.has(name)) throw new Error(`Duplicate AArch64 label '${name}'`);
-                labels.set(name, offset);
+                if (!section) throw new Error(`AArch64 label '${name}' is in an unsupported section`);
+                labels.set(name, {section, value: section === '.text' ? textOffset : dataOffset});
                 continue;
             }
-            instructions.push({line, offset});
-            offset += 4;
+            if (line.startsWith('.quad ')) {
+                if (section !== '.data') throw new Error('AArch64 .quad is only supported in .data');
+                dataEntries.push({offset: dataOffset, value: line.slice(6).trim()});
+                dataOffset += 8;
+                continue;
+            }
+            if (section !== '.text') throw new Error(`Unsupported AArch64 data directive '${line}'`);
+            instructions.push({line, offset: textOffset});
+            textOffset += 4;
         }
 
-        const text = Buffer.alloc(offset);
+        const text = Buffer.alloc(textOffset);
+        const data = Buffer.alloc(dataOffset);
         const object = new ElfObject({machine: 183});
+        const textLabels = new Map([...labels].filter(([, label]) => label.section === '.text').map(([name, label]) => [name, label.value]));
         for (const instruction of instructions) {
-            const encoded = this.encode(instruction.line, instruction.offset, labels);
+            const encoded = this.encode(instruction.line, instruction.offset, textLabels);
             text.writeUInt32LE(encoded.word >>> 0, instruction.offset);
-            if (encoded.relocation) object.addRelocation('.text', instruction.offset, encoded.relocation, 283, 0);
+            if (encoded.relocation) object.addRelocation('.text', instruction.offset,
+                encoded.relocation.symbol ?? encoded.relocation, encoded.relocation.type ?? 283, encoded.relocation.addend ?? 0);
         }
         object.addText(text, 4);
-        for (const [name, value] of labels) object.addSymbol(name, {section: '.text', value,
-            binding: globals.has(name) ? 'GLOBAL' : 'LOCAL', type: globals.has(name) ? 'FUNC' : 'NOTYPE'});
-        for (const name of externals) if (!labels.has(name)) object.addSymbol(name, {binding: 'GLOBAL'});
+        for (const entry of dataEntries) {
+            if (/^-?[0-9]+$/.test(entry.value)) data.writeBigUInt64LE(BigInt.asUintN(64, BigInt(entry.value)), entry.offset);
+            else object.addRelocation('.data', entry.offset, entry.value, 257, 0);
+        }
+        if (data.length) object.addData(data, dataAlignment);
+        for (const [name, label] of labels) object.addSymbol(name, {section: label.section, value: label.value,
+            binding: globals.has(name) ? 'GLOBAL' : 'LOCAL', type: label.section === '.data' ? 'OBJECT' : globals.has(name) ? 'FUNC' : 'NOTYPE'});
+        const referenced = new Set([...externals, ...object.relocations.map(relocation => relocation.symbol)]);
         for (const instruction of instructions) {
             const target = this.branchTarget(instruction.line);
-            if (target && !labels.has(target) && !object.symbolNames.has(target)) object.addSymbol(target, {binding: 'GLOBAL'});
+            if (target) referenced.add(target);
         }
+        for (const name of referenced) if (!labels.has(name) && !object.symbolNames.has(name)) object.addSymbol(name, {binding: 'GLOBAL'});
         return object;
     }
 
     encode(line, offset, labels) {
         let match;
+        if ((match = line.match(/^adrp (x(?:[0-9]|[12][0-9]|30)), ([A-Za-z0-9_.$]+)$/))) {
+            return {word: 0x90000000 | register(match[1]), relocation: {symbol: match[2], type: 275}};
+        }
+        if ((match = line.match(/^add (x(?:[0-9]|[12][0-9]|30)), (x(?:[0-9]|[12][0-9]|30)), :lo12:([A-Za-z0-9_.$]+)$/))) {
+            return {word: 0x91000000 | (register(match[2]) << 5) | register(match[1]), relocation: {symbol: match[3], type: 277}};
+        }
         if ((match = line.match(/^(add|sub) (x(?:[0-9]|[12][0-9]|30)|sp), (x(?:[0-9]|[12][0-9]|30)|sp), (#-?(?:0x[0-9a-f]+|[0-9]+))$/i))) {
             const value = immediate(match[4]);
             if (value < 0 || value > 4095) throw new Error(`AArch64 ${match[1]} immediate is out of range`);
@@ -201,6 +236,7 @@ export class AArch64Assembler {
             const displacement = this.displacement(labels, match[2], offset, 26);
             return {word: (match[1] === 'bl' ? 0x94000000 : 0x14000000) | displacement};
         }
+        if ((match = line.match(/^blr (x(?:[0-9]|[12][0-9]|30))$/))) return {word: 0xd63f0000 | (register(match[1]) << 5)};
         if (line === 'ret') return {word: 0xd65f03c0};
         if (line === 'svc #0') return {word: 0xd4000001};
         throw new Error(`Unsupported AArch64 instruction '${line}'`);

@@ -128,8 +128,27 @@ export class ElfLinker {
     }
 
     applyAArch64Relocation(output, location, place, symbol, relocation) {
+        const target = BigInt(symbol) + BigInt(relocation.addend);
+        if (relocation.type === 257) {
+            output.writeBigUInt64LE(BigInt.asUintN(64, target), location);
+            return;
+        }
+        if (relocation.type === 275) {
+            const pages = (target >> 12n) - (BigInt(place) >> 12n);
+            if (pages < -(1n << 20n) || pages >= 1n << 20n) throw new LinkerError(`AArch64 page relocation to '${relocation.symbol}' is out of range`);
+            const immediate = BigInt.asUintN(21, pages);
+            const instruction = output.readUInt32LE(location);
+            const encoded = (instruction & 0x9f00001f) | (Number(immediate & 3n) << 29) | (Number((immediate >> 2n) & 0x7ffffn) << 5);
+            output.writeUInt32LE(encoded >>> 0, location);
+            return;
+        }
+        if (relocation.type === 277) {
+            const instruction = output.readUInt32LE(location);
+            output.writeUInt32LE(((instruction & 0xffc003ff) | (Number(target & 0xfffn) << 10)) >>> 0, location);
+            return;
+        }
         if (![282, 283].includes(relocation.type)) throw new LinkerError(`Unsupported AArch64 relocation ${relocation.type}`);
-        const displacement = BigInt(symbol) + BigInt(relocation.addend) - BigInt(place);
+        const displacement = target - BigInt(place);
         if ((displacement & 3n) !== 0n || displacement < -134217728n || displacement > 134217724n) {
             throw new LinkerError(`AArch64 branch relocation to '${relocation.symbol}' is out of range`);
         }

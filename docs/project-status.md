@@ -41,9 +41,11 @@
   executables. Float-to-integer conversions reject NaN and out-of-range values with runtime status 76.
   Direct calls support AAPCS64 integer, floating, and overflow stack arguments. Basic objects share the
   x86-64 16-byte header and packed field layout, zero-initialize storage, run field initializers before
-  constructors, and preserve reference identity. The generation-0 allocator currently retains one
-  anonymous mapping per object for process lifetime; type metadata, virtual dispatch, tracing GC, weak
-  references, strings, native facilities, and self-hosting remain WIP on AArch64.
+  constructors, and preserve reference identity. ABI-compatible type descriptors carry base links and
+  virtual method slots, enabling inherited and overridden dispatch. The generation-0 allocator currently
+  retains one anonymous mapping per object for process lifetime; contract tables/calls, checked reference
+  casts, structural hooks, tracing GC, weak references, strings, native facilities, and self-hosting remain
+  WIP on AArch64.
 - x86-64 Linux executables own their `_start` adapter, link without an implicit C runtime, and
   reject target-native symbols that the backend cannot provide.
 - **WIP:** general freestanding capability manifests, runtime hooks, and non-Linux code generation

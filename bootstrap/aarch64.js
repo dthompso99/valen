@@ -25,12 +25,15 @@ export class AArch64Backend {
             this.typeSizes.set(type.name, Math.max(8, this.align(offset, alignment)));
         }
         this.symbols = new Map(program.functions.map(fn => [fn.name, this.mangle(fn.name)]));
-        const functions = (moduleId === null ? program.functions : program.functions.filter(fn => fn.moduleId === moduleId));
+        this.emittedTypes = moduleId === null ? program.types : program.types.filter(type => type.moduleId === moduleId);
+        const functions = moduleId === null ? program.functions : program.functions.filter(fn => fn.moduleId === moduleId);
         const lines = ['.text'];
         for (const fn of functions) lines.push(...this.generateFunction(fn));
         if (includeRuntime) lines.push(...this.generateStart(), ...this.allocationRuntime());
         lines.push('.Ldivision_by_zero_error:', '    mov x0, #73', '    mov x8, #93', '    svc #0',
+            '.Lcontract_dispatch_error:', '    mov x0, #75', '    mov x8, #93', '    svc #0',
             '.Lfloat_conversion_error:', '    mov x0, #76', '    mov x8, #93', '    svc #0', '');
+        lines.push(...this.typeData(this.emittedTypes));
         lines.push('.section .note.GNU-stack,"",@progbits');
         return `${lines.join('\n')}\n`;
     }
@@ -117,31 +120,17 @@ export class AArch64Backend {
                 return this.binary(instruction);
             case 'allocate':
                 return [...this.constant('x0', this.typeSizes.get(instruction.objectType) ?? 16), '    bl valen_alloc',
-                    '    str xzr, [x0, #0]', ...this.constant('x9', 1), '    str x9, [x0, #8]',
+                    ...this.address('x9', this.typeLabel(instruction.objectType)), '    str x9, [x0, #0]',
+                    ...this.constant('x9', 1), '    str x9, [x0, #8]',
                     `    str x0, ${this.temp(instruction.result)}`];
             case 'destroy_object': {
                 const done = `${this.blockLabel(`destroy_done_${instruction.value.name}`)}`;
                 return [...this.load(instruction.value, 'x9'), `    cbz x9, ${done}`, '    str xzr, [x9, #8]', `${done}:`];
             }
             case 'call':
-            case 'virtual_call': {
-                const lines = [];
-                for (const location of this.argumentLocations(instruction.arguments)) {
-                    if (location.kind === 'stack') lines.push(...this.load(location.value, 'x9'),
-                        `    str x9, [sp, #${location.stackIndex * 8}]`);
-                    else if (location.kind === 'float') lines.push(...this.load(location.value, 'x9'),
-                        `    fmov ${location.value.type === 'f32' ? 's' : 'd'}${location.register}, ${location.value.type === 'f32' ? 'w9' : 'x9'}`);
-                    else lines.push(...this.load(location.value, location.register));
-                }
-                const target = this.symbols.get(instruction.target);
-                if (!target) throw new Error(`aarch64-linux bootstrap backend has no function symbol for '${instruction.target}'`);
-                lines.push(`    bl ${target}`);
-                if (instruction.result && this.isFloat(instruction.type)) lines.push(
-                    `    fmov ${instruction.type === 'f32' ? 'w9' : 'x9'}, ${instruction.type === 'f32' ? 's0' : 'd0'}`,
-                    `    str x9, ${this.temp(instruction.result)}`);
-                else if (instruction.result) lines.push(...this.normalize('x0', instruction.type), `    str x0, ${this.temp(instruction.result)}`);
-                return lines;
-            }
+                return this.call(instruction, false);
+            case 'virtual_call':
+                return this.call(instruction, true);
             case 'convert':
                 return this.convert(instruction);
             case 'jump':
@@ -236,8 +225,9 @@ export class AArch64Backend {
         if (!entry) throw new Error('Program has no entry.__ method');
         const entryType = this.program.types.find(type => type.name === entry.owner);
         const lines = ['.globl _start', '.type _start, %function', '_start:', '    sub sp, sp, #16',
-            ...this.constant('x0', this.typeSizes.get(entry.owner) ?? 16), '    bl valen_alloc', '    str xzr, [x0, #0]',
-            ...this.constant('x9', 1), '    str x9, [x0, #8]', '    str x0, [sp, #0]'];
+            ...this.constant('x0', this.typeSizes.get(entry.owner) ?? 16), '    bl valen_alloc',
+            ...this.address('x9', this.typeLabel(entry.owner)), '    str x9, [x0, #0]', ...this.constant('x9', 1),
+            '    str x9, [x0, #8]', '    str x0, [sp, #0]'];
         if (entryType?.initializer) lines.push(`    bl ${this.symbols.get(entryType.initializer)}`, '    ldr x0, [sp, #0]');
         lines.push(`    bl ${this.symbols.get(entry.name)}`, '    add sp, sp, #16', '    mov x8, #93', '    svc #0',
             '.size _start, .-_start', '');
@@ -249,6 +239,31 @@ export class AArch64Backend {
             '    mov x2, #3', '    mov x3, #34', '    mov x4, #-1', '    mov x5, #0', '    mov x8, #222', '    svc #0',
             '    mov x9, #-4095', '    cmp x0, x9', '    b.cs .Lallocation_error', '    ret', '.size valen_alloc, .-valen_alloc',
             '.Lallocation_error:', '    mov x0, #72', '    mov x8, #93', '    svc #0', ''];
+    }
+
+    call(instruction, dynamic) {
+        const lines = [];
+        for (const location of this.argumentLocations(instruction.arguments)) {
+            if (location.kind === 'stack') lines.push(...this.load(location.value, 'x9'),
+                `    str x9, [sp, #${location.stackIndex * 8}]`);
+            else if (location.kind === 'float') lines.push(...this.load(location.value, 'x9'),
+                `    fmov ${location.value.type === 'f32' ? 's' : 'd'}${location.register}, ${location.value.type === 'f32' ? 'w9' : 'x9'}`);
+            else lines.push(...this.load(location.value, location.register));
+        }
+        if (dynamic) {
+            if (!Number.isInteger(instruction.slot) || instruction.slot < 0) throw new Error('aarch64-linux virtual call has no dispatch slot');
+            lines.push('    ldr x9, [x0, #0]', '    cbz x9, .Lcontract_dispatch_error',
+                `    ldr x9, [x9, #${40 + instruction.slot * 8}]`, '    cbz x9, .Lcontract_dispatch_error', '    blr x9');
+        } else {
+            const target = this.symbols.get(instruction.target);
+            if (!target) throw new Error(`aarch64-linux bootstrap backend has no function symbol for '${instruction.target}'`);
+            lines.push(`    bl ${target}`);
+        }
+        if (instruction.result && this.isFloat(instruction.type)) lines.push(
+            `    fmov ${instruction.type === 'f32' ? 'w9' : 'x9'}, ${instruction.type === 'f32' ? 's0' : 'd0'}`,
+            `    str x9, ${this.temp(instruction.result)}`);
+        else if (instruction.result) lines.push(...this.normalize('x0', instruction.type), `    str x0, ${this.temp(instruction.result)}`);
+        return lines;
     }
 
     load(value, register) {
@@ -315,6 +330,21 @@ export class AArch64Backend {
     loadMnemonic(type) { return {1: 'ldrb', 2: 'ldrh', 4: 'ldr', 8: 'ldr'}[this.sizeOf(type)]; }
     storeMnemonic(type) { return {1: 'strb', 2: 'strh', 4: 'str', 8: 'str'}[this.sizeOf(type)]; }
     valueRegister(register, type) { return this.sizeOf(type) < 8 ? `w${register.slice(1)}` : register; }
+
+    address(register, symbol) { return [`    adrp ${register}, ${symbol}`, `    add ${register}, ${register}, :lo12:${symbol}`]; }
+
+    typeData(types) {
+        const lines = ['.section .data', '.align 8'];
+        for (const type of types) {
+            lines.push(`${this.typeLabel(type.name)}:`, type.base ? `    .quad ${this.typeLabel(type.base)}` : '    .quad 0',
+                '    .quad 0', '    .quad 0', '    .quad 0', '    .quad 0');
+            for (const method of type.virtualMethods ?? []) lines.push(`    .quad ${this.symbols.get(method.target)}`);
+        }
+        lines.push('.text');
+        return lines;
+    }
+
+    typeLabel(typeName) { return `.Lvalen_type_${this.mangle(typeName)}`; }
 
     normalize(register, type) {
         if (!type || this.isFloat(type)) return [];
