@@ -73,6 +73,17 @@ export class AArch64Assembler {
                 lsl: 0x9ac02000, lsr: 0x9ac02400, asr: 0x9ac02800, mul: 0x9b007c00}[match[1]];
             return {word: base | (right << 16) | (left << 5) | destination};
         }
+        if ((match = line.match(/^(sdiv|udiv) (x(?:[0-9]|[12][0-9]|30)), (x(?:[0-9]|[12][0-9]|30)), (x(?:[0-9]|[12][0-9]|30))$/))) {
+            const base = match[1] === 'sdiv' ? 0x9ac00c00 : 0x9ac00800;
+            return {word: base | (register(match[4]) << 16) | (register(match[3]) << 5) | register(match[2])};
+        }
+        if ((match = line.match(/^(lsl|lsr|asr) (x(?:[0-9]|[12][0-9]|30)), (x(?:[0-9]|[12][0-9]|30)), (#(?:0x[0-9a-f]+|[0-9]+))$/i))) {
+            const shift = immediate(match[4]);
+            if (shift < 0 || shift > 63) throw new Error(`AArch64 ${match[1]} immediate is out of range`);
+            const [destination, source] = [register(match[2]), register(match[3])];
+            if (match[1] === 'lsl') return {word: 0xd3400000 | (((64 - shift) & 63) << 16) | ((63 - shift) << 10) | (source << 5) | destination};
+            return {word: (match[1] === 'lsr' ? 0xd3400000 : 0x93400000) | (shift << 16) | (63 << 10) | (source << 5) | destination};
+        }
         if ((match = line.match(/^(ldr|str) (x(?:[0-9]|[12][0-9]|30)), \[(x(?:[0-9]|[12][0-9]|30)|sp), (#(?:0x[0-9a-f]+|[0-9]+))\]$/i))) {
             const value = immediate(match[4]);
             if (value < 0 || value % 8 || value / 8 > 4095) throw new Error(`AArch64 ${match[1]} offset is out of range`);
@@ -84,6 +95,12 @@ export class AArch64Assembler {
             if (value >= 0 && value <= 65535) return {word: 0xd2800000 | (value << 5) | destination};
             if (value < 0 && value >= -65536) return {word: 0x92800000 | ((~value & 0xffff) << 5) | destination};
             throw new Error('AArch64 mov immediate is out of range');
+        }
+        if ((match = line.match(/^(movz|movk) (x(?:[0-9]|[12][0-9]|30)), (#(?:0x[0-9a-f]+|[0-9]+))(?:, lsl (#(?:0x[0-9a-f]+|[0-9]+)))?$/i))) {
+            const value = immediate(match[3]), shift = match[4] ? immediate(match[4]) : 0;
+            if (value < 0 || value > 65535 || ![0, 16, 32, 48].includes(shift)) throw new Error(`AArch64 ${match[1]} immediate is out of range`);
+            const base = match[1] === 'movz' ? 0xd2800000 : 0xf2800000;
+            return {word: base | ((shift / 16) << 21) | (value << 5) | register(match[2])};
         }
         if ((match = line.match(/^mov (x(?:[0-9]|[12][0-9]|30)), (x(?:[0-9]|[12][0-9]|30))$/))) {
             return {word: 0xaa0003e0 | (register(match[2]) << 16) | register(match[1])};
@@ -107,6 +124,10 @@ export class AArch64Assembler {
         if ((match = line.match(/^cbnz (x(?:[0-9]|[12][0-9]|30)), ([A-Za-z0-9_.$]+)$/))) {
             const displacement = this.displacement(labels, match[2], offset, 19);
             return {word: 0xb5000000 | (displacement << 5) | register(match[1])};
+        }
+        if ((match = line.match(/^cbz (x(?:[0-9]|[12][0-9]|30)), ([A-Za-z0-9_.$]+)$/))) {
+            const displacement = this.displacement(labels, match[2], offset, 19);
+            return {word: 0xb4000000 | (displacement << 5) | register(match[1])};
         }
         if ((match = line.match(/^(b|bl) ([A-Za-z0-9_.$]+)$/))) {
             if (!labels.has(match[2])) {

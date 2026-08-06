@@ -17,6 +17,7 @@ export class AArch64Backend {
         const lines = ['.text'];
         for (const fn of functions) lines.push(...this.generateFunction(fn));
         if (includeRuntime) lines.push(...this.generateStart());
+        lines.push('.Ldivision_by_zero_error:', '    mov x0, #73', '    mov x8, #93', '    svc #0', '');
         lines.push('.section .note.GNU-stack,"",@progbits');
         return `${lines.join('\n')}\n`;
     }
@@ -54,7 +55,8 @@ export class AArch64Backend {
     instruction(instruction, end) {
         switch (instruction.op) {
             case 'constant':
-                return [...this.constant('x9', instruction.value), `    str x9, ${this.temp(instruction.result)}`];
+                return [...this.constant('x9', instruction.value), ...this.normalize('x9', instruction.type),
+                    `    str x9, ${this.temp(instruction.result)}`];
             case 'declare_local':
                 return instruction.value
                     ? [...this.load(instruction.value, 'x9'), `    str x9, ${this.named(instruction.name)}`]
@@ -68,21 +70,29 @@ export class AArch64Backend {
                 if (instruction.operator === '-') lines.push('    neg x9, x9');
                 else if (instruction.operator === '!') lines.push('    cmp x9, #0', '    cset x9, eq');
                 else throw new Error(`aarch64-linux bootstrap backend does not support unary '${instruction.operator}'`);
+                lines.push(...this.normalize('x9', instruction.type));
                 lines.push(`    str x9, ${this.temp(instruction.result)}`);
                 return lines;
             }
             case 'binary':
                 return this.binary(instruction);
-            case 'call': {
+            case 'call':
+            case 'virtual_call': {
                 if (instruction.arguments.length > argumentRegisters.length) throw new Error('aarch64-linux bootstrap backend does not yet support stack-passed arguments');
                 const lines = [];
                 instruction.arguments.forEach((argument, index) => lines.push(...this.load(argument, argumentRegisters[index])));
                 const target = this.symbols.get(instruction.target);
                 if (!target) throw new Error(`aarch64-linux bootstrap backend has no function symbol for '${instruction.target}'`);
                 lines.push(`    bl ${target}`);
-                if (instruction.result) lines.push(`    str x0, ${this.temp(instruction.result)}`);
+                if (instruction.result) lines.push(...this.normalize('x0', instruction.type), `    str x0, ${this.temp(instruction.result)}`);
                 return lines;
             }
+            case 'convert':
+                if (this.isFloat(instruction.value.type) || this.isFloat(instruction.type)) {
+                    throw new Error('aarch64-linux bootstrap backend does not yet support floating-point conversion');
+                }
+                return [...this.load(instruction.value, 'x9'), ...this.normalize('x9', instruction.type),
+                    `    str x9, ${this.temp(instruction.result)}`];
             case 'jump':
                 return [`    b ${this.blockLabel(instruction.target)}`];
             case 'branch':
@@ -104,8 +114,11 @@ export class AArch64Backend {
         const condition = this.isUnsigned(instruction.left.type) && unsignedCondition[instruction.operator]
             ? unsignedCondition[instruction.operator] : signedCondition[instruction.operator];
         if (operation) lines.push(`    ${operation} x9, x9, x10`);
+        else if (instruction.operator === '/') lines.push('    cbz x10, .Ldivision_by_zero_error',
+            `    ${this.isUnsigned(instruction.left.type) ? 'udiv' : 'sdiv'} x9, x9, x10`);
         else if (condition) lines.push('    cmp x9, x10', `    cset x9, ${condition}`);
         else throw new Error(`aarch64-linux bootstrap backend does not yet support binary '${instruction.operator}'`);
+        lines.push(...this.normalize('x9', instruction.type));
         lines.push(`    str x9, ${this.temp(instruction.result)}`);
         return lines;
     }
@@ -121,14 +134,31 @@ export class AArch64Backend {
     }
 
     load(value, register) {
-        if (value.kind !== 'temporary') throw new Error(`aarch64-linux bootstrap backend cannot load '${value.kind}' values yet`);
-        return [`    ldr ${register}, ${this.temp(value.name)}`];
+        if (value.kind === 'temporary') return [`    ldr ${register}, ${this.temp(value.name)}`];
+        if (value.kind === 'parameter') return [`    ldr ${register}, ${this.named(value.name)}`];
+        throw new Error(`aarch64-linux bootstrap backend cannot load '${value.kind}' values yet`);
     }
 
     constant(register, value) {
-        const integer = BigInt(value);
-        if (integer < -65535n || integer > 65535n) throw new Error(`aarch64-linux bootstrap backend constant ${integer} is not implemented yet`);
-        return [`    mov ${register}, #${integer}`];
+        const integer = BigInt.asUintN(64, BigInt(value));
+        const lines = [`    movz ${register}, #${integer & 0xffffn}`];
+        for (let shift = 16n; shift < 64n; shift += 16n) {
+            const part = (integer >> shift) & 0xffffn;
+            if (part !== 0n) lines.push(`    movk ${register}, #${part}, lsl #${shift}`);
+        }
+        return lines;
+    }
+
+    normalize(register, type) {
+        if (!type || this.isFloat(type)) return [];
+        const base = type.endsWith('?') ? type.slice(0, -1) : type;
+        if (base === 'bool') return [`    cmp ${register}, #0`, `    cset ${register}, ne`];
+        if (!/^[iu](8|16|32|64)$/.test(base)) return [];
+        const bits = Number(base.slice(1));
+        if (bits === 64) return [];
+        const shift = 64 - bits;
+        return [`    lsl ${register}, ${register}, #${shift}`,
+            `    ${base.startsWith('u') ? 'lsr' : 'asr'} ${register}, ${register}, #${shift}`];
     }
 
     temp(name) { return `[sp, #${this.slots.get(`temp:${name}`)}]`; }
@@ -136,6 +166,7 @@ export class AArch64Backend {
     blockLabel(label) { return `${this.symbols.get(this.fn.name)}__${this.mangle(label)}`; }
     align(value, alignment) { return Math.ceil(value / alignment) * alignment; }
     isUnsigned(type) { return type === 'bool' || type?.startsWith('u'); }
+    isFloat(type) { return type === 'f32' || type === 'f64'; }
 
     mangle(value) {
         let result = '__valen_';

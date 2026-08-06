@@ -34,7 +34,8 @@ source -> tokens -> AST -> module graph -> semantic symbols
 - The x86-64 backend emits a controlled Intel-syntax subset. Both generation 0 and the self-hosted
   compiler encode that subset and write ELF64 relocatable objects directly.
 - The initial generation-0 AArch64 backend emits and directly encodes a deliberately restricted
-  primitive integer/control-flow subset. It is the cross-compilation foothold for the full runtime
+  integer/control-flow subset, including full-width constants, integer conversions and normalization,
+  division checks, loops, and direct calls. It is the cross-compilation foothold for the full runtime
   and self-hosted backend, not yet a general AArch64 language target.
 
 Native executable builds can reuse validated backend artifacts by setting

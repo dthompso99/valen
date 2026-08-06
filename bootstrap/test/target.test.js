@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import {fileURLToPath} from 'node:url';
+import {Compiler} from '../compiler.js';
 import {ElfObject} from '../elf.js';
 import {ElfLinker, LinkerError} from '../linker.js';
 import {LibraryMetadata} from '../library-metadata.js';
@@ -61,4 +66,21 @@ caller:
 `);
     assert.deepEqual(call.relocations.map(relocation => ({symbol: relocation.symbol, type: relocation.type})),
         [{symbol: 'callee', type: 283}]);
+});
+
+test('bootstrap compiler cross-compiles primitive AArch64 programs', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-primitives.ar', import.meta.url));
+    const output = path.join(directory, 'primitives');
+    const result = new Compiler().compile(source, output, {target: 'aarch64-linux'});
+
+    const executable = fs.readFileSync(output);
+    assert.equal(result.target.name, 'aarch64-linux');
+    assert.equal(result.linker, 'native');
+    assert.equal(executable.subarray(0, 4).toString('hex'), '7f454c46');
+    assert.equal(executable.readUInt16LE(18), 183);
+    assert.match(result.assembly, /movk x9, #1, lsl #32/);
+    assert.match(result.assembly, /sdiv x9, x9, x10/);
+    assert.match(result.assembly, /bl __valen_.*entry_2e_twice/);
 });

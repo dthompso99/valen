@@ -36,8 +36,9 @@
 
 - Poll-backed readiness operations and an event-loop executor for files and networking
 - **WIP:** the generation-0 `aarch64-linux` backend cross-compiles primitive integer and control-flow
-  programs into internally encoded, internally linked static ELF executables. Object layouts, GC,
-  strings, floating point, native facilities, and self-hosting remain x86-64-only.
+  programs with full-width constants, conversions, checked division, loops, and direct calls into
+  internally encoded, internally linked static ELF executables. Object layouts, GC, strings, floating
+  point, native facilities, and self-hosting remain x86-64-only.
 - x86-64 Linux executables own their `_start` adapter, link without an implicit C runtime, and
   reject target-native symbols that the backend cannot provide.
 - **WIP:** general freestanding capability manifests, runtime hooks, and non-Linux code generation

@@ -1,0 +1,28 @@
+entry {{
+    twice(value:i64) -> i64 { return value * 2 }
+
+    __() -> i32 {
+        local large:i64 = 4294967297
+        if (large >> 32) != 1 { return 1 }
+
+        local signed8:i8 = -2
+        local signedWide:i64 = signed8 as i64
+        if signedWide != -2 { return 2 }
+
+        local unsigned8:u8 = 255
+        local unsignedWide:u64 = unsigned8 as u64
+        if unsignedWide != 255 { return 3 }
+
+        if (large / 65537) != 65535 { return 4 }
+        if (-42 / 5) != -8 { return 5 }
+
+        local index:i64 = 0
+        local sum:i64 = 0
+        while index < 5 {
+            sum = sum + index
+            index = index + 1
+        }
+        if self.twice(sum) != 20 { return 6 }
+        return 0
+    }
+}}
