@@ -4,6 +4,7 @@ import {ElfObject} from '../elf.js';
 import {ElfLinker, LinkerError} from '../linker.js';
 import {LibraryMetadata} from '../library-metadata.js';
 import {hostTarget, resolveTarget, supportedTargets} from '../target.js';
+import {AArch64Assembler} from '../aarch64-assembler.js';
 
 test('target model normalizes supported Linux architecture names', () => {
     assert.deepEqual(supportedTargets, ['x86_64-linux', 'aarch64-linux']);
@@ -33,5 +34,31 @@ test('ELF objects retain their target machine and reject mixed-architecture link
     x86.addText(Buffer.alloc(1));
     x86.addSymbol('_start', {section: '.text', binding: 'GLOBAL', type: 'FUNC'});
     assert.throws(() => new ElfLinker().linkObjects([x86, arm]), LinkerError);
-    assert.throws(() => new ElfLinker().link(arm), /Unsupported ELF machine 183/);
+    const executable = new ElfLinker().link(arm);
+    assert.equal(executable.readUInt16LE(18), 183);
+    assert.equal(Number(executable.readBigUInt64LE(112)), 65536);
+});
+
+test('integrated AArch64 encoder emits Linux exit instructions and call relocations', () => {
+    const assembler = new AArch64Assembler();
+    const exit = assembler.assembleObject(`.text
+.globl _start
+_start:
+    mov x0, #0
+    mov x8, #93
+    svc #0
+`);
+    assert.equal(exit.machine, 183);
+    assert.equal(Buffer.from(exit.sections.find(section => section.name === '.text').data).toString('hex'),
+        '000080d2a80b80d2010000d4');
+
+    const call = assembler.assembleObject(`.text
+.globl caller
+.extern callee
+caller:
+    bl callee
+    ret
+`);
+    assert.deepEqual(call.relocations.map(relocation => ({symbol: relocation.symbol, type: relocation.type})),
+        [{symbol: 'callee', type: 283}]);
 });

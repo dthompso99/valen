@@ -19,8 +19,8 @@ Both implementations follow the same broad stages:
 
 ```text
 source -> tokens -> AST -> module graph -> semantic symbols
-       -> IR -> validation/canonicalization -> x86-64 assembly
-       -> x86-64 encoding -> ELF object -> linker -> executable
+       -> IR -> validation/canonicalization -> target backend
+       -> native encoding -> ELF object -> linker -> executable
 ```
 
 - Tokenization records source spans for diagnostics. Token categories use the first-class `Compiler.TokenKind` enum while each token retains its original string lexeme.
@@ -33,6 +33,9 @@ source -> tokens -> AST -> module graph -> semantic symbols
 - Validation rejects malformed IR before backend generation.
 - The x86-64 backend emits a controlled Intel-syntax subset. Both generation 0 and the self-hosted
   compiler encode that subset and write ELF64 relocatable objects directly.
+- The initial generation-0 AArch64 backend emits and directly encodes a deliberately restricted
+  primitive integer/control-flow subset. It is the cross-compilation foothold for the full runtime
+  and self-hosted backend, not yet a general AArch64 language target.
 
 Native executable builds can reuse validated backend artifacts by setting
 `VALEN_CACHE_PATH` to an existing writable directory. Cache keys include every loaded module's

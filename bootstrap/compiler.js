@@ -12,12 +12,15 @@ import {ModuleInterface, ModuleInterfaceCache} from './module-interface.js';
 import {LibraryMetadata} from './library-metadata.js';
 import {ElfObject} from './elf.js';
 import {defaultSysroot, resolveTarget} from './target.js';
+import {AArch64Backend} from './aarch64.js';
+import {AArch64Assembler} from './aarch64-assembler.js';
 
 const bootstrapRoot = path.dirname(fileURLToPath(import.meta.url));
 
 const targetTools = target => {
     if (target.name === 'x86_64-linux') return {Backend: X86_64Backend, Assembler: X86Assembler};
-    throw new Error(`Target '${target.name}' is recognized, but its backend is not implemented`);
+    if (target.name === 'aarch64-linux') return {Backend: AArch64Backend, Assembler: AArch64Assembler};
+    throw new Error(`Target '${target.name}' has no backend`);
 };
 
 export class Compiler {

@@ -35,7 +35,9 @@
 ## WIP: runtime and concurrency
 
 - Poll-backed readiness operations and an event-loop executor for files and networking
-- **WIP:** additional operating systems and architectures
+- **WIP:** the generation-0 `aarch64-linux` backend cross-compiles primitive integer and control-flow
+  programs into internally encoded, internally linked static ELF executables. Object layouts, GC,
+  strings, floating point, native facilities, and self-hosting remain x86-64-only.
 - x86-64 Linux executables own their `_start` adapter, link without an implicit C runtime, and
   reject target-native symbols that the backend cannot provide.
 - **WIP:** general freestanding capability manifests, runtime hooks, and non-Linux code generation
@@ -74,8 +76,10 @@ and embedded targets.
 - IR canonicalization folds integer/boolean constants, simplifies constant branches, removes unreachable blocks, and eliminates unused pure SSA values without suppressing runtime traps or state changes.
 - Integer instruction selection uses signed 32-bit immediates for arithmetic, bitwise, shift, and comparison operations; generated-function peepholes remove redundant moves and neutral operations.
 - `-O0` performs only mandatory IR cleanup and validation; `-O1` is the default and enables constant folding, dead/unreachable elimination, register allocation, immediate selection, and peepholes. Unsupported levels are rejected.
-- Generation 0 and the self-hosted compiler emit ELF64 relocatable objects without a system assembler.
-- The integrated x86-64 ELF linker handles freestanding executables; `--linker system` remains available for foreign libraries.
+- Generation 0 emits x86-64 and the initial AArch64 subset as ELF64 relocatable objects without a
+  system assembler; the self-hosted encoder remains x86-64-only.
+- The integrated ELF linker handles x86-64 and AArch64 branch relocations and emits page-size-neutral
+  AArch64 executables with 64 KiB segment alignment; `--linker system` remains available for foreign libraries.
 - Cold freestanding builds emit versioned module interfaces and dependency-fingerprinted module objects, lower implementations in bounded chunks, and retain importers when only a dependency body changes.
 - Repeatable compiler and generated-code benchmarks report compile time, memory, executable size, and runtime speed; expanding the workload corpus remains **WIP**.
 - The self-hosted x86-64 backend indexes hot compiler lookups and streams common assembly fragments directly into its builder to avoid repeated linear scans and temporary concatenated strings.

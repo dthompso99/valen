@@ -2,7 +2,6 @@ import {ElfObject} from './elf.js';
 
 const ELF_HEADER_SIZE = 64;
 const PROGRAM_HEADER_SIZE = 56;
-const PAGE_SIZE = 4096;
 const BASE_ADDRESS = 0x400000;
 
 const align = (value, alignment) => alignment <= 1 ? value : Math.ceil(value / alignment) * alignment;
@@ -50,20 +49,21 @@ export class ElfLinker {
     }
 
     link(object, {entry = '_start'} = {}) {
-        if (object.machine !== 62) throw new LinkerError(`Unsupported ELF machine ${object.machine}`);
+        if (![62, 183].includes(object.machine)) throw new LinkerError(`Unsupported ELF machine ${object.machine}`);
+        const pageSize = object.machine === 183 ? 65536 : 4096;
         const alloc = object.sections.filter(section => (section.flags & 2) !== 0);
         const readOnly = alloc.filter(section => (section.flags & 1) === 0);
         const writable = alloc.filter(section => (section.flags & 1) !== 0);
         const layouts = new Map();
 
-        let fileOffset = PAGE_SIZE;
+        let fileOffset = pageSize;
         for (const section of readOnly) {
             fileOffset = align(fileOffset, section.alignment);
             layouts.set(section.name, {fileOffset, address: BASE_ADDRESS + fileOffset, section});
             if (section.type !== 8) fileOffset += section.data.length;
         }
         const readOnlyEnd = fileOffset;
-        const writableStart = align(fileOffset, PAGE_SIZE);
+        const writableStart = align(fileOffset, pageSize);
         fileOffset = writableStart;
         let memoryEnd = writableStart;
         for (const section of writable) {
@@ -79,7 +79,10 @@ export class ElfLinker {
         for (const symbol of object.symbols) {
             if (!symbol.section) continue;
             const layout = layouts.get(symbol.section);
-            if (!layout) throw new LinkerError(`Symbol '${symbol.name}' refers to non-allocated section '${symbol.section}'`);
+            if (!layout) {
+                if (symbol.binding === 'LOCAL') continue;
+                throw new LinkerError(`Symbol '${symbol.name}' refers to non-allocated section '${symbol.section}'`);
+            }
             if (symbols.has(symbol.name)) throw new LinkerError(`Duplicate symbol '${symbol.name}'`);
             symbols.set(symbol.name, layout.address + symbol.value);
         }
@@ -99,11 +102,14 @@ export class ElfLinker {
             if (symbol === undefined) throw new LinkerError(`Undefined symbol '${relocation.symbol}'`);
             const location = layout.fileOffset + relocation.offset;
             const place = layout.address + relocation.offset;
-            const value = BigInt(symbol) + BigInt(relocation.addend) - ([2, 4].includes(relocation.type) ? BigInt(place) : 0n);
-            if (relocation.type === 1) output.writeBigUInt64LE(BigInt.asUintN(64, value), location);
-            else if (relocation.type === 2 || relocation.type === 4 || relocation.type === 11) output.writeInt32LE(Number(BigInt.asIntN(32, value)), location);
-            else if (relocation.type === 10) output.writeUInt32LE(Number(BigInt.asUintN(32, value)), location);
-            else throw new LinkerError(`Unsupported x86-64 relocation ${relocation.type}`);
+            if (object.machine === 183) this.applyAArch64Relocation(output, location, place, symbol, relocation);
+            else {
+                const value = BigInt(symbol) + BigInt(relocation.addend) - ([2, 4].includes(relocation.type) ? BigInt(place) : 0n);
+                if (relocation.type === 1) output.writeBigUInt64LE(BigInt.asUintN(64, value), location);
+                else if (relocation.type === 2 || relocation.type === 4 || relocation.type === 11) output.writeInt32LE(Number(BigInt.asIntN(32, value)), location);
+                else if (relocation.type === 10) output.writeUInt32LE(Number(BigInt.asUintN(32, value)), location);
+                else throw new LinkerError(`Unsupported x86-64 relocation ${relocation.type}`);
+            }
         }
 
         output.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0], 0);
@@ -115,13 +121,24 @@ export class ElfLinker {
         output.writeUInt16LE(ELF_HEADER_SIZE, 52);
         output.writeUInt16LE(PROGRAM_HEADER_SIZE, 54);
         output.writeUInt16LE(2, 56);
-        this.programHeader(output, 64, 5, 0, BASE_ADDRESS, readOnlyEnd, readOnlyEnd);
+        this.programHeader(output, 64, 5, 0, BASE_ADDRESS, readOnlyEnd, readOnlyEnd, pageSize);
         this.programHeader(output, 64 + PROGRAM_HEADER_SIZE, 6, writableStart, BASE_ADDRESS + writableStart,
-            Math.max(0, fileOffset - writableStart), Math.max(0, memoryEnd - writableStart));
+            Math.max(0, fileOffset - writableStart), Math.max(0, memoryEnd - writableStart), pageSize);
         return output;
     }
 
-    programHeader(output, offset, flags, fileOffset, address, fileSize, memorySize) {
+    applyAArch64Relocation(output, location, place, symbol, relocation) {
+        if (![282, 283].includes(relocation.type)) throw new LinkerError(`Unsupported AArch64 relocation ${relocation.type}`);
+        const displacement = BigInt(symbol) + BigInt(relocation.addend) - BigInt(place);
+        if ((displacement & 3n) !== 0n || displacement < -134217728n || displacement > 134217724n) {
+            throw new LinkerError(`AArch64 branch relocation to '${relocation.symbol}' is out of range`);
+        }
+        const instruction = output.readUInt32LE(location);
+        const immediate = Number(BigInt.asUintN(26, displacement >> 2n));
+        output.writeUInt32LE(((instruction & 0xfc000000) | immediate) >>> 0, location);
+    }
+
+    programHeader(output, offset, flags, fileOffset, address, fileSize, memorySize, alignment) {
         output.writeUInt32LE(1, offset);
         output.writeUInt32LE(flags, offset + 4);
         output.writeBigUInt64LE(BigInt(fileOffset), offset + 8);
@@ -129,6 +146,6 @@ export class ElfLinker {
         output.writeBigUInt64LE(BigInt(address), offset + 24);
         output.writeBigUInt64LE(BigInt(fileSize), offset + 32);
         output.writeBigUInt64LE(BigInt(memorySize), offset + 40);
-        output.writeBigUInt64LE(BigInt(PAGE_SIZE), offset + 48);
+        output.writeBigUInt64LE(BigInt(alignment), offset + 48);
     }
 }
