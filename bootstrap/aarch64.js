@@ -47,9 +47,10 @@ export class AArch64Backend {
         }
         const lines = ['.text'];
         for (const fn of functions) lines.push(...this.generateFunction(fn));
-        lines.push(...this.gcTypeFunctions(this.emittedTypes), ...this.gcArrayFunctions(this.arrayTypes));
+        lines.push(...this.gcTypeFunctions(this.emittedTypes), ...this.gcArrayFunctions(this.arrayTypes),
+            ...this.structuralTypeRuntime());
         if (includeRuntime) lines.push(...this.generateStart(), ...this.allocationRuntime(), ...this.arrayRuntime(),
-            ...this.stringRuntime(), ...this.builderRuntime(), ...this.systemRuntime());
+            ...this.stringRuntime(), ...this.builderRuntime(), ...this.structuralCoreRuntime(), ...this.systemRuntime());
         lines.push('.Larray_bounds_error:', '    mov x0, #70', '    mov x8, #93', '    svc #0',
             '.Ldivision_by_zero_error:', '    mov x0, #73', '    mov x8, #93', '    svc #0',
             '.Loptional_unwrap_error:', '    mov x0, #71', '    mov x8, #93', '    svc #0',
@@ -261,6 +262,16 @@ export class AArch64Backend {
                 lines.push(`    str x0, ${this.temp(instruction.result)}`);
                 return lines;
             }
+            case 'structural_equal': {
+                const lines = [...this.load(instruction.left, 'x0'), ...this.load(instruction.right, 'x1'),
+                    ...this.constant('x2', 0), `    bl ${this.equalityFunction(instruction.valueType)}`];
+                if (instruction.negate) lines.push('    mov x9, #1', '    eor x0, x0, x9');
+                lines.push(`    str x0, ${this.temp(instruction.result)}`);
+                return lines;
+            }
+            case 'structural_hash':
+                return [...this.load(instruction.value, 'x0'), ...this.constant('x1', 0),
+                    `    bl ${this.hashFunction(instruction.valueType)}`, `    str x0, ${this.temp(instruction.result)}`];
             case 'string_concat':
                 return [...this.load(instruction.left, 'x0'), ...this.load(instruction.right, 'x1'),
                     '    bl valen_string_concat', `    str x0, ${this.temp(instruction.result)}`];
@@ -305,8 +316,16 @@ export class AArch64Backend {
             case 'type_test':
             case 'checked_cast':
                 return this.typeRelationship(instruction);
+            case 'optional_box':
+                return [...this.constant('x0', 24), ...this.constant('x1', 0), ...this.constant('x2', 0),
+                    ...this.constant('x3', 0), '    bl valen_gc_alloc', '    str xzr, [x0, #0]',
+                    ...this.constant('x9', 1), '    str x9, [x0, #8]', `    str x0, ${this.temp(instruction.result)}`,
+                    ...this.load(instruction.value, 'x9'), `    ldr x10, ${this.temp(instruction.result)}`,
+                    '    str x9, [x10, #16]'];
             case 'unwrap':
                 return [...this.load(instruction.value, 'x9'), '    cbz x9, .Loptional_unwrap_error',
+                    ...(instruction.optionalType && this.isPrimitiveOptional(instruction.optionalType)
+                        ? ['    ldr x9, [x9, #16]', ...this.normalize('x9', instruction.type)] : []),
                     `    str x9, ${this.temp(instruction.result)}`];
             case 'convert':
                 return this.convert(instruction);
@@ -1294,7 +1313,8 @@ export class AArch64Backend {
         const lines = ['.section .data', '.align 8'];
         for (const type of types) {
             lines.push(`${this.typeLabel(type.name)}:`, type.base ? `    .quad ${this.typeLabel(type.base)}` : '    .quad 0',
-                `    .quad ${this.contractListLabel(type.name)}`, '    .quad 0', '    .quad 0', '    .quad 0');
+                `    .quad ${this.contractListLabel(type.name)}`, `    .quad ${this.objectEqualityLabel(type.name)}`,
+                `    .quad ${this.objectHashLabel(type.name)}`, '    .quad 0');
             for (const method of type.virtualMethods ?? []) lines.push(`    .quad ${this.requireFunction(method.target)}`);
         }
         for (const type of types) {
@@ -1308,6 +1328,99 @@ export class AArch64Backend {
         }
         lines.push('.text');
         return lines;
+    }
+
+    structuralTypeRuntime() {
+        const lines = [];
+        for (const type of this.emittedTypes) lines.push(...this.objectEqualityFunction(type), ...this.objectHashFunction(type));
+        return lines;
+    }
+
+    structuralCoreRuntime() {
+        return [
+            '.globl valen_object_equal', 'valen_object_equal:', '    cmp x0, x1', '    b.eq .Lobject_equal_true',
+            '    cbz x0, .Lobject_equal_false', '    cbz x1, .Lobject_equal_false', '    ldr x9, [x0, #0]',
+            '    ldr x10, [x1, #0]', '    cmp x9, x10', '    b.ne .Lobject_equal_false', '    mov x11, x2',
+            '.Lobject_equal_scan:', '    cbz x11, .Lobject_equal_enter', '    ldr x12, [x11, #0]',
+            '    cmp x12, x0', '    b.ne .Lobject_equal_next', '    ldr x12, [x11, #8]', '    cmp x12, x1',
+            '    b.eq .Lobject_equal_true', '.Lobject_equal_next:', '    ldr x11, [x11, #16]',
+            '    b .Lobject_equal_scan', '.Lobject_equal_enter:', '    sub sp, sp, #48', '    str x29, [sp, #32]',
+            '    str x30, [sp, #40]', '    add x29, sp, #32', '    str x0, [sp, #0]', '    str x1, [sp, #8]',
+            '    str x2, [sp, #16]', '    add x2, sp, #0', '    ldr x9, [x9, #16]', '    blr x9',
+            '    ldr x29, [sp, #32]', '    ldr x30, [sp, #40]', '    add sp, sp, #48', '    ret',
+            '.Lobject_equal_true:', '    mov x0, #1', '    ret', '.Lobject_equal_false:', '    mov x0, #0', '    ret', '',
+            '.globl valen_object_hash', 'valen_object_hash:', '    cbz x0, .Lobject_hash_null', '    mov x9, x1',
+            '.Lobject_hash_scan:', '    cbz x9, .Lobject_hash_enter', '    ldr x10, [x9, #0]', '    cmp x10, x0',
+            '    b.eq .Lobject_hash_cycle', '    ldr x9, [x9, #8]', '    b .Lobject_hash_scan',
+            '.Lobject_hash_enter:', '    sub sp, sp, #32', '    str x0, [sp, #0]', '    str x1, [sp, #8]',
+            '    str x30, [sp, #24]', '    add x1, sp, #0', '    ldr x9, [x0, #0]', '    ldr x9, [x9, #24]',
+            '    blr x9', '    ldr x30, [sp, #24]', '    add sp, sp, #32', '    ret',
+            '.Lobject_hash_null:', '    mov x0, #0', '    ret', '.Lobject_hash_cycle:',
+            ...this.constant('x0', -7046029254386353131n), '    ret', '',
+            'valen_string_equal_context:', '    cmp x0, x1', '    b.eq .Lstring_context_true',
+            '    cbz x0, .Lstring_context_false', '    cbz x1, .Lstring_context_false', '    b valen_string_equal',
+            '.Lstring_context_true:', '    mov x0, #1', '    ret', '.Lstring_context_false:', '    mov x0, #0', '    ret', '',
+            'valen_string_hash_context:', '    cbz x0, .Lstring_hash_null', '    ldr x9, [x0, #0]',
+            '    ldr x10, [x0, #8]', ...this.constant('x0', 1469598103934665603n),
+            ...this.constant('x12', 1099511628211n), '.Lstring_hash_next:', '    cbz x10, .Lstring_hash_done',
+            '    ldrb w11, [x9, #0]', '    eor x0, x0, x11', '    mul x0, x0, x12', '    add x9, x9, #1',
+            '    sub x10, x10, #1', '    b .Lstring_hash_next', '.Lstring_hash_done:', '    ret',
+            '.Lstring_hash_null:', '    mov x0, #0', '    ret', ''
+        ];
+    }
+
+    objectEqualityFunction(type) {
+        const label = this.objectEqualityLabel(type.name), fail = `${label}_false`, done = `${label}_done`;
+        const lines = [`.type ${label}, %function`, `${label}:`, '    sub sp, sp, #48', '    str x19, [sp, #0]',
+            '    str x20, [sp, #8]', '    str x21, [sp, #16]', '    str x30, [sp, #40]', '    mov x19, x0',
+            '    mov x20, x1', '    mov x21, x2'];
+        for (const field of type.fields) {
+            const offset = this.fieldOffsets.get(field.symbol).offset;
+            lines.push(...this.compareFields(offset, field.type, fail));
+        }
+        lines.push('    mov x0, #1', `    b ${done}`, `${fail}:`, '    mov x0, #0', `${done}:`,
+            '    ldr x19, [sp, #0]', '    ldr x20, [sp, #8]', '    ldr x21, [sp, #16]', '    ldr x30, [sp, #40]',
+            '    add sp, sp, #48', '    ret', `.size ${label}, .-${label}`, '');
+        return lines;
+    }
+
+    compareFields(offset, type, fail) {
+        const base = type.endsWith('?') ? type.slice(0, -1) : type;
+        if (base === 'string' || this.program.types.some(item => item.name === base)) return [
+            `    ldr x0, [x19, #${offset}]`, `    ldr x1, [x20, #${offset}]`, '    mov x2, x21',
+            `    bl ${this.equalityFunction(base)}`, `    cbz x0, ${fail}`];
+        const register = this.valueRegister('x9', base);
+        const other = this.valueRegister('x10', base);
+        return [`    ${this.loadMnemonic(base)} ${register}, [x19, #${offset}]`,
+            `    ${this.loadMnemonic(base)} ${other}, [x20, #${offset}]`, '    cmp x9, x10', `    b.ne ${fail}`];
+    }
+
+    objectHashFunction(type) {
+        const label = this.objectHashLabel(type.name);
+        const lines = [`.type ${label}, %function`, `${label}:`, '    sub sp, sp, #48', '    str x19, [sp, #0]',
+            '    str x20, [sp, #8]', '    str x21, [sp, #16]', '    str x30, [sp, #40]', '    mov x19, x0',
+            '    mov x20, x1', ...this.constant('x21', BigInt(this.stableTypeHash(type.name)))];
+        for (const field of type.fields) {
+            const offset = this.fieldOffsets.get(field.symbol).offset;
+            lines.push(...this.hashField(offset, field.type), '    eor x21, x21, x0',
+                ...this.constant('x9', 1099511628211n), '    mul x21, x21, x9');
+        }
+        lines.push('    mov x0, x21', '    ldr x19, [sp, #0]', '    ldr x20, [sp, #8]', '    ldr x21, [sp, #16]',
+            '    ldr x30, [sp, #40]', '    add sp, sp, #48', '    ret', `.size ${label}, .-${label}`, '');
+        return lines;
+    }
+
+    hashField(offset, type) {
+        const base = type.endsWith('?') ? type.slice(0, -1) : type;
+        if (base === 'string' || this.program.types.some(item => item.name === base)) return [
+            `    ldr x0, [x19, #${offset}]`, '    mov x1, x20', `    bl ${this.hashFunction(base)}`];
+        return [`    ${this.loadMnemonic(base)} ${this.valueRegister('x0', base)}, [x19, #${offset}]`];
+    }
+
+    stableTypeHash(name) {
+        let hash = 1469598103934665603n;
+        for (const byte of new TextEncoder().encode(name)) hash = BigInt.asIntN(64, (hash ^ BigInt(byte)) * 1099511628211n);
+        return hash.toString();
     }
 
     internString(value) {
@@ -1436,6 +1549,22 @@ export class AArch64Backend {
     typeLabel(typeName) { return `.Lvalen_type_${this.mangle(typeName)}`; }
     contractListLabel(typeName) { return `${this.typeLabel(typeName)}_contracts`; }
     contractTableLabel(typeName, contractName) { return `${this.typeLabel(typeName)}_as_${this.mangle(contractName)}`; }
+    objectEqualityLabel(typeName) { return `${this.typeLabel(typeName)}_equal`; }
+    objectHashLabel(typeName) { return `${this.typeLabel(typeName)}_hash`; }
+
+    equalityFunction(typeName) {
+        const type = typeName?.endsWith('?') ? typeName.slice(0, -1) : typeName;
+        if (type === 'string') return 'valen_string_equal_context';
+        if (type?.startsWith('Array<')) throw new Error('aarch64-linux bootstrap backend does not yet support structural array equality');
+        return 'valen_object_equal';
+    }
+
+    hashFunction(typeName) {
+        const type = typeName?.endsWith('?') ? typeName.slice(0, -1) : typeName;
+        if (type === 'string') return 'valen_string_hash_context';
+        if (type?.startsWith('Array<')) throw new Error('aarch64-linux bootstrap backend does not yet support structural array hashing');
+        return 'valen_object_hash';
+    }
 
     requireFunction(target) {
         const symbol = this.symbols.get(target);
@@ -1461,11 +1590,15 @@ export class AArch64Backend {
     align(value, alignment) { return Math.ceil(value / alignment) * alignment; }
     isUnsigned(type) { return type === 'bool' || type?.startsWith('u'); }
     isFloat(type) { return type === 'f32' || type === 'f64'; }
+    isPrimitiveOptional(type) {
+        return type?.endsWith('?') && ['bool', 'u8', 'i8', 'u16', 'i16', 'u32', 'i32', 'u64', 'i64', 'f32', 'f64']
+            .includes(type.slice(0, -1));
+    }
     isManagedReferenceType(type) {
         if (!type) return false;
         const base = type.endsWith('?') ? type.slice(0, -1) : type;
         return base === 'string' || base === 'StringBuilder' || base.startsWith('Array<') || this.typeSizes.has(base) ||
-            (type.endsWith('?') && ['bool', 'u8', 'i8', 'u16', 'i16', 'u32', 'i32', 'u64', 'i64', 'f32', 'f64'].includes(base));
+            this.isPrimitiveOptional(type);
     }
 
     mangle(value) {

@@ -1,0 +1,24 @@
+Node {{
+    member value:i64
+    member name:string
+    member next:Node?
+
+    __(value:i64, name:string) -> void {
+        self.value = value
+        self.name = name
+    }
+}}
+
+entry {{
+    __() -> i32 {
+        local first = new Node(7, "cycle")
+        first.next = first
+        local second = new Node(7, "cycle")
+        second.next = second
+        if first != second { return 1 }
+        if first.hash() != second.hash() { return 2 }
+        second.value = 8
+        if first == second { return 3 }
+        return 0
+    }
+}}

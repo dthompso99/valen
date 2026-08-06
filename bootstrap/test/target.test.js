@@ -420,6 +420,33 @@ test('bootstrap compiler tracks AArch64 managed allocations and precise roots', 
     assert.match(builders.assembly, /valen_array_new:[\s\S]*ldr x1, \[sp, #16\][\s\S]*ldr x2, \[sp, #24\]/);
 });
 
+test('bootstrap compiler boxes primitive optionals on AArch64', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-optionals-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-optionals.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'optionals'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'optionals')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /bl valen_gc_alloc/);
+    assert.match(result.assembly, /str x9, \[x10, #16\]/);
+    assert.match(result.assembly, /ldr x9, \[x9, #16\]/);
+});
+
+test('bootstrap compiler emits cycle-safe AArch64 structural equality and hashing', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-structural-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-structural.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'structural'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'structural')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /\.globl valen_object_equal/);
+    assert.match(result.assembly, /\.Lobject_equal_scan:/);
+    assert.match(result.assembly, /\.globl valen_object_hash/);
+    assert.match(result.assembly, /valen_string_hash_context:/);
+    assert.match(result.assembly, /\.quad .*_equal/);
+    assert.match(result.assembly, /\.quad .*_hash/);
+});
+
 test('bootstrap compiler collects AArch64 object graphs and clears weak references', t => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-gc-'));
     t.after(() => fs.rmSync(directory, {recursive: true, force: true}));

@@ -1,0 +1,23 @@
+Holder {{
+    member value:i64? = 0
+}}
+
+entry {{
+    present(value:i64) -> i64? { return value }
+    decimal() -> f64? { return 2.5 }
+
+    __() -> i32 {
+        local zero:i64? = 0
+        if zero == null || zero! != 0 { return 1 }
+        local answer = self.present(42)
+        if answer == null || answer! != 42 { return 2 }
+        local decimal = self.decimal()
+        if decimal == null || decimal! != 2.5 { return 3 }
+        local holder = new Holder()
+        if holder.value == null || holder.value! != 0 { return 4 }
+        local values = new Array<i64?>(1)
+        values[0] = 11
+        if values[0] == null || values[0]! != 11 { return 5 }
+        return 0
+    }
+}}
