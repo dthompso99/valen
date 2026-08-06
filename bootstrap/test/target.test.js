@@ -304,3 +304,16 @@ test('bootstrap compiler emits foundational UTF-8 AArch64 string operations', t 
     assert.match(result.assembly, /bl valen_string_slice/);
     assert.match(bounds.assembly, /b\.cs \.Larray_bounds_error/);
 });
+
+test('bootstrap compiler copies between AArch64 strings and byte arrays', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-byte-conversions-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-byte-conversions.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'byte-conversions'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'byte-conversions')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /bl valen_string_to_bytes/);
+    assert.match(result.assembly, /bl valen_bytes_to_string/);
+    assert.match(result.assembly, /\.Lstring_to_bytes_copy:/);
+    assert.match(result.assembly, /\.Lbytes_to_string_copy:/);
+});

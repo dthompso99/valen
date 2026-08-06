@@ -49,9 +49,9 @@
   elements. The generation-0 allocator currently retains replaced buffers as anonymous mappings for process
   lifetime. Copied slices support value elements and explicit reference aliases; deep-copy slices of owned
   managed elements and weak-element slices remain WIP with structural hooks and tracing GC. AArch64 strings
-  support UTF-8 literals, byte length and indexing, equality, concatenation, and copied byte slices. Unicode
-  scalar/grapheme operations, byte conversion, builders/interpolation, native facilities, and self-hosting
-  remain WIP on AArch64.
+  support UTF-8 literals, byte length and indexing, equality, concatenation, copied byte slices, and copied
+  conversion to and from byte arrays. Unicode scalar/grapheme operations, builders/interpolation, native
+  facilities, and self-hosting remain WIP on AArch64.
 - x86-64 Linux executables own their `_start` adapter, link without an implicit C runtime, and
   reject target-native symbols that the backend cannot provide.
 - **WIP:** general freestanding capability manifests, runtime hooks, and non-Linux code generation

@@ -1,0 +1,19 @@
+entry {{
+    __() -> i32 {
+        local source = "world"
+        local bytes = source.toBytes()
+        if bytes.length != 5 || bytes[0] != 119 || bytes[4] != 100 { return 1 }
+
+        bytes[0] = 87
+        if bytes.toString() != "World" { return 2 }
+        if source != "world" { return 3 }
+
+        local unicode = "hé🙂"
+        local encoded = unicode.toBytes()
+        if encoded.length != 7 || encoded.toString() != unicode { return 4 }
+
+        local empty = "".toBytes()
+        if empty.length != 0 || empty.toString() != "" { return 5 }
+        return 0
+    }
+}}

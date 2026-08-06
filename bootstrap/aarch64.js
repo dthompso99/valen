@@ -214,6 +214,12 @@ export class AArch64Backend {
                 return [...this.load(instruction.string, 'x0'), ...this.load(instruction.start, 'x1'),
                     ...this.load(instruction.length, 'x2'), '    bl valen_string_slice',
                     `    str x0, ${this.temp(instruction.result)}`];
+            case 'string_to_bytes':
+                return [...this.load(instruction.value, 'x0'), '    bl valen_string_to_bytes',
+                    `    str x0, ${this.temp(instruction.result)}`];
+            case 'bytes_to_string':
+                return [...this.load(instruction.value, 'x0'), '    bl valen_bytes_to_string',
+                    `    str x0, ${this.temp(instruction.result)}`];
             case 'call':
                 return this.call(instruction, false);
             case 'virtual_call':
@@ -477,7 +483,23 @@ export class AArch64Backend {
             '.Lstring_slice_copy:', '    cbz x2, .Lstring_slice_done', '    ldrb w5, [x4, #0]', '    strb w5, [x3, #0]',
             '    add x4, x4, #1', '    add x3, x3, #1', '    sub x2, x2, #1', '    b .Lstring_slice_copy',
             '.Lstring_slice_done:', '    ldr x0, [sp, #24]', '    ldr x30, [sp, #40]', '    add sp, sp, #48',
-            '    ret', '.size valen_string_slice, .-valen_string_slice', ''];
+            '    ret', '.size valen_string_slice, .-valen_string_slice', '', '.globl valen_string_to_bytes',
+            '.type valen_string_to_bytes, %function', 'valen_string_to_bytes:', '    sub sp, sp, #48',
+            '    str x30, [sp, #40]', '    str x0, [sp, #0]', '    ldr x1, [x0, #8]', '    str x1, [sp, #8]',
+            '    mov x0, #1', '    bl valen_array_new', '    str x0, [sp, #16]', '    ldr x2, [x0, #16]',
+            '    ldr x0, [sp, #0]', '    ldr x1, [x0, #0]', '    ldr x3, [sp, #8]',
+            '.Lstring_to_bytes_copy:', '    cbz x3, .Lstring_to_bytes_done', '    ldrb w4, [x1, #0]',
+            '    strb w4, [x2, #0]', '    add x1, x1, #1', '    add x2, x2, #1', '    sub x3, x3, #1',
+            '    b .Lstring_to_bytes_copy', '.Lstring_to_bytes_done:', '    ldr x0, [sp, #16]', '    ldr x30, [sp, #40]',
+            '    add sp, sp, #48', '    ret', '.size valen_string_to_bytes, .-valen_string_to_bytes', '',
+            '.globl valen_bytes_to_string', '.type valen_bytes_to_string, %function', 'valen_bytes_to_string:',
+            '    sub sp, sp, #48', '    str x30, [sp, #40]', '    str x0, [sp, #0]', '    ldr x1, [x0, #0]',
+            '    str x1, [sp, #8]', '    mov x0, x1', '    bl valen_string_new', '    str x0, [sp, #16]',
+            '    ldr x2, [x0, #0]', '    ldr x0, [sp, #0]', '    ldr x1, [x0, #16]', '    ldr x3, [sp, #8]',
+            '.Lbytes_to_string_copy:', '    cbz x3, .Lbytes_to_string_done', '    ldrb w4, [x1, #0]',
+            '    strb w4, [x2, #0]', '    add x1, x1, #1', '    add x2, x2, #1', '    sub x3, x3, #1',
+            '    b .Lbytes_to_string_copy', '.Lbytes_to_string_done:', '    ldr x0, [sp, #16]', '    ldr x30, [sp, #40]',
+            '    add sp, sp, #48', '    ret', '.size valen_bytes_to_string, .-valen_bytes_to_string', ''];
     }
 
     call(instruction, dynamic) {
