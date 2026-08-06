@@ -24,6 +24,7 @@ RUN chmod +x valen
 COPY src/ ./src/
 COPY lib/ ./lib/
 COPY scripts/package-stdlib.mjs ./scripts/package-stdlib.mjs
+COPY bootstrap/target.js ./bootstrap/target.js
 
 ENV VALEN_LIBRARY_PATH=/app/lib
 ENV VALEN_SYSROOT=/app/lib/valen/current/x86_64-linux
