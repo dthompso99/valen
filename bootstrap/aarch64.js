@@ -41,6 +41,7 @@ export class AArch64Backend {
             '.Lcontract_dispatch_error:', '    mov x0, #75', '    mov x8, #93', '    svc #0',
             '.Lfloat_conversion_error:', '    mov x0, #76', '    mov x8, #93', '    svc #0', '');
         lines.push(...this.typeData(this.emittedTypes), ...this.stringData());
+        if (includeRuntime) lines.push(...this.gcData());
         lines.push('.section .note.GNU-stack,"",@progbits');
         return `${lines.join('\n')}\n`;
     }
@@ -48,26 +49,34 @@ export class AArch64Backend {
     generateFunction(fn) {
         this.fn = fn;
         this.slots = new Map();
+        const slotTypes = new Map();
         this.outgoingSize = this.outgoingStackSize(fn);
         let slotOffset = this.outgoingSize;
-        const reserve = key => {
+        const reserve = (key, type = null) => {
             if (!this.slots.has(key)) {
                 this.slots.set(key, slotOffset);
                 slotOffset += 8;
             }
+            if (type) slotTypes.set(key, type);
         };
-        for (const parameter of fn.parameters) reserve(`name:${parameter.name}`);
+        for (const parameter of fn.parameters) reserve(`name:${parameter.name}`, parameter.type);
         for (const instruction of fn.blocks.flatMap(block => block.instructions)) {
-            if (instruction.result) reserve(`temp:${instruction.result}`);
-            if (instruction.op === 'declare_local' || instruction.op === 'store_local') reserve(`name:${instruction.name}`);
+            if (instruction.result) reserve(`temp:${instruction.result}`, instruction.type);
+            if (instruction.op === 'declare_local' || instruction.op === 'store_local') {
+                reserve(`name:${instruction.name}`, instruction.type ?? instruction.value?.type);
+            }
         }
-        const frameSize = this.align(slotOffset, 16);
+        const rootOffset = this.align(slotOffset, 16);
+        const frameSize = this.align(rootOffset + 24, 16);
         if (frameSize > 4064) throw new Error(`aarch64-linux bootstrap backend function '${fn.displayName}' needs an unsupported large stack frame`);
         const total = frameSize + 16;
         const symbol = this.symbols.get(fn.name);
         const end = `${symbol}__return`;
+        const rootTrace = `${symbol}__gc_roots`;
+        const roots = [...slotTypes].filter(([, type]) => this.isManagedReferenceType(type));
         const lines = [`.globl ${symbol}`, `.type ${symbol}, %function`, `${symbol}:`, `    sub sp, sp, #${total}`,
             `    str x29, [sp, #${frameSize}]`, `    str x30, [sp, #${frameSize + 8}]`, `    add x29, sp, #${frameSize}`];
+        for (let offset = this.outgoingSize; offset < slotOffset; offset += 8) lines.push(`    str xzr, [sp, #${offset}]`);
         for (const location of this.argumentLocations(fn.parameters)) {
             if (location.kind === 'stack') lines.push(`    ldr x9, [x29, #${16 + location.stackIndex * 8}]`,
                 `    str x9, ${this.named(location.value.name)}`);
@@ -76,12 +85,23 @@ export class AArch64Backend {
                 `    str x9, ${this.named(location.value.name)}`);
             else lines.push(`    str ${location.register}, ${this.named(location.value.name)}`);
         }
+        lines.push(...this.address('x9', 'valen_gc_roots'), '    ldr x10, [x9, #0]',
+            `    str x10, [sp, #${rootOffset}]`, ...this.address('x10', rootTrace),
+            `    str x10, [sp, #${rootOffset + 8}]`, '    add x10, sp, #0',
+            `    str x10, [sp, #${rootOffset + 16}]`, `    add x10, sp, #${rootOffset}`, '    str x10, [x9, #0]');
         for (const block of fn.blocks) {
             if (block.label !== 'entry') lines.push(`${this.blockLabel(block.label)}:`);
             for (const instruction of block.instructions) lines.push(...this.instruction(instruction, end));
         }
-        lines.push(`${end}:`, `    ldr x29, [sp, #${frameSize}]`, `    ldr x30, [sp, #${frameSize + 8}]`,
-            `    add sp, sp, #${total}`, '    ret', `.size ${symbol}, .-${symbol}`, '');
+        lines.push(`${end}:`, ...this.address('x9', 'valen_gc_roots'), `    ldr x10, [sp, #${rootOffset}]`,
+            '    str x10, [x9, #0]', `    ldr x29, [sp, #${frameSize}]`, `    ldr x30, [sp, #${frameSize + 8}]`,
+            `    add sp, sp, #${total}`, '    ret', `.size ${symbol}, .-${symbol}`, '',
+            `.type ${rootTrace}, %function`, `${rootTrace}:`, '    sub sp, sp, #32', '    str x30, [sp, #24]',
+            '    str x0, [sp, #16]');
+        for (const [key] of roots) lines.push('    ldr x9, [sp, #16]', `    ldr x0, [x9, #${this.slots.get(key)}]`,
+            '    bl valen_gc_mark');
+        lines.push('    ldr x30, [sp, #24]', '    add sp, sp, #32', '    ret',
+            `.size ${rootTrace}, .-${rootTrace}`, '');
         return lines;
     }
 
@@ -132,7 +152,8 @@ export class AArch64Backend {
             case 'binary':
                 return this.binary(instruction);
             case 'allocate':
-                return [...this.constant('x0', this.typeSizes.get(instruction.objectType) ?? 16), '    bl valen_alloc',
+                return [...this.constant('x0', this.typeSizes.get(instruction.objectType) ?? 16),
+                    ...this.constant('x1', 0), ...this.constant('x2', 0), ...this.constant('x3', 0), '    bl valen_gc_alloc',
                     ...this.address('x9', this.typeLabel(instruction.objectType)), '    str x9, [x0, #0]',
                     ...this.constant('x9', 1), '    str x9, [x0, #8]',
                     `    str x0, ${this.temp(instruction.result)}`];
@@ -361,7 +382,8 @@ export class AArch64Backend {
         if (!entry) throw new Error('Program has no entry.__ method');
         const entryType = this.program.types.find(type => type.name === entry.owner);
         const lines = ['.globl _start', '.type _start, %function', '_start:', '    sub sp, sp, #16',
-            ...this.constant('x0', this.typeSizes.get(entry.owner) ?? 16), '    bl valen_alloc',
+            ...this.constant('x0', this.typeSizes.get(entry.owner) ?? 16), ...this.constant('x1', 0),
+            ...this.constant('x2', 0), ...this.constant('x3', 0), '    bl valen_gc_alloc',
             ...this.address('x9', this.typeLabel(entry.owner)), '    str x9, [x0, #0]', ...this.constant('x9', 1),
             '    str x9, [x0, #8]', '    str x0, [sp, #0]'];
         if (entryType?.initializer) lines.push(`    bl ${this.symbols.get(entryType.initializer)}`, '    ldr x0, [sp, #0]');
@@ -374,6 +396,17 @@ export class AArch64Backend {
         return ['.globl valen_alloc', '.type valen_alloc, %function', 'valen_alloc:', '    mov x1, x0', '    mov x0, #0',
             '    mov x2, #3', '    mov x3, #34', '    mov x4, #-1', '    mov x5, #0', '    mov x8, #222', '    svc #0',
             '    mov x9, #-4095', '    cmp x0, x9', '    b.cs .Lallocation_error', '    ret', '.size valen_alloc, .-valen_alloc',
+            '', '.globl valen_gc_alloc', '.type valen_gc_alloc, %function', 'valen_gc_alloc:',
+            '    sub sp, sp, #64', '    str x30, [sp, #56]', '    str x0, [sp, #0]', '    str x1, [sp, #8]',
+            '    str x2, [sp, #16]', '    str x3, [sp, #24]', '    add x0, x0, #48', '    ldr x9, [sp, #0]',
+            '    cmp x0, x9', '    b.cc .Lallocation_error', '    str x0, [sp, #32]', '    bl valen_alloc',
+            '    str x0, [sp, #40]', ...this.address('x9', 'valen_gc_heap'), '    ldr x10, [x9, #0]',
+            '    str x10, [x0, #0]', '    ldr x10, [sp, #32]', '    str x10, [x0, #8]',
+            '    ldr x10, [sp, #8]', '    str x10, [x0, #16]', '    ldr x10, [sp, #16]', '    str x10, [x0, #24]',
+            '    str xzr, [x0, #32]', '    ldr x10, [sp, #24]', '    str x10, [x0, #40]',
+            '    str x0, [x9, #0]', '    add x0, x0, #48', '    ldr x30, [sp, #56]', '    add sp, sp, #64',
+            '    ret', '.size valen_gc_alloc, .-valen_gc_alloc', '', '.globl valen_gc_mark',
+            '.type valen_gc_mark, %function', 'valen_gc_mark:', '    ret', '.size valen_gc_mark, .-valen_gc_mark',
             '.Lallocation_error:', '    mov x0, #72', '    mov x8, #93', '    svc #0', ''];
     }
 
@@ -383,7 +416,8 @@ export class AArch64Backend {
             '    str x0, [sp, #0]', '    str x1, [sp, #8]', '    mov x2, x1', '    cmp x2, #4',
             '    b.ge .Larray_capacity_ready', '    mov x2, #4', '.Larray_capacity_ready:', '    str x2, [sp, #16]',
             '    mul x3, x2, x0', '    udiv x4, x3, x0', '    cmp x4, x2', '    b.ne .Larray_bounds_error',
-            '    str x3, [sp, #24]', '    mov x0, #40', '    bl valen_alloc', '    str x0, [sp, #32]',
+            '    str x3, [sp, #24]', '    mov x0, #40', '    mov x1, #0', '    mov x2, #0', '    mov x3, #0',
+            '    bl valen_gc_alloc', '    str x0, [sp, #32]',
             '    ldr x0, [sp, #24]', '    bl valen_alloc', '    mov x5, x0', '    ldr x0, [sp, #32]',
             '    ldr x1, [sp, #8]', '    str x1, [x0, #0]', '    ldr x1, [sp, #16]', '    str x1, [x0, #8]',
             '    str x5, [x0, #16]', '    ldr x1, [sp, #0]', '    str x1, [x0, #24]', '    mov x1, #1',
@@ -478,7 +512,8 @@ export class AArch64Backend {
     stringRuntime() {
         return ['.globl valen_string_new', '.type valen_string_new, %function', 'valen_string_new:',
             '    cmp x0, #0', '    b.lt .Larray_bounds_error', '    sub sp, sp, #32', '    str x30, [sp, #24]',
-            '    str x0, [sp, #0]', '    mov x0, #24', '    bl valen_alloc', '    str x0, [sp, #8]',
+            '    str x0, [sp, #0]', '    mov x0, #24', '    mov x1, #0', '    mov x2, #0', '    mov x3, #0',
+            '    bl valen_gc_alloc', '    str x0, [sp, #8]',
             '    ldr x0, [sp, #0]', '    cbnz x0, .Lstring_new_allocate', '    mov x0, #1', '.Lstring_new_allocate:',
             '    str x0, [sp, #16]', '    bl valen_alloc', '    mov x1, x0', '    ldr x0, [sp, #8]',
             '    str x1, [x0, #0]', '    ldr x1, [sp, #0]', '    str x1, [x0, #8]', '    ldr x1, [sp, #16]',
@@ -879,6 +914,11 @@ export class AArch64Backend {
             `    .byte ${literal.bytes.length ? literal.bytes.join(', ') : 0}`);
         lines.push('.text');
         return lines;
+    }
+
+    gcData() {
+        return ['.section .data', '.align 8', '.globl valen_gc_roots', 'valen_gc_roots:', '    .quad 0',
+            '.globl valen_gc_heap', 'valen_gc_heap:', '    .quad 0', '.text'];
     }
 
     typeLabel(typeName) { return `.Lvalen_type_${this.mangle(typeName)}`; }

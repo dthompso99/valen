@@ -397,3 +397,22 @@ test('bootstrap compiler invalidates weak AArch64 fields and array elements', t 
     assert.match(collection.assembly, /\.Lweak_array_live_/);
     assert.doesNotMatch(collection.assembly, /does not yet support weak/);
 });
+
+test('bootstrap compiler tracks AArch64 managed allocations and precise roots', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-gc-foundation-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const objectSource = fileURLToPath(new URL('fixtures/aarch64-objects.ar', import.meta.url));
+    const objects = new Compiler().compile(objectSource, path.join(directory, 'objects'), {target: 'aarch64-linux'});
+    const builderSource = fileURLToPath(new URL('fixtures/aarch64-string-builder.ar', import.meta.url));
+    const builders = new Compiler().compile(builderSource, path.join(directory, 'builders'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'objects')).readUInt16LE(18), 183);
+    assert.match(objects.assembly, /valen_gc_alloc:/);
+    assert.match(objects.assembly, /valen_gc_heap:/);
+    assert.match(objects.assembly, /valen_gc_roots:/);
+    assert.match(objects.assembly, /__gc_roots:/);
+    assert.match(objects.assembly, /bl valen_gc_mark/);
+    assert.match(objects.assembly, /add x0, x0, #48/);
+    assert.match(builders.assembly, /valen_array_new:[\s\S]*bl valen_gc_alloc/);
+    assert.match(builders.assembly, /valen_string_new:[\s\S]*bl valen_gc_alloc/);
+});
