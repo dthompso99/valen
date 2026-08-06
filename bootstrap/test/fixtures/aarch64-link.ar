@@ -1,0 +1,21 @@
+library System {{
+    native openWrite(path:string) -> File?
+    native writeFile(file:File, input:string) -> i64
+    native close(own file:File) -> i64
+    native link(assemblyPath:string, outputPath:string, libraries:Array<string>) -> i64
+
+    File {{ member descriptor:i64 }}
+}}
+
+entry {{
+    __() -> i64 {
+        local assemblyPath = "/tmp/valen-aarch64-link-input.s"
+        local outputPath = "/tmp/valen-aarch64-link-output"
+        local assembly = ".globl _start\n_start:\n    mov x0, #42\n    mov x8, #93\n    svc #0\n.section .note.GNU-stack,\"\",@progbits\n"
+        local file = System.openWrite(assemblyPath)
+        if file == null { return 1 }
+        if System.writeFile(file!, assembly) != assembly.length { return 2 }
+        if System.close(file!) != 0 { return 3 }
+        return System.link(assemblyPath, outputPath, new Array<string>(0))
+    }
+}}

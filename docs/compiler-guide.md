@@ -55,6 +55,8 @@ source -> tokens -> AST -> module graph -> semantic symbols
   signed-integer printing, process exit, garbage collection, and foundational file I/O with explicit error state.
   The startup adapter preserves `argc`, `argv`, and `envp` for managed argument arrays, current-directory
   discovery, and copied environment values.
+  A freestanding linker adapter constructs `cc -nostdlib -no-pie` arguments, preserves library and direct
+  object inputs, and reports normal or signal-derived child status without libc process helpers.
   Weak object fields and weak array elements/slices observe the shared
   object liveness word and become null after explicit destruction. Managed object, array, and dynamic-string
   descriptors carry the common hidden 48-byte GC allocation prefix, and functions publish precise managed

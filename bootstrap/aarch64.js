@@ -13,7 +13,8 @@ export class AArch64Backend {
             'valen_System_openWrite', 'valen_System_read', 'valen_System_writeFile', 'valen_System_close',
             'valen_System_lastError', 'valen_System_arguments', 'valen_System_currentDirectory',
             'valen_System_environmentVariable', 'valen_System_enableProcessArena', 'valen_System_writeBytes',
-            'valen_System_sync', 'valen_System_replaceFile', 'valen_System_removeFile', 'valen_System_makeExecutable']);
+            'valen_System_sync', 'valen_System_replaceFile', 'valen_System_removeFile', 'valen_System_makeExecutable',
+            'valen_System_link', 'valen_System_memoryCopy', 'valen_System_memoryCompare']);
         this.program = program;
         this.runtimeLabel = 0;
         this.fieldOffsets = new Map();
@@ -874,8 +875,11 @@ export class AArch64Backend {
             '.globl valen_System_enableProcessArena', '.type valen_System_enableProcessArena, %function',
             'valen_System_enableProcessArena:', '    ret',
             '.size valen_System_enableProcessArena, .-valen_System_enableProcessArena', '');
-        if (['valen_System_replaceFile', 'valen_System_removeFile', 'valen_System_makeExecutable']
+        if (['valen_System_replaceFile', 'valen_System_removeFile', 'valen_System_makeExecutable', 'valen_System_link']
             .some(symbol => this.runtimeSymbols.has(symbol))) lines.push(...this.systemPathRuntime());
+        if (this.runtimeSymbols.has('valen_System_link')) lines.push(...this.systemLinkRuntime());
+        if (this.runtimeSymbols.has('valen_System_memoryCopy')) lines.push(...this.systemMemoryCopyRuntime());
+        if (this.runtimeSymbols.has('valen_System_memoryCompare')) lines.push(...this.systemMemoryCompareRuntime());
         return lines;
     }
 
@@ -984,6 +988,88 @@ export class AArch64Backend {
             '    svc #0', '    cmp x0, #0', `    b.lt ${error}`, ...this.clearFilesystemError(), `    b ${done}`,
             `${error}:`, '    neg x10, x0', ...this.storeFilesystemError('x10'), `${done}:`,
             '    ldr x30, [sp, #8]', '    add sp, sp, #16', '    ret', `.size ${symbol}, .-${symbol}`, ''];
+    }
+
+    systemLinkRuntime() {
+        return ['.globl valen_System_link', '.type valen_System_link, %function', 'valen_System_link:',
+            '    sub sp, sp, #112', '    str x30, [sp, #104]', '    str x1, [sp, #0]', '    str x2, [sp, #8]',
+            '    bl valen_path_cstring', '    str x0, [sp, #16]', '    ldr x0, [sp, #0]',
+            '    bl valen_path_cstring', '    str x0, [sp, #24]', '    ldr x9, [sp, #8]',
+            '    ldr x10, [x9, #0]', '    str x10, [sp, #32]', '    add x0, x10, #7', '    lsl x0, x0, #3',
+            '    bl valen_alloc', '    str x0, [sp, #40]', ...this.address('x9', '.Lvalen_link_cc'),
+            '    str x9, [x0, #0]', ...this.address('x9', '.Lvalen_link_no_stdlib'), '    str x9, [x0, #8]',
+            ...this.address('x9', '.Lvalen_link_no_pie'), '    str x9, [x0, #16]', '    ldr x9, [sp, #16]',
+            '    str x9, [x0, #24]', ...this.address('x9', '.Lvalen_link_output'), '    str x9, [x0, #32]',
+            '    ldr x9, [sp, #24]', '    str x9, [x0, #40]', '    str xzr, [sp, #48]',
+            '.Lsystem_link_library_next:', '    ldr x9, [sp, #48]', '    ldr x10, [sp, #32]',
+            '    cmp x9, x10', '    b.cs .Lsystem_link_library_done', '    ldr x10, [sp, #8]',
+            '    ldr x10, [x10, #16]', '    lsl x11, x9, #3', '    add x10, x10, x11', '    ldr x10, [x10, #0]',
+            '    ldr x11, [x10, #0]', '    str x11, [sp, #56]', '    ldr x12, [x10, #8]', '    str x12, [sp, #64]',
+            '    cbz x12, .Lsystem_link_normal_library', '    ldrb w13, [x11, #0]', '    cmp x13, #64',
+            '    b.ne .Lsystem_link_normal_library', '    mov x0, x12', '    bl valen_alloc', '    str x0, [sp, #72]',
+            '    ldr x1, [sp, #56]', '    add x1, x1, #1', '    ldr x2, [sp, #64]', '    sub x2, x2, #1',
+            '    b .Lsystem_link_library_copy', '.Lsystem_link_normal_library:', '    ldr x12, [sp, #64]',
+            '    add x0, x12, #3', '    bl valen_alloc', '    str x0, [sp, #72]', '    mov x13, #45',
+            '    strb w13, [x0, #0]', '    mov x13, #108', '    strb w13, [x0, #1]', '    add x0, x0, #2',
+            '    ldr x1, [sp, #56]', '    ldr x2, [sp, #64]', '.Lsystem_link_library_copy:',
+            '    cbz x2, .Lsystem_link_library_terminate', '    ldrb w13, [x1, #0]', '    strb w13, [x0, #0]',
+            '    add x1, x1, #1', '    add x0, x0, #1', '    sub x2, x2, #1',
+            '    b .Lsystem_link_library_copy', '.Lsystem_link_library_terminate:', '    mov x13, #0',
+            '    strb w13, [x0, #0]', '    ldr x9, [sp, #48]', '    add x10, x9, #6', '    lsl x10, x10, #3',
+            '    ldr x11, [sp, #40]', '    add x10, x11, x10', '    ldr x11, [sp, #72]', '    str x11, [x10, #0]',
+            '    add x9, x9, #1', '    str x9, [sp, #48]', '    b .Lsystem_link_library_next',
+            '.Lsystem_link_library_done:', '    add x10, x9, #6', '    lsl x10, x10, #3',
+            '    ldr x11, [sp, #40]', '    add x10, x11, x10', '    str xzr, [x10, #0]',
+            '    mov x0, #17', '    mov x1, #0', '    mov x2, #0', '    mov x3, #0', '    mov x4, #0',
+            '    mov x8, #220', '    svc #0', '    cmp x0, #0', '    b.lt .Lsystem_link_failure',
+            '    cbz x0, .Lsystem_link_child', '    add x1, sp, #88', '    mov x2, #0', '    mov x3, #0',
+            '    mov x8, #260', '    svc #0', '    cmp x0, #0', '    b.lt .Lsystem_link_failure',
+            '    ldr x9, [sp, #88]', '    mov x10, #127', '    and x10, x9, x10',
+            '    cbnz x10, .Lsystem_link_signaled', '    lsr x0, x9, #8', '    mov x10, #255',
+            '    and x0, x0, x10', '    b .Lsystem_link_done', '.Lsystem_link_signaled:',
+            '    add x0, x10, #128', '    b .Lsystem_link_done', '.Lsystem_link_child:',
+            ...this.address('x0', '.Lvalen_link_cc'), '    ldr x1, [sp, #40]',
+            ...this.address('x9', 'valen_process_envp'), '    ldr x2, [x9, #0]', '    mov x8, #221',
+            '    svc #0', '    mov x0, #127', '    mov x8, #93', '    svc #0', '.Lsystem_link_failure:',
+            '    mov x0, #127', '.Lsystem_link_done:', '    ldr x30, [sp, #104]', '    add sp, sp, #112',
+            '    ret', '.size valen_System_link, .-valen_System_link', '', '.section .data',
+            '.Lvalen_link_cc:', '    .byte 47,117,115,114,47,98,105,110,47,99,99,0',
+            '.Lvalen_link_no_stdlib:', '    .byte 45,110,111,115,116,100,108,105,98,0',
+            '.Lvalen_link_no_pie:', '    .byte 45,110,111,45,112,105,101,0',
+            '.Lvalen_link_output:', '    .byte 45,111,0', '.text'];
+    }
+
+    systemMemoryCopyRuntime() {
+        return ['.globl valen_System_memoryCopy', '.type valen_System_memoryCopy, %function',
+            'valen_System_memoryCopy:', '    cmp x1, #0', '    b.lt .Larray_bounds_error', '    cmp x3, #0',
+            '    b.lt .Larray_bounds_error', '    cmp x4, #0', '    b.lt .Larray_bounds_error',
+            '    ldr x9, [x0, #0]', '    cmp x1, x9', '    b.hi .Larray_bounds_error', '    sub x9, x9, x1',
+            '    cmp x4, x9', '    b.hi .Larray_bounds_error', '    ldr x9, [x2, #0]', '    cmp x3, x9',
+            '    b.hi .Larray_bounds_error', '    sub x9, x9, x3', '    cmp x4, x9',
+            '    b.hi .Larray_bounds_error', '    ldr x9, [x0, #16]', '    add x9, x9, x1',
+            '    ldr x10, [x2, #16]', '    add x10, x10, x3', '.Lsystem_memory_copy_next:',
+            '    cbz x4, .Lsystem_memory_copy_done', '    ldrb w11, [x10, #0]', '    strb w11, [x9, #0]',
+            '    add x9, x9, #1', '    add x10, x10, #1', '    sub x4, x4, #1',
+            '    b .Lsystem_memory_copy_next', '.Lsystem_memory_copy_done:', '    mov x0, #1', '    ret',
+            '.size valen_System_memoryCopy, .-valen_System_memoryCopy', ''];
+    }
+
+    systemMemoryCompareRuntime() {
+        return ['.globl valen_System_memoryCompare', '.type valen_System_memoryCompare, %function',
+            'valen_System_memoryCompare:', '    cmp x1, #0', '    b.lt .Larray_bounds_error', '    cmp x3, #0',
+            '    b.lt .Larray_bounds_error', '    cmp x4, #0', '    b.lt .Larray_bounds_error',
+            '    ldr x9, [x0, #0]', '    cmp x1, x9', '    b.hi .Larray_bounds_error', '    sub x9, x9, x1',
+            '    cmp x4, x9', '    b.hi .Larray_bounds_error', '    ldr x9, [x2, #0]', '    cmp x3, x9',
+            '    b.hi .Larray_bounds_error', '    sub x9, x9, x3', '    cmp x4, x9',
+            '    b.hi .Larray_bounds_error', '    ldr x9, [x0, #16]', '    add x9, x9, x1',
+            '    ldr x10, [x2, #16]', '    add x10, x10, x3', '.Lsystem_memory_compare_next:',
+            '    cbz x4, .Lsystem_memory_compare_equal', '    ldrb w11, [x9, #0]', '    ldrb w12, [x10, #0]',
+            '    cmp x11, x12', '    b.cc .Lsystem_memory_compare_less', '    b.hi .Lsystem_memory_compare_greater',
+            '    add x9, x9, #1', '    add x10, x10, #1', '    sub x4, x4, #1',
+            '    b .Lsystem_memory_compare_next', '.Lsystem_memory_compare_less:', '    mov x0, #-1', '    ret',
+            '.Lsystem_memory_compare_greater:', '    mov x0, #1', '    ret',
+            '.Lsystem_memory_compare_equal:', '    mov x0, #0', '    ret',
+            '.size valen_System_memoryCompare, .-valen_System_memoryCompare', ''];
     }
 
     clearFilesystemError() { return [...this.address('x9', 'valen_filesystem_error'), '    str xzr, [x9, #0]']; }

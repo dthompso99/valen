@@ -66,7 +66,9 @@
   Linux process arguments, current-directory discovery, and environment lookup are also available.
   Byte-array writes, synchronization, atomic replacement, removal, and executable permissions complete the
   compiler-facing filesystem mutation surface. Networking, threading, foreign calls, and
-  self-hosting remain WIP on AArch64.
+  self-hosting remain WIP on AArch64. The freestanding system-linker adapter can invoke `/usr/bin/cc`
+  with ordinary libraries and direct `@object` inputs using `clone`, `execve`, and `wait4`.
+  Bounds-checked bulk byte copying and lexicographic comparison match the x86-64 runtime surface.
 - x86-64 Linux executables own their `_start` adapter, link without an implicit C runtime, and
   reject target-native symbols that the backend cannot provide.
 - **WIP:** general freestanding capability manifests, runtime hooks, and non-Linux code generation

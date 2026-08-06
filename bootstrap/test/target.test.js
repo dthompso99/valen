@@ -479,3 +479,25 @@ test('bootstrap compiler preserves and exposes AArch64 process state', t => {
     assert.match(result.assembly, /valen_System_currentDirectory:[\s\S]*mov x8, #17/);
     assert.match(result.assembly, /valen_System_environmentVariable:[\s\S]*\.Lsystem_environment_compare:/);
 });
+
+test('bootstrap compiler emits an AArch64 system-linker driver', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-link-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-link.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'link'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'link')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /valen_System_link:[\s\S]*mov x8, #220[\s\S]*mov x8, #260[\s\S]*mov x8, #221/);
+    assert.match(result.assembly, /\.Lvalen_link_cc:[\s\S]*\.byte 47,117,115,114,47,98,105,110,47,99,99,0/);
+});
+
+test('bootstrap compiler emits checked AArch64 bulk-memory facilities', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-memory-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-memory.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'memory'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'memory')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /valen_System_memoryCopy:[\s\S]*\.Lsystem_memory_copy_next:/);
+    assert.match(result.assembly, /valen_System_memoryCompare:[\s\S]*\.Lsystem_memory_compare_less:[\s\S]*\.Lsystem_memory_compare_greater:/);
+});
