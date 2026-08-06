@@ -96,7 +96,15 @@ export class AArch64Assembler {
             if (match[1] === 'lsl') return {word: 0xd3400000 | (((64 - shift) & 63) << 16) | ((63 - shift) << 10) | (source << 5) | destination};
             return {word: (match[1] === 'lsr' ? 0xd3400000 : 0x93400000) | (shift << 16) | (63 << 10) | (source << 5) | destination};
         }
-        if ((match = line.match(/^(ldr|str) (x(?:[0-9]|[12][0-9]|30)), \[(x(?:[0-9]|[12][0-9]|30)|sp), (#(?:0x[0-9a-f]+|[0-9]+))\]$/i))) {
+        if ((match = line.match(/^(ldrb|strb|ldrh|strh|ldr|str) (w(?:[0-9]|[12][0-9]|30)), \[(x(?:[0-9]|[12][0-9]|30)|sp), (#(?:0x[0-9a-f]+|[0-9]+))\]$/i))) {
+            const value = immediate(match[4]);
+            const size = match[1].endsWith('b') ? 1 : match[1].endsWith('h') ? 2 : 4;
+            if (value < 0 || value % size || value / size > 4095) throw new Error(`AArch64 ${match[1]} offset is out of range`);
+            const base = {ldrb: 0x39400000, strb: 0x39000000, ldrh: 0x79400000, strh: 0x79000000,
+                ldr: 0xb9400000, str: 0xb9000000}[match[1]];
+            return {word: base | ((value / size) << 10) | (register(match[3]) << 5) | wordRegister(match[2])};
+        }
+        if ((match = line.match(/^(ldr|str) (x(?:[0-9]|[12][0-9]|30)|xzr), \[(x(?:[0-9]|[12][0-9]|30)|sp), (#(?:0x[0-9a-f]+|[0-9]+))\]$/i))) {
             const value = immediate(match[4]);
             if (value < 0 || value % 8 || value / 8 > 4095) throw new Error(`AArch64 ${match[1]} offset is out of range`);
             const base = match[1] === 'ldr' ? 0xf9400000 : 0xf9000000;

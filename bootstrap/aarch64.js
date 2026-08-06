@@ -9,15 +9,26 @@ export class AArch64Backend {
         if (![0, 1].includes(optimizationLevel)) throw new Error(`Unsupported optimization level '-O${optimizationLevel}'`);
         prepareIr(program, {optimize: optimizationLevel === 1, requireEntry: includeRuntime});
         if (program.externals.length) throw new Error('aarch64-linux bootstrap backend does not yet support native or foreign calls');
-        if (program.types.some(type => type.fields.length || type.initializer)) {
-            throw new Error('aarch64-linux bootstrap backend does not yet support object fields or initializers');
-        }
         this.program = program;
+        this.fieldOffsets = new Map();
+        this.typeSizes = new Map();
+        for (const type of program.types) {
+            let offset = 16, alignment = 1;
+            for (const field of type.fields) {
+                if (field.ownership === 'member-weak') throw new Error('aarch64-linux bootstrap backend does not yet support weak object fields');
+                const size = this.sizeOf(field.type), fieldAlignment = Math.min(size, 8);
+                offset = this.align(offset, fieldAlignment);
+                this.fieldOffsets.set(field.symbol, {offset, type: field.type, ownership: field.ownership});
+                offset += size;
+                alignment = Math.max(alignment, fieldAlignment);
+            }
+            this.typeSizes.set(type.name, Math.max(8, this.align(offset, alignment)));
+        }
         this.symbols = new Map(program.functions.map(fn => [fn.name, this.mangle(fn.name)]));
         const functions = (moduleId === null ? program.functions : program.functions.filter(fn => fn.moduleId === moduleId));
         const lines = ['.text'];
         for (const fn of functions) lines.push(...this.generateFunction(fn));
-        if (includeRuntime) lines.push(...this.generateStart());
+        if (includeRuntime) lines.push(...this.generateStart(), ...this.allocationRuntime());
         lines.push('.Ldivision_by_zero_error:', '    mov x0, #73', '    mov x8, #93', '    svc #0',
             '.Lfloat_conversion_error:', '    mov x0, #76', '    mov x8, #93', '    svc #0', '');
         lines.push('.section .note.GNU-stack,"",@progbits');
@@ -80,6 +91,16 @@ export class AArch64Backend {
                 return [`    ldr x9, ${this.named(instruction.name)}`, `    str x9, ${this.temp(instruction.result)}`];
             case 'store_local':
                 return [...this.load(instruction.value, 'x9'), `    str x9, ${this.named(instruction.name)}`];
+            case 'load_field': {
+                const field = this.requireField(instruction.field);
+                return [...this.load(instruction.object, 'x9'), `    ${this.loadMnemonic(field.type)} ${this.valueRegister('x9', field.type)}, [x9, #${field.offset}]`,
+                    ...this.normalize('x9', field.type), `    str x9, ${this.temp(instruction.result)}`];
+            }
+            case 'store_field': {
+                const field = this.requireField(instruction.field);
+                return [...this.load(instruction.object, 'x9'), ...this.load(instruction.value, 'x10'),
+                    `    ${this.storeMnemonic(field.type)} ${this.valueRegister('x10', field.type)}, [x9, #${field.offset}]`];
+            }
             case 'unary': {
                 const lines = this.load(instruction.operand, 'x9');
                 if (instruction.operator === '-' && this.isFloat(instruction.type)) {
@@ -94,6 +115,14 @@ export class AArch64Backend {
             }
             case 'binary':
                 return this.binary(instruction);
+            case 'allocate':
+                return [...this.constant('x0', this.typeSizes.get(instruction.objectType) ?? 16), '    bl valen_alloc',
+                    '    str xzr, [x0, #0]', ...this.constant('x9', 1), '    str x9, [x0, #8]',
+                    `    str x0, ${this.temp(instruction.result)}`];
+            case 'destroy_object': {
+                const done = `${this.blockLabel(`destroy_done_${instruction.value.name}`)}`;
+                return [...this.load(instruction.value, 'x9'), `    cbz x9, ${done}`, '    str xzr, [x9, #8]', `${done}:`];
+            }
             case 'call':
             case 'virtual_call': {
                 const lines = [];
@@ -205,11 +234,21 @@ export class AArch64Backend {
     generateStart() {
         const entry = this.program.functions.find(fn => fn.name === this.program.entry);
         if (!entry) throw new Error('Program has no entry.__ method');
-        if (entry.owner && this.program.types.find(type => type.name === entry.owner)?.fields.length) {
-            throw new Error('aarch64-linux bootstrap backend cannot construct an entry object with fields yet');
-        }
-        return ['.globl _start', '.type _start, %function', '_start:', '    mov x0, #0', `    bl ${this.symbols.get(entry.name)}`,
-            '    mov x8, #93', '    svc #0', '.size _start, .-_start', ''];
+        const entryType = this.program.types.find(type => type.name === entry.owner);
+        const lines = ['.globl _start', '.type _start, %function', '_start:', '    sub sp, sp, #16',
+            ...this.constant('x0', this.typeSizes.get(entry.owner) ?? 16), '    bl valen_alloc', '    str xzr, [x0, #0]',
+            ...this.constant('x9', 1), '    str x9, [x0, #8]', '    str x0, [sp, #0]'];
+        if (entryType?.initializer) lines.push(`    bl ${this.symbols.get(entryType.initializer)}`, '    ldr x0, [sp, #0]');
+        lines.push(`    bl ${this.symbols.get(entry.name)}`, '    add sp, sp, #16', '    mov x8, #93', '    svc #0',
+            '.size _start, .-_start', '');
+        return lines;
+    }
+
+    allocationRuntime() {
+        return ['.globl valen_alloc', '.type valen_alloc, %function', 'valen_alloc:', '    mov x1, x0', '    mov x0, #0',
+            '    mov x2, #3', '    mov x3, #34', '    mov x4, #-1', '    mov x5, #0', '    mov x8, #222', '    svc #0',
+            '    mov x9, #-4095', '    cmp x0, x9', '    b.cs .Lallocation_error', '    ret', '.size valen_alloc, .-valen_alloc',
+            '.Lallocation_error:', '    mov x0, #72', '    mov x8, #93', '    svc #0', ''];
     }
 
     load(value, register) {
@@ -259,6 +298,23 @@ export class AArch64Backend {
         }
         return this.align(slots * 8, 16);
     }
+
+    requireField(symbol) {
+        const field = this.fieldOffsets.get(symbol);
+        if (!field) throw new Error(`aarch64-linux bootstrap backend has no layout for field '${symbol}'`);
+        return field;
+    }
+
+    sizeOf(type) {
+        if (type === 'u8' || type === 'i8' || type === 'bool') return 1;
+        if (type === 'u16' || type === 'i16') return 2;
+        if (type === 'u32' || type === 'i32' || type === 'f32') return 4;
+        return 8;
+    }
+
+    loadMnemonic(type) { return {1: 'ldrb', 2: 'ldrh', 4: 'ldr', 8: 'ldr'}[this.sizeOf(type)]; }
+    storeMnemonic(type) { return {1: 'strb', 2: 'strh', 4: 'str', 8: 'str'}[this.sizeOf(type)]; }
+    valueRegister(register, type) { return this.sizeOf(type) < 8 ? `w${register.slice(1)}` : register; }
 
     normalize(register, type) {
         if (!type || this.isFloat(type)) return [];

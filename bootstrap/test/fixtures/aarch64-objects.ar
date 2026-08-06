@@ -1,0 +1,28 @@
+Counter {{
+    member signed:i8 = -3
+    member code:u16 = 60000
+    member ratio:f32 = 1.5 as f32
+    member total:i64 = 4
+
+    __(delta:i64) -> void {
+        self.total = self.total + delta
+    }
+
+    value() -> i64 {
+        return (self.signed as i64) + (self.code as i64) + (self.ratio as i64) + self.total
+    }
+}}
+
+entry {{
+    member delta:i64 = 2
+
+    __() -> i32 {
+        local counter = new Counter(self.delta)
+        if counter.value() != 60004 { return 1 }
+
+        local alias = counter
+        local separate = new Counter(0)
+        if counter !== alias || counter === separate { return 2 }
+        return 0
+    }
+}}

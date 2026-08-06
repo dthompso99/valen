@@ -150,3 +150,19 @@ test('bootstrap compiler uses AAPCS64 stack argument slots after register exhaus
     assert.match(result.assembly, /str x9, \[sp, #0\]/);
     assert.match(result.assembly, /str x9, \[sp, #32\]/);
 });
+
+test('bootstrap compiler lays out and constructs basic AArch64 objects', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-objects-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-objects.ar', import.meta.url));
+    const output = path.join(directory, 'objects');
+    const result = new Compiler().compile(source, output, {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(output).readUInt16LE(18), 183);
+    assert.match(result.assembly, /bl valen_alloc/);
+    assert.match(result.assembly, /strb w10, \[x9, #16\]/);
+    assert.match(result.assembly, /strh w10, \[x9, #18\]/);
+    assert.match(result.assembly, /str w10, \[x9, #20\]/);
+    assert.match(result.assembly, /str x10, \[x9, #24\]/);
+    assert.match(result.assembly, /mov x0, #72/);
+});
