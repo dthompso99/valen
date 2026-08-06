@@ -1,0 +1,25 @@
+entry {{
+    mix(value:f64, scale:f32) -> f64 {
+        return value + (scale as f64)
+    }
+
+    __() -> i32 {
+        local total = self.mix(1.5, 2.25 as f32)
+        if total != 3.75 { return 1 }
+        if -total != -3.75 { return 2 }
+
+        local small:f32 = (1.25 as f32) + (2.5 as f32)
+        if small != (3.75 as f32) { return 3 }
+
+        local signed:i64 = -7
+        if (signed as f64) != -7.0 { return 4 }
+        local unsigned:u64 = 9
+        if (unsigned as f32) != (9.0 as f32) { return 5 }
+
+        local nan = 0.0 / 0.0
+        if nan == nan { return 6 }
+        if !(nan != nan) { return 7 }
+        if nan < 1.0 || nan <= 1.0 || nan > 1.0 || nan >= 1.0 { return 8 }
+        return 0
+    }
+}}

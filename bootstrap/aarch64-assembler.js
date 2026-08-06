@@ -10,6 +10,18 @@ const register = value => {
     return Number(match[1]);
 };
 
+const scalarRegister = value => {
+    const match = value.match(/^[sd]([0-9]|[12][0-9]|3[01])$/);
+    if (!match) throw new Error(`Invalid AArch64 scalar register '${value}'`);
+    return Number(match[1]);
+};
+
+const wordRegister = value => {
+    const match = value.match(/^[wx]([0-9]|[12][0-9]|30)$/);
+    if (!match) throw new Error(`Invalid AArch64 integer register '${value}'`);
+    return Number(match[1]);
+};
+
 const immediate = value => {
     if (!/^#-?(?:0x[0-9a-f]+|[0-9]+)$/i.test(value)) throw new Error(`Invalid AArch64 immediate '${value}'`);
     const raw = value.slice(1);
@@ -101,6 +113,40 @@ export class AArch64Assembler {
             if (value < 0 || value > 65535 || ![0, 16, 32, 48].includes(shift)) throw new Error(`AArch64 ${match[1]} immediate is out of range`);
             const base = match[1] === 'movz' ? 0xd2800000 : 0xf2800000;
             return {word: base | ((shift / 16) << 21) | (value << 5) | register(match[2])};
+        }
+        if ((match = line.match(/^fmov ([sd](?:[0-9]|[12][0-9]|3[01])), ([wx](?:[0-9]|[12][0-9]|30))$/))) {
+            const widths = `${match[1][0]}${match[2][0]}`;
+            const base = {sw: 0x1e270000, dx: 0x9e670000}[widths];
+            if (base === undefined) throw new Error(`Invalid AArch64 fmov widths '${widths}'`);
+            return {word: base | (wordRegister(match[2]) << 5) | scalarRegister(match[1])};
+        }
+        if ((match = line.match(/^fmov ([wx](?:[0-9]|[12][0-9]|30)), ([sd](?:[0-9]|[12][0-9]|3[01]))$/))) {
+            const widths = `${match[1][0]}${match[2][0]}`;
+            const base = {ws: 0x1e260000, xd: 0x9e660000}[widths];
+            if (base === undefined) throw new Error(`Invalid AArch64 fmov widths '${widths}'`);
+            return {word: base | (scalarRegister(match[2]) << 5) | wordRegister(match[1])};
+        }
+        if ((match = line.match(/^(fadd|fsub|fmul|fdiv) ([sd](?:[0-9]|[12][0-9]|3[01])), ([sd](?:[0-9]|[12][0-9]|3[01])), ([sd](?:[0-9]|[12][0-9]|3[01]))$/))) {
+            const widths = new Set([match[2][0], match[3][0], match[4][0]]);
+            if (widths.size !== 1) throw new Error(`AArch64 ${match[1]} register widths must match`);
+            const base = {fadd: 0x1e202800, fsub: 0x1e203800, fmul: 0x1e200800, fdiv: 0x1e201800}[match[1]] +
+                (match[2][0] === 'd' ? 0x00400000 : 0);
+            return {word: base | (scalarRegister(match[4]) << 16) | (scalarRegister(match[3]) << 5) | scalarRegister(match[2])};
+        }
+        if ((match = line.match(/^fcmp ([sd](?:[0-9]|[12][0-9]|3[01])), ([sd](?:[0-9]|[12][0-9]|3[01]))$/))) {
+            if (match[1][0] !== match[2][0]) throw new Error('AArch64 fcmp register widths must match');
+            const base = 0x1e202000 + (match[1][0] === 'd' ? 0x00400000 : 0);
+            return {word: base | (scalarRegister(match[2]) << 16) | (scalarRegister(match[1]) << 5)};
+        }
+        if ((match = line.match(/^fcvt ([sd](?:[0-9]|[12][0-9]|3[01])), ([sd](?:[0-9]|[12][0-9]|3[01]))$/))) {
+            const widths = `${match[1][0]}${match[2][0]}`;
+            const base = {ds: 0x1e22c000, sd: 0x1e624000}[widths];
+            if (base === undefined) throw new Error(`Invalid AArch64 fcvt widths '${widths}'`);
+            return {word: base | (scalarRegister(match[2]) << 5) | scalarRegister(match[1])};
+        }
+        if ((match = line.match(/^(scvtf|ucvtf) ([sd](?:[0-9]|[12][0-9]|3[01])), (x(?:[0-9]|[12][0-9]|30))$/))) {
+            const base = (match[1] === 'scvtf' ? 0x9e220000 : 0x9e230000) + (match[2][0] === 'd' ? 0x00400000 : 0);
+            return {word: base | (register(match[3]) << 5) | scalarRegister(match[2])};
         }
         if ((match = line.match(/^mov (x(?:[0-9]|[12][0-9]|30)), (x(?:[0-9]|[12][0-9]|30))$/))) {
             return {word: 0xaa0003e0 | (register(match[2]) << 16) | register(match[1])};

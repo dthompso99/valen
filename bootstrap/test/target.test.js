@@ -68,6 +68,21 @@ caller:
         [{symbol: 'callee', type: 283}]);
 });
 
+test('integrated AArch64 encoder emits scalar floating-point instructions', () => {
+    const object = new AArch64Assembler().assembleObject(`.text
+sample:
+    fmov d0, x9
+    fadd d0, d0, d1
+    fcmp d0, d1
+    fcvt s0, d0
+    scvtf d0, x9
+    fmov x9, d0
+    ret
+`);
+    assert.equal(Buffer.from(object.sections.find(section => section.name === '.text').data).toString('hex'),
+        '2001679e0028611e0020611e0040621e2001629e0900669ec0035fd6');
+});
+
 test('bootstrap compiler cross-compiles primitive AArch64 programs', t => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-'));
     t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
@@ -83,4 +98,19 @@ test('bootstrap compiler cross-compiles primitive AArch64 programs', t => {
     assert.match(result.assembly, /movk x9, #1, lsl #32/);
     assert.match(result.assembly, /sdiv x9, x9, x10/);
     assert.match(result.assembly, /bl __valen_.*entry_2e_twice/);
+});
+
+test('bootstrap compiler cross-compiles scalar AArch64 floating point', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-float-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-floating-point.ar', import.meta.url));
+    const output = path.join(directory, 'floating-point');
+    const result = new Compiler().compile(source, output, {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(output).readUInt16LE(18), 183);
+    assert.match(result.assembly, /fadd d0, d0, d1/);
+    assert.match(result.assembly, /fcvt d0, s0/);
+    assert.match(result.assembly, /scvtf d0, x9/);
+    assert.match(result.assembly, /ucvtf s0, x9/);
+    assert.match(result.assembly, /fcmp d0, d1/);
 });

@@ -1,8 +1,9 @@
 import {prepareIr} from './ir-validation.js';
 
 const argumentRegisters = Array.from({length: 8}, (_, index) => `x${index}`);
+const floatArgumentRegisters = Array.from({length: 8}, (_, index) => index);
 
-/** Initial AArch64 backend for primitive integer/control-flow programs. */
+/** Initial AArch64 backend for primitive programs. */
 export class AArch64Backend {
     generate(program, {optimizationLevel = 1, moduleId = null, includeRuntime = true} = {}) {
         if (![0, 1].includes(optimizationLevel)) throw new Error(`Unsupported optimization level '-O${optimizationLevel}'`);
@@ -39,10 +40,13 @@ export class AArch64Backend {
         const end = `${symbol}__return`;
         const lines = [`.globl ${symbol}`, `.type ${symbol}, %function`, `${symbol}:`, `    sub sp, sp, #${total}`,
             `    str x29, [sp, #${frameSize}]`, `    str x30, [sp, #${frameSize + 8}]`, `    add x29, sp, #${frameSize}`];
-        fn.parameters.forEach((parameter, index) => {
-            if (index >= argumentRegisters.length) throw new Error('aarch64-linux bootstrap backend does not yet support stack-passed arguments');
-            lines.push(`    str ${argumentRegisters[index]}, ${this.named(parameter.name)}`);
-        });
+        for (const location of this.argumentLocations(fn.parameters)) {
+            if (location.kind === 'stack') throw new Error('aarch64-linux bootstrap backend does not yet support stack-passed arguments');
+            if (location.kind === 'float') lines.push(
+                `    fmov ${location.value.type === 'f32' ? 'w9' : 'x9'}, ${location.value.type === 'f32' ? 's' : 'd'}${location.register}`,
+                `    str x9, ${this.named(location.value.name)}`);
+            else lines.push(`    str ${location.register}, ${this.named(location.value.name)}`);
+        }
         for (const block of fn.blocks) {
             if (block.label !== 'entry') lines.push(`${this.blockLabel(block.label)}:`);
             for (const instruction of block.instructions) lines.push(...this.instruction(instruction, end));
@@ -57,6 +61,9 @@ export class AArch64Backend {
             case 'constant':
                 return [...this.constant('x9', instruction.value), ...this.normalize('x9', instruction.type),
                     `    str x9, ${this.temp(instruction.result)}`];
+            case 'float_constant':
+                return [...this.floatConstant('x9', instruction.value, instruction.type),
+                    `    str x9, ${this.temp(instruction.result)}`];
             case 'declare_local':
                 return instruction.value
                     ? [...this.load(instruction.value, 'x9'), `    str x9, ${this.named(instruction.name)}`]
@@ -67,7 +74,10 @@ export class AArch64Backend {
                 return [...this.load(instruction.value, 'x9'), `    str x9, ${this.named(instruction.name)}`];
             case 'unary': {
                 const lines = this.load(instruction.operand, 'x9');
-                if (instruction.operator === '-') lines.push('    neg x9, x9');
+                if (instruction.operator === '-' && this.isFloat(instruction.type)) {
+                    lines.push(...this.constant('x10', instruction.type === 'f32' ? 0x80000000n : 0x8000000000000000n),
+                        '    eor x9, x9, x10');
+                } else if (instruction.operator === '-') lines.push('    neg x9, x9');
                 else if (instruction.operator === '!') lines.push('    cmp x9, #0', '    cset x9, eq');
                 else throw new Error(`aarch64-linux bootstrap backend does not support unary '${instruction.operator}'`);
                 lines.push(...this.normalize('x9', instruction.type));
@@ -78,34 +88,41 @@ export class AArch64Backend {
                 return this.binary(instruction);
             case 'call':
             case 'virtual_call': {
-                if (instruction.arguments.length > argumentRegisters.length) throw new Error('aarch64-linux bootstrap backend does not yet support stack-passed arguments');
                 const lines = [];
-                instruction.arguments.forEach((argument, index) => lines.push(...this.load(argument, argumentRegisters[index])));
+                for (const location of this.argumentLocations(instruction.arguments)) {
+                    if (location.kind === 'stack') throw new Error('aarch64-linux bootstrap backend does not yet support stack-passed arguments');
+                    if (location.kind === 'float') lines.push(...this.load(location.value, 'x9'),
+                        `    fmov ${location.value.type === 'f32' ? 's' : 'd'}${location.register}, ${location.value.type === 'f32' ? 'w9' : 'x9'}`);
+                    else lines.push(...this.load(location.value, location.register));
+                }
                 const target = this.symbols.get(instruction.target);
                 if (!target) throw new Error(`aarch64-linux bootstrap backend has no function symbol for '${instruction.target}'`);
                 lines.push(`    bl ${target}`);
-                if (instruction.result) lines.push(...this.normalize('x0', instruction.type), `    str x0, ${this.temp(instruction.result)}`);
+                if (instruction.result && this.isFloat(instruction.type)) lines.push(
+                    `    fmov ${instruction.type === 'f32' ? 'w9' : 'x9'}, ${instruction.type === 'f32' ? 's0' : 'd0'}`,
+                    `    str x9, ${this.temp(instruction.result)}`);
+                else if (instruction.result) lines.push(...this.normalize('x0', instruction.type), `    str x0, ${this.temp(instruction.result)}`);
                 return lines;
             }
             case 'convert':
-                if (this.isFloat(instruction.value.type) || this.isFloat(instruction.type)) {
-                    throw new Error('aarch64-linux bootstrap backend does not yet support floating-point conversion');
-                }
-                return [...this.load(instruction.value, 'x9'), ...this.normalize('x9', instruction.type),
-                    `    str x9, ${this.temp(instruction.result)}`];
+                return this.convert(instruction);
             case 'jump':
                 return [`    b ${this.blockLabel(instruction.target)}`];
             case 'branch':
                 return [...this.load(instruction.condition, 'x9'), `    cbnz x9, ${this.blockLabel(instruction.thenTarget)}`,
                     `    b ${this.blockLabel(instruction.elseTarget)}`];
             case 'return':
-                return instruction.value ? [...this.load(instruction.value, 'x0'), `    b ${end}`] : ['    mov x0, #0', `    b ${end}`];
+                if (!instruction.value) return ['    mov x0, #0', `    b ${end}`];
+                if (this.isFloat(instruction.value.type)) return [...this.load(instruction.value, 'x9'),
+                    `    fmov ${instruction.value.type === 'f32' ? 's0, w9' : 'd0, x9'}`, `    b ${end}`];
+                return [...this.load(instruction.value, 'x0'), `    b ${end}`];
             default:
                 throw new Error(`aarch64-linux bootstrap backend does not yet support IR operation '${instruction.op}'`);
         }
     }
 
     binary(instruction) {
+        if (this.isFloat(instruction.left.type)) return this.floatBinary(instruction);
         const lines = [...this.load(instruction.left, 'x9'), ...this.load(instruction.right, 'x10')];
         const operation = {'+': 'add', '-': 'sub', '*': 'mul', '&&': 'and', '||': 'orr', '&': 'and', '|': 'orr', '^': 'eor',
             '<<': 'lsl', '>>': this.isUnsigned(instruction.left.type) ? 'lsr' : 'asr'}[instruction.operator];
@@ -119,6 +136,39 @@ export class AArch64Backend {
         else if (condition) lines.push('    cmp x9, x10', `    cset x9, ${condition}`);
         else throw new Error(`aarch64-linux bootstrap backend does not yet support binary '${instruction.operator}'`);
         lines.push(...this.normalize('x9', instruction.type));
+        lines.push(`    str x9, ${this.temp(instruction.result)}`);
+        return lines;
+    }
+
+    floatBinary(instruction) {
+        const type = instruction.left.type;
+        const width = type === 'f32' ? 's' : 'd';
+        const integerWidth = type === 'f32' ? 'w' : 'x';
+        const lines = [...this.load(instruction.left, 'x9'), ...this.load(instruction.right, 'x10'),
+            `    fmov ${width}0, ${integerWidth}9`, `    fmov ${width}1, ${integerWidth}10`];
+        const arithmetic = {'+': 'fadd', '-': 'fsub', '*': 'fmul', '/': 'fdiv'}[instruction.operator];
+        if (arithmetic) lines.push(`    ${arithmetic} ${width}0, ${width}0, ${width}1`, `    fmov ${integerWidth}9, ${width}0`);
+        else {
+            const condition = {'==': 'eq', '!=': 'ne', '<': 'mi', '<=': 'ls', '>': 'gt', '>=': 'ge'}[instruction.operator];
+            if (!condition) throw new Error(`aarch64-linux bootstrap backend does not support floating binary '${instruction.operator}'`);
+            lines.push(`    fcmp ${width}0, ${width}1`, `    cset x9, ${condition}`);
+        }
+        lines.push(`    str x9, ${this.temp(instruction.result)}`);
+        return lines;
+    }
+
+    convert(instruction) {
+        const from = instruction.value.type, to = instruction.type;
+        const lines = this.load(instruction.value, 'x9');
+        if (this.isFloat(from) && this.isFloat(to)) {
+            if (from !== to) lines.push(`    fmov ${from === 'f32' ? 's0, w9' : 'd0, x9'}`,
+                `    fcvt ${to === 'f32' ? 's0, d0' : 'd0, s0'}`,
+                `    fmov ${to === 'f32' ? 'w9, s0' : 'x9, d0'}`);
+        } else if (!this.isFloat(from) && this.isFloat(to)) {
+            lines.push(`    ${this.isUnsigned(from) ? 'ucvtf' : 'scvtf'} ${to === 'f32' ? 's0' : 'd0'}, x9`,
+                `    fmov ${to === 'f32' ? 'w9, s0' : 'x9, d0'}`);
+        } else if (this.isFloat(from)) throw new Error('aarch64-linux bootstrap backend does not yet support checked floating-point to integer conversion');
+        else lines.push(...this.normalize('x9', to));
         lines.push(`    str x9, ${this.temp(instruction.result)}`);
         return lines;
     }
@@ -147,6 +197,29 @@ export class AArch64Backend {
             if (part !== 0n) lines.push(`    movk ${register}, #${part}, lsl #${shift}`);
         }
         return lines;
+    }
+
+    floatConstant(register, value, type) {
+        const bytes = Buffer.alloc(8);
+        if (type === 'f32') {
+            bytes.writeFloatLE(Number(value));
+            return this.constant(register, BigInt(bytes.readUInt32LE()));
+        }
+        bytes.writeDoubleLE(Number(value));
+        return this.constant(register, bytes.readBigUInt64LE());
+    }
+
+    argumentLocations(values) {
+        let general = 0, floating = 0;
+        return values.map(value => {
+            if (this.isFloat(value.type) && floating < floatArgumentRegisters.length) {
+                return {kind: 'float', register: floatArgumentRegisters[floating++], value};
+            }
+            if (!this.isFloat(value.type) && general < argumentRegisters.length) {
+                return {kind: 'general', register: argumentRegisters[general++], value};
+            }
+            return {kind: 'stack', value};
+        });
     }
 
     normalize(register, type) {
