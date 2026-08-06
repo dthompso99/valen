@@ -55,7 +55,9 @@ source -> tokens -> AST -> module graph -> semantic symbols
   object liveness word and become null after explicit destruction. Managed object, array, and dynamic-string
   descriptors carry the common hidden 48-byte GC allocation prefix, and functions publish precise managed
   stack slots through linked root records. Cycle-safe marking follows generated object and managed-array trace
-  callbacks; sweeping and collector-driven weak clearing remain WIP.
+  callbacks. Explicit collection sweeps unreachable descriptors, releases array and dynamic-string backing
+  mappings, and clears weak references. Allocation pressure triggers collection at an adaptive threshold with
+  a 1 MiB minimum.
 
 Native executable builds can reuse validated backend artifacts by setting
 `VALEN_CACHE_PATH` to an existing writable directory. Cache keys include every loaded module's

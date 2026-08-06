@@ -48,9 +48,11 @@
   indexing, replacement, append, insert, remove, reserve, and shrink-to-fit across scalar and reference-sized
   elements. Managed object, array, and dynamic-string descriptors use tracked 48-byte GC allocation headers,
   and functions publish precise managed stack roots. Cycle-safe marking follows generated object and managed-array
-  trace callbacks. Sweeping is not yet enabled, so tracked
-  descriptors and replaced buffers remain anonymous mappings for process lifetime. Weak object fields and
-  weak array elements/slices observe explicit destruction through the common liveness word. Copied slices
+  trace callbacks. Explicit collection traverses precise roots, clears weak references, finalizes array and
+  dynamic-string buffers, and unmaps unreachable descriptors. Allocation pressure triggers collection using
+  an adaptive live-heap threshold with a 1 MiB floor.
+  Replaced buffers remain anonymous mappings for process lifetime. Weak object fields and
+  weak array elements/slices observe explicit destruction and collection. Copied slices
   support value elements, explicit reference aliases, and weak aliases;
   deep-copy slices of owned managed elements remain WIP with structural hooks and tracing GC. AArch64 strings
   support UTF-8 literals, byte length and indexing, equality, concatenation, copied byte slices, and copied

@@ -1,0 +1,35 @@
+library System {{
+    native collectGarbage() -> void
+}}
+
+Payload {{
+    member value:i64
+}}
+
+Observer {{
+    member weak payload:Payload?
+}}
+
+entry {{
+    __() -> i64 {
+        local observer = new Observer()
+        local payload = new Payload()
+        payload.value = 42
+        observer.payload = payload
+        local values = new Array<ref Payload?>(0)
+        values.append(payload)
+        System.collectGarbage()
+        if values[0]!.value != 42 { return 1 }
+        delete payload
+        System.collectGarbage()
+        if observer.payload != null { return 2 }
+        System.collectGarbage()
+        local index:i64 = 0
+        while index < 20000 {
+            local garbage = new Payload()
+            garbage.value = index
+            index = index + 1
+        }
+        return 0
+    }
+}}

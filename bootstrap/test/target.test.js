@@ -419,3 +419,18 @@ test('bootstrap compiler tracks AArch64 managed allocations and precise roots', 
     assert.match(builders.assembly, /valen_string_new:[\s\S]*bl valen_gc_alloc/);
     assert.match(builders.assembly, /valen_array_new:[\s\S]*ldr x1, \[sp, #16\][\s\S]*ldr x2, \[sp, #24\]/);
 });
+
+test('bootstrap compiler collects AArch64 object graphs and clears weak references', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-gc-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-garbage-collection.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'garbage-collection'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'garbage-collection')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /valen_System_collectGarbage:[\s\S]*b valen_gc_collect/);
+    assert.match(result.assembly, /valen_gc_collect:[\s\S]*\.Lgc_collect_roots:[\s\S]*\.Lgc_collect_weak:[\s\S]*\.Lgc_collect_sweep:/);
+    assert.match(result.assembly, /valen_gc_maybe_collect:[\s\S]*valen_gc_threshold[\s\S]*b valen_gc_collect/);
+    assert.match(result.assembly, /valen_gc_bytes:[\s\S]*valen_gc_threshold:/);
+    assert.match(result.assembly, /valen_gc_array_finalize:[\s\S]*mov x8, #215/);
+    assert.match(result.assembly, /valen_string_finalize:[\s\S]*mov x8, #215/);
+});
