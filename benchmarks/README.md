@@ -7,8 +7,13 @@ language toolchains are intentionally optional.
 Run the complete locally available suite from the repository root:
 
 ```sh
+./scripts/bootstrap-valen.sh
 node benchmarks/run.mjs
 ```
+
+The benchmark runner deliberately does not bootstrap Valen. It uses the repository-root `./valen`
+compiler produced by `scripts/bootstrap-valen.sh`, keeping bootstrap work outside the compilation and
+runtime measurements. If `./valen` is absent, Valen is reported as skipped with the bootstrap command.
 
 Select languages, change the measured repetition count, or preserve a machine-readable result:
 
@@ -38,7 +43,7 @@ The report records:
 - peak runtime RSS
 - primary artifact size
 - ELF dynamic dependencies
-- generation-0 preparation cost for the native Valen compiler
+- the fingerprint of the prebuilt native Valen compiler used for the run
 
 Valen's self-contained executable size should not be compared naively with a dynamically linked executable.
 The dependency column makes that distinction visible. Java and Node artifact sizes similarly exclude their

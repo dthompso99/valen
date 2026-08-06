@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import {createHash} from 'node:crypto';
 import {spawn, spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
@@ -27,6 +28,8 @@ const version = (command, args = ['--version']) => {
 const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
 const memory = kib => kib == null ? 'unavailable' : kib < 1024 ? `${kib} KiB` : `${(kib / 1024).toFixed(1)} MiB`;
 const environment = {...process.env, VALEN_LIBRARY_PATH: path.join(root, 'lib')};
+const valenCompiler = path.join(root, 'valen');
+const fileFingerprint = filePath => createHash('sha256').update(fs.readFileSync(filePath)).digest('hex').slice(0, 12);
 
 async function measure(command, args, options = {}) {
     const started = process.hrtime.bigint();
@@ -75,12 +78,11 @@ async function repeated(runtime, expectedOutput) {
     };
 }
 
-const stage1 = path.join(temporary, 'valen');
 const languages = {
     valen: {
-        tools: ['node'], version: () => `Valen generation 1 (${version('node')} bootstrap)`,
-        prepare: async () => measure(process.execPath, [path.join(root, 'bootstrap/compiler.js'), path.join(root, 'src/valen.ar'), stage1]),
-        compile: source => ({command: stage1, args: [source, '-O1', '-o', path.join(temporary, 'integer-loop-valen')]}),
+        tools: [valenCompiler], missingHint: 'run ./scripts/bootstrap-valen.sh first',
+        version: () => `Valen native compiler (sha256:${fileFingerprint(valenCompiler)})`,
+        compile: source => ({command: valenCompiler, args: [source, '-O1', '-o', path.join(temporary, 'integer-loop-valen')]}),
         runtime: () => ({name: 'valen', command: path.join(temporary, 'integer-loop-valen'), args: []}), artifact: () => path.join(temporary, 'integer-loop-valen')
     },
     c: {
@@ -126,12 +128,12 @@ try {
         if (!language) throw new Error(`Unknown language '${name}'`);
         const missing = language.tools.filter(tool => !commandExists(tool));
         if (missing.length) {
-            report.skipped.push({language: name, reason: `missing ${missing.join(', ')}`});
+            const hint = language.missingHint ? `; ${language.missingHint}` : '';
+            report.skipped.push({language: name, reason: `missing ${missing.join(', ')}${hint}`});
             continue;
         }
         try {
             const source = path.join(benchmarkRoot, 'workloads/integer-loop', extensions[name]);
-            const preparation = language.prepare ? await language.prepare() : null;
             const command = language.compile(source);
             const compilation = await measure(command.command, command.args);
             const runtime = language.runtime(source);
@@ -140,9 +142,8 @@ try {
             const dynamic = ['valen', 'c', 'cpp', 'rust', 'go'].includes(name)
                 ? spawnSync('readelf', ['-d', artifact], {encoding: 'utf8'}).stdout.match(/NEEDED[^\[]*\[([^\]]+)\]/g)?.map(item => item.slice(item.indexOf('[') + 1, -1)) ?? []
                 : [];
-            report.results.push({language: name, version: language.version(), preparation: preparation ? {
-                seconds: preparation.wallSeconds, peakRssKiB: preparation.maxRssKiB
-            } : null, compile: {seconds: compilation.wallSeconds, peakRssKiB: compilation.maxRssKiB}, execution,
+            report.results.push({language: name, version: language.version(),
+            compile: {seconds: compilation.wallSeconds, peakRssKiB: compilation.maxRssKiB}, execution,
             artifact: {bytes: fs.statSync(artifact).size, dynamicDependencies: dynamic}});
         } catch (error) {
             report.skipped.push({language: name, reason: error.message.split('\n').filter(Boolean).slice(0, 2).join(' — ')});
