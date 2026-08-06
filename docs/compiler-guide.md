@@ -44,8 +44,9 @@ source -> tokens -> AST -> module graph -> semantic symbols
   checked reference casts. Arrays preserve the common 40-byte header and provide allocation, length and
   capacity, width-correct loads and stores, checked indexing with runtime status 70, append, insert, remove,
   reserve, and shrink-to-fit. Buffer growth uses allocate-copy-update until tracing reclamation is available.
-  It is the cross-compilation foothold for the full runtime and self-hosted backend, not yet a general AArch64
-  language target.
+  Slices copy value elements into independent buffers and preserve aliases for explicit `ref` elements;
+  deep-copy slices of owned managed elements await structural copy hooks. It is the cross-compilation
+  foothold for the full runtime and self-hosted backend, not yet a general AArch64 language target.
 
 Native executable builds can reuse validated backend artifacts by setting
 `VALEN_CACHE_PATH` to an existing writable directory. Cache keys include every loaded module's

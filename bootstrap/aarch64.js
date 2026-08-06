@@ -180,6 +180,14 @@ export class AArch64Backend {
             case 'array_shrink':
                 return [...this.load(instruction.array, 'x0'), ...this.constant('x1', this.sizeOf(instruction.elementType)),
                     '    bl valen_array_shrink_to_fit'];
+            case 'array_slice':
+                if (instruction.elementOwnership === 'weak') throw new Error('aarch64-linux bootstrap backend does not yet support weak array slices');
+                if (instruction.elementOwnership === 'owned' && this.isManagedReferenceType(instruction.elementType)) {
+                    throw new Error('aarch64-linux bootstrap backend does not yet support deep-copying owned managed array slices');
+                }
+                return [...this.load(instruction.array, 'x0'), ...this.load(instruction.start, 'x1'),
+                    ...this.load(instruction.length, 'x2'), ...this.constant('x3', this.sizeOf(instruction.elementType)),
+                    '    bl valen_array_slice', `    str x0, ${this.temp(instruction.result)}`];
             case 'call':
                 return this.call(instruction, false);
             case 'virtual_call':
@@ -385,7 +393,19 @@ export class AArch64Backend {
             '.Larray_remove_clear_start:', '    mul x6, x3, x2', '    ldr x7, [x0, #16]', '    add x7, x7, x6',
             '    mov x8, #0', '    mov x6, x2', '.Larray_remove_clear:', '    strb w8, [x7, #0]',
             '    add x7, x7, #1', '    sub x6, x6, #1', '    cbnz x6, .Larray_remove_clear',
-            '    str x3, [x0, #0]', '    mov x0, x5', '    ret', '.size valen_array_remove, .-valen_array_remove', ''];
+            '    str x3, [x0, #0]', '    mov x0, x5', '    ret', '.size valen_array_remove, .-valen_array_remove', '',
+            '.globl valen_array_slice', '.type valen_array_slice, %function', 'valen_array_slice:',
+            '    cmp x1, #0', '    b.lt .Larray_bounds_error', '    cmp x2, #0', '    b.lt .Larray_bounds_error',
+            '    add x4, x1, x2', '    cmp x4, x1', '    b.cc .Larray_bounds_error', '    ldr x5, [x0, #0]',
+            '    cmp x4, x5', '    b.hi .Larray_bounds_error', '    sub sp, sp, #64', '    str x30, [sp, #56]',
+            '    str x0, [sp, #0]', '    str x1, [sp, #8]', '    str x2, [sp, #16]', '    str x3, [sp, #24]',
+            '    mov x0, x3', '    mov x1, x2', '    bl valen_array_new', '    str x0, [sp, #32]',
+            '    ldr x4, [sp, #8]', '    ldr x5, [sp, #24]', '    mul x4, x4, x5', '    ldr x6, [sp, #0]',
+            '    ldr x6, [x6, #16]', '    add x6, x6, x4', '    ldr x7, [x0, #16]', '    ldr x4, [sp, #16]',
+            '    mul x4, x4, x5', '.Larray_slice_copy:', '    cbz x4, .Larray_slice_done', '    ldrb w8, [x6, #0]',
+            '    strb w8, [x7, #0]', '    add x6, x6, #1', '    add x7, x7, #1', '    sub x4, x4, #1',
+            '    b .Larray_slice_copy', '.Larray_slice_done:', '    ldr x0, [sp, #32]', '    ldr x30, [sp, #56]',
+            '    add sp, sp, #64', '    ret', '.size valen_array_slice, .-valen_array_slice', ''];
     }
 
     call(instruction, dynamic) {
@@ -572,6 +592,12 @@ export class AArch64Backend {
     align(value, alignment) { return Math.ceil(value / alignment) * alignment; }
     isUnsigned(type) { return type === 'bool' || type?.startsWith('u'); }
     isFloat(type) { return type === 'f32' || type === 'f64'; }
+    isManagedReferenceType(type) {
+        if (!type) return false;
+        const base = type.endsWith('?') ? type.slice(0, -1) : type;
+        return base === 'string' || base === 'StringBuilder' || base.startsWith('Array<') || this.typeSizes.has(base) ||
+            (type.endsWith('?') && ['bool', 'u8', 'i8', 'u16', 'i16', 'u32', 'i32', 'u64', 'i64', 'f32', 'f64'].includes(base));
+    }
 
     mangle(value) {
         let result = '__valen_';

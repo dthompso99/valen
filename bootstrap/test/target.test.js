@@ -260,3 +260,17 @@ test('bootstrap compiler inserts and removes AArch64 array elements', t => {
     assert.match(result.assembly, /\.Larray_remove_clear:/);
     assert.match(bounds.assembly, /b\.cs \.Larray_bounds_error/);
 });
+
+test('bootstrap compiler copies value and reference AArch64 array slices', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-array-slices-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-array-slices.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'slices'), {target: 'aarch64-linux'});
+    const boundsSource = fileURLToPath(new URL('fixtures/array-slice-bounds.ar', import.meta.url));
+    const bounds = new Compiler().compile(boundsSource, path.join(directory, 'slice-bounds'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'slices')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /bl valen_array_slice/);
+    assert.match(result.assembly, /\.Larray_slice_copy:/);
+    assert.match(bounds.assembly, /b\.hi \.Larray_bounds_error/);
+});
