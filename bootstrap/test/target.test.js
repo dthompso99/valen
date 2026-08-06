@@ -443,6 +443,8 @@ test('bootstrap compiler emits cycle-safe AArch64 structural equality and hashin
     assert.match(result.assembly, /\.Lobject_equal_scan:/);
     assert.match(result.assembly, /\.globl valen_object_hash/);
     assert.match(result.assembly, /valen_string_hash_context:/);
+    assert.match(result.assembly, /\.Lvalen_array_equal_/);
+    assert.match(result.assembly, /\.Lvalen_array_hash_/);
     assert.match(result.assembly, /\.quad .*_equal/);
     assert.match(result.assembly, /\.quad .*_hash/);
 });

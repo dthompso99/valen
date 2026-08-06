@@ -39,7 +39,7 @@ export class AArch64Backend {
         this.runtimeSymbols = new Set(program.externals.map(external => external.runtimeSymbol));
         this.emittedTypes = moduleId === null ? program.types : program.types.filter(type => type.moduleId === moduleId);
         const functions = moduleId === null ? program.functions : program.functions.filter(fn => fn.moduleId === moduleId);
-        this.arrayTypes = new Set();
+        this.arrayTypes = this.structuralArrayTypes(functions);
         this.stringLiterals = new Map();
         for (const instruction of functions.flatMap(fn => fn.blocks.flatMap(block => block.instructions))) {
             if (instruction.op === 'string_constant') this.internString(instruction.value);
@@ -1333,6 +1333,7 @@ export class AArch64Backend {
     structuralTypeRuntime() {
         const lines = [];
         for (const type of this.emittedTypes) lines.push(...this.objectEqualityFunction(type), ...this.objectHashFunction(type));
+        for (const type of this.arrayTypes) lines.push(...this.arrayEqualityFunction(type), ...this.arrayHashFunction(type));
         return lines;
     }
 
@@ -1395,6 +1396,16 @@ export class AArch64Backend {
             `    ${this.loadMnemonic(base)} ${other}, [x20, #${offset}]`, '    cmp x9, x10', `    b.ne ${fail}`];
     }
 
+    compareAddresses(left, right, type, context, fail) {
+        const base = type.endsWith('?') ? type.slice(0, -1) : type;
+        if (base === 'string' || base.startsWith('Array<') || this.program.types.some(item => item.name === base)) return [
+            `    ldr x0, [${left}, #0]`, `    ldr x1, [${right}, #0]`, `    mov x2, ${context}`,
+            `    bl ${this.equalityFunction(base)}`, `    cbz x0, ${fail}`];
+        return [`    ${this.loadMnemonic(base)} ${this.valueRegister('x11', base)}, [${left}, #0]`,
+            `    ${this.loadMnemonic(base)} ${this.valueRegister('x12', base)}, [${right}, #0]`,
+            '    cmp x11, x12', `    b.ne ${fail}`];
+    }
+
     objectHashFunction(type) {
         const label = this.objectHashLabel(type.name);
         const lines = [`.type ${label}, %function`, `${label}:`, '    sub sp, sp, #48', '    str x19, [sp, #0]',
@@ -1415,6 +1426,56 @@ export class AArch64Backend {
         if (base === 'string' || this.program.types.some(item => item.name === base)) return [
             `    ldr x0, [x19, #${offset}]`, '    mov x1, x20', `    bl ${this.hashFunction(base)}`];
         return [`    ${this.loadMnemonic(base)} ${this.valueRegister('x0', base)}, [x19, #${offset}]`];
+    }
+
+    hashAddress(address, type, context) {
+        const base = type.endsWith('?') ? type.slice(0, -1) : type;
+        if (base === 'string' || base.startsWith('Array<') || this.program.types.some(item => item.name === base)) return [
+            `    ldr x0, [${address}, #0]`, `    mov x1, ${context}`, `    bl ${this.hashFunction(base)}`];
+        return [`    ${this.loadMnemonic(base)} ${this.valueRegister('x0', base)}, [${address}, #0]`];
+    }
+
+    arrayEqualityFunction(type) {
+        const spec = this.arraySpec(type), label = this.arrayEqualityLabel(type), fail = `${label}_false`;
+        const loop = `${label}_loop`, done = `${label}_done`, enter = `${label}_enter`, next = `${label}_next`;
+        const lines = [`.type ${label}, %function`, `${label}:`, '    cmp x0, x1', `    b.eq ${done}_true`,
+            `    cbz x0, ${fail}`, `    cbz x1, ${fail}`, '    ldr x9, [x0, #0]', '    ldr x10, [x1, #0]',
+            '    cmp x9, x10', `    b.ne ${fail}`, '    mov x11, x2', `${label}_scan:`, `    cbz x11, ${enter}`,
+            '    ldr x12, [x11, #0]', '    cmp x12, x0', `    b.ne ${next}`, '    ldr x12, [x11, #8]',
+            '    cmp x12, x1', `    b.eq ${done}_true`, `${next}:`, '    ldr x11, [x11, #16]', `    b ${label}_scan`,
+            `${enter}:`, '    sub sp, sp, #80', '    str x19, [sp, #0]', '    str x20, [sp, #8]',
+            '    str x21, [sp, #16]', '    str x22, [sp, #24]', '    str x30, [sp, #72]', '    mov x19, x0',
+            '    mov x20, x1', '    str x0, [sp, #32]', '    str x1, [sp, #40]', '    str x2, [sp, #48]',
+            '    add x21, sp, #32', '    mov x22, #0', `${loop}:`, '    ldr x9, [x19, #0]', '    cmp x22, x9',
+            `    b.cs ${done}`, '    ldr x9, [x19, #16]', `    mov x11, #${spec.size}`, '    mul x10, x22, x11',
+            '    add x9, x9, x10', '    ldr x10, [x20, #16]', `    mov x12, #${spec.size}`,
+            '    mul x11, x22, x12', '    add x10, x10, x11'];
+        lines.push(...this.compareAddresses('x9', 'x10', spec.ownership === 'owned' ? spec.element : 'u64', 'x21', `${fail}_frame`),
+            '    add x22, x22, #1', `    b ${loop}`, `${done}:`, '    mov x0, #1', `    b ${done}_frame`,
+            `${fail}_frame:`, '    mov x0, #0', `${done}_frame:`, '    ldr x19, [sp, #0]', '    ldr x20, [sp, #8]',
+            '    ldr x21, [sp, #16]', '    ldr x22, [sp, #24]', '    ldr x30, [sp, #72]', '    add sp, sp, #80',
+            '    ret', `${done}_true:`, '    mov x0, #1', '    ret', `${fail}:`, '    mov x0, #0', '    ret',
+            `.size ${label}, .-${label}`, '');
+        return lines;
+    }
+
+    arrayHashFunction(type) {
+        const spec = this.arraySpec(type), label = this.arrayHashLabel(type), loop = `${label}_loop`, done = `${label}_done`;
+        const lines = [`.type ${label}, %function`, `${label}:`, `    cbz x0, ${done}_null`, '    mov x9, x1',
+            `${label}_scan:`, `    cbz x9, ${label}_enter`, '    ldr x10, [x9, #0]', '    cmp x10, x0',
+            `    b.eq ${done}_cycle`, '    ldr x9, [x9, #8]', `    b ${label}_scan`, `${label}_enter:`,
+            '    sub sp, sp, #80', '    str x19, [sp, #0]', '    str x20, [sp, #8]', '    str x21, [sp, #16]',
+            '    str x22, [sp, #24]', '    str x30, [sp, #72]', '    mov x19, x0', '    str x0, [sp, #32]',
+            '    str x1, [sp, #40]', '    add x20, sp, #32', '    mov x21, #0',
+            ...this.constant('x22', 1469598103934665603n), `${loop}:`, '    ldr x9, [x19, #0]', '    cmp x21, x9',
+            `    b.cs ${done}`, '    ldr x9, [x19, #16]', `    mov x11, #${spec.size}`, '    mul x10, x21, x11',
+            '    add x9, x9, x10', ...this.hashAddress('x9', spec.ownership === 'owned' ? spec.element : 'u64', 'x20'),
+            '    eor x22, x22, x0', ...this.constant('x9', 1099511628211n), '    mul x22, x22, x9',
+            '    add x21, x21, #1', `    b ${loop}`, `${done}:`, '    mov x0, x22', '    ldr x19, [sp, #0]',
+            '    ldr x20, [sp, #8]', '    ldr x21, [sp, #16]', '    ldr x22, [sp, #24]', '    ldr x30, [sp, #72]',
+            '    add sp, sp, #80', '    ret', `${done}_null:`, '    mov x0, #0', '    ret', `${done}_cycle:`,
+            ...this.constant('x0', -7046029254386353131n), '    ret', `.size ${label}, .-${label}`, ''];
+        return lines;
     }
 
     stableTypeHash(name) {
@@ -1551,19 +1612,40 @@ export class AArch64Backend {
     contractTableLabel(typeName, contractName) { return `${this.typeLabel(typeName)}_as_${this.mangle(contractName)}`; }
     objectEqualityLabel(typeName) { return `${this.typeLabel(typeName)}_equal`; }
     objectHashLabel(typeName) { return `${this.typeLabel(typeName)}_hash`; }
+    arrayEqualityLabel(typeName) { return `.Lvalen_array_equal_${this.mangle(typeName)}`; }
+    arrayHashLabel(typeName) { return `.Lvalen_array_hash_${this.mangle(typeName)}`; }
 
     equalityFunction(typeName) {
         const type = typeName?.endsWith('?') ? typeName.slice(0, -1) : typeName;
         if (type === 'string') return 'valen_string_equal_context';
-        if (type?.startsWith('Array<')) throw new Error('aarch64-linux bootstrap backend does not yet support structural array equality');
+        if (type?.startsWith('Array<')) return this.arrayEqualityLabel(type);
         return 'valen_object_equal';
     }
 
     hashFunction(typeName) {
         const type = typeName?.endsWith('?') ? typeName.slice(0, -1) : typeName;
         if (type === 'string') return 'valen_string_hash_context';
-        if (type?.startsWith('Array<')) throw new Error('aarch64-linux bootstrap backend does not yet support structural array hashing');
+        if (type?.startsWith('Array<')) return this.arrayHashLabel(type);
         return 'valen_object_hash';
+    }
+
+    structuralArrayTypes(functions = this.program.functions) {
+        const types = new Set();
+        const add = type => {
+            const base = type?.endsWith('?') ? type.slice(0, -1) : type;
+            if (!base?.startsWith('Array<') || types.has(base)) return;
+            types.add(base);
+            const spec = this.arraySpec(base);
+            add(spec.element);
+        };
+        for (const type of this.program.types) for (const field of type.fields) add(field.type);
+        for (const fn of functions) for (const block of fn.blocks) for (const instruction of block.instructions) {
+            add(instruction.type);
+            add(instruction.valueType);
+            add(instruction.arrayType);
+            add(instruction.objectType);
+        }
+        return types;
     }
 
     requireFunction(target) {

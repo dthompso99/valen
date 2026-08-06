@@ -19,6 +19,16 @@ entry {{
         if first.hash() != second.hash() { return 2 }
         second.value = 8
         if first == second { return 3 }
+        local left = new Array<i64>(0)
+        left.append(4)
+        left.append(9)
+        local right = new Array<i64>(0)
+        right.append(4)
+        right.append(9)
+        if left != right { return 4 }
+        if left.hash() != right.hash() { return 5 }
+        right[1] = 10
+        if left == right { return 6 }
         return 0
     }
 }}
