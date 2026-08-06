@@ -236,6 +236,24 @@ export class AArch64Backend {
             case 'integer_to_string':
                 return [...this.load(instruction.value, 'x0'), ...this.constant('x1', this.isUnsigned(instruction.integerType) ? 0 : 1),
                     '    bl valen_integer_to_string', `    str x0, ${this.temp(instruction.result)}`];
+            case 'builder_new':
+                return [...this.constant('x0', 1), ...this.constant('x1', 0), '    bl valen_array_new',
+                    `    str x0, ${this.temp(instruction.result)}`];
+            case 'builder_length':
+                return [...this.load(instruction.builder, 'x9'), '    ldr x9, [x9, #0]',
+                    `    str x9, ${this.temp(instruction.result)}`];
+            case 'builder_append_string':
+                return [...this.load(instruction.builder, 'x0'), ...this.load(instruction.value, 'x1'),
+                    '    bl valen_builder_append_string'];
+            case 'builder_append_bytes':
+                return [...this.load(instruction.builder, 'x0'), ...this.load(instruction.value, 'x1'),
+                    '    bl valen_builder_append_bytes'];
+            case 'builder_append_byte':
+                return [...this.load(instruction.builder, 'x0'), ...this.load(instruction.value, 'x1'),
+                    ...this.constant('x2', 1), '    bl valen_array_append'];
+            case 'builder_build':
+                return [...this.load(instruction.builder, 'x0'), '    bl valen_builder_build',
+                    `    str x0, ${this.temp(instruction.result)}`];
             case 'call':
                 return this.call(instruction, false);
             case 'virtual_call':
@@ -651,7 +669,32 @@ export class AArch64Backend {
             '    strb w5, [x3, #0]', '    add x2, x2, #1', '    add x3, x3, #1', '    sub x4, x4, #1',
             '    b .Linteger_string_copy', '.Linteger_string_copy_done:', '    ldr x0, [sp, #16]',
             '    ldr x30, [sp, #56]', '    add sp, sp, #64', '    ret',
-            '.size valen_integer_to_string, .-valen_integer_to_string', ''];
+            '.size valen_integer_to_string, .-valen_integer_to_string', '',
+            '.globl valen_builder_append_string', '.type valen_builder_append_string, %function',
+            'valen_builder_append_string:', '    ldr x2, [x1, #8]', '    ldr x1, [x1, #0]',
+            '    b valen_builder_append_raw', '.size valen_builder_append_string, .-valen_builder_append_string', '',
+            '.globl valen_builder_append_bytes', '.type valen_builder_append_bytes, %function',
+            'valen_builder_append_bytes:', '    ldr x2, [x1, #0]', '    ldr x1, [x1, #16]',
+            '    b valen_builder_append_raw', '.size valen_builder_append_bytes, .-valen_builder_append_bytes', '',
+            '.type valen_builder_append_raw, %function', 'valen_builder_append_raw:', '    ldr x3, [x0, #0]',
+            '    add x4, x3, x2', '    cmp x4, x3', '    b.cc .Larray_bounds_error', '    sub sp, sp, #64',
+            '    str x30, [sp, #56]', '    str x0, [sp, #0]', '    str x1, [sp, #8]', '    str x2, [sp, #16]',
+            '    str x3, [sp, #24]', '    str x4, [sp, #32]', '    mov x1, x4', '    mov x2, #1',
+            '    bl valen_array_reserve', '    ldr x0, [sp, #0]', '    ldr x1, [sp, #8]', '    ldr x2, [sp, #16]',
+            '    ldr x3, [sp, #24]', '    ldr x4, [x0, #16]', '    add x4, x4, x3',
+            '.Lbuilder_append_copy:', '    cbz x2, .Lbuilder_append_done', '    ldrb w5, [x1, #0]',
+            '    strb w5, [x4, #0]', '    add x1, x1, #1', '    add x4, x4, #1', '    sub x2, x2, #1',
+            '    b .Lbuilder_append_copy', '.Lbuilder_append_done:', '    ldr x4, [sp, #32]', '    str x4, [x0, #0]',
+            '    ldr x30, [sp, #56]', '    add sp, sp, #64', '    ret',
+            '.size valen_builder_append_raw, .-valen_builder_append_raw', '', '.globl valen_builder_build',
+            '.type valen_builder_build, %function', 'valen_builder_build:', '    sub sp, sp, #48',
+            '    str x30, [sp, #40]', '    str x0, [sp, #0]', '    ldr x1, [x0, #0]', '    str x1, [sp, #8]',
+            '    mov x0, x1', '    bl valen_string_new', '    str x0, [sp, #16]', '    ldr x2, [x0, #0]',
+            '    ldr x0, [sp, #0]', '    ldr x1, [x0, #16]', '    ldr x3, [sp, #8]',
+            '.Lbuilder_build_copy:', '    cbz x3, .Lbuilder_build_done', '    ldrb w4, [x1, #0]',
+            '    strb w4, [x2, #0]', '    add x1, x1, #1', '    add x2, x2, #1', '    sub x3, x3, #1',
+            '    b .Lbuilder_build_copy', '.Lbuilder_build_done:', '    ldr x0, [sp, #16]', '    ldr x30, [sp, #40]',
+            '    add sp, sp, #48', '    ret', '.size valen_builder_build, .-valen_builder_build', ''];
     }
 
     call(instruction, dynamic) {

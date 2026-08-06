@@ -363,3 +363,22 @@ test('bootstrap compiler formats signed and unsigned AArch64 integers', t => {
     assert.match(result.assembly, /udiv x7, x4, x6/);
     assert.match(result.assembly, /\.Linteger_string_copy:/);
 });
+
+test('bootstrap compiler builds immutable strings and interpolation on AArch64', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-string-builder-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-string-builder.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'string-builder'), {target: 'aarch64-linux'});
+    const interpolationSource = fileURLToPath(new URL('fixtures/string-interpolation.ar', import.meta.url));
+    const interpolation = new Compiler().compile(interpolationSource, path.join(directory, 'interpolation'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'string-builder')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /bl valen_builder_append_string/);
+    assert.match(result.assembly, /bl valen_builder_append_bytes/);
+    assert.match(result.assembly, /bl valen_builder_build/);
+    assert.match(result.assembly, /\.Lbuilder_append_copy:/);
+    assert.match(result.assembly, /\.Lbuilder_build_copy:/);
+    assert.match(interpolation.assembly, /bl valen_integer_to_string/);
+    assert.match(interpolation.assembly, /bl valen_builder_append_string/);
+    assert.match(interpolation.assembly, /bl valen_builder_build/);
+});

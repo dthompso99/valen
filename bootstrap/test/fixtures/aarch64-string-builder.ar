@@ -1,0 +1,21 @@
+entry {{
+    __() -> i32 {
+        local builder = new StringBuilder()
+        if builder.length != 0 { return 1 }
+
+        builder.append("value=")
+        builder.append(42)
+        builder.appendByte(33)
+        local first = builder.build()
+        if first != "value=42!" || builder.length != 9 { return 2 }
+
+        builder.append(" changed")
+        local bytes = " bytes".toBytes()
+        builder.appendBytes(bytes)
+        builder.appendBytes("".toBytes())
+        if builder.length != 23 { return 3 }
+        if builder.build() != "value=42! changed bytes" { return 4 }
+        if first != "value=42!" { return 5 }
+        return 0
+    }
+}}
