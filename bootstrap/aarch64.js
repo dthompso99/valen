@@ -232,7 +232,9 @@ export class AArch64Backend {
                     '    bl valen_array_shrink_to_fit'];
             case 'array_slice':
                 if (instruction.elementOwnership === 'owned' && this.isManagedReferenceType(instruction.elementType)) {
-                    throw new Error('aarch64-linux bootstrap backend does not yet support deep-copying owned managed array slices');
+                    return [...this.load(instruction.array, 'x0'), ...this.load(instruction.start, 'x1'),
+                        ...this.load(instruction.length, 'x2'), ...this.address('x3', this.arraySliceLabel(instruction.type)),
+                        '    bl valen_slice_with_context', `    str x0, ${this.temp(instruction.result)}`];
                 }
                 return [...this.load(instruction.array, 'x0'), ...this.load(instruction.start, 'x1'),
                     ...this.load(instruction.length, 'x2'), ...this.constant('x3', this.sizeOf(instruction.elementType)),
@@ -272,6 +274,9 @@ export class AArch64Backend {
             case 'structural_hash':
                 return [...this.load(instruction.value, 'x0'), ...this.constant('x1', 0),
                     `    bl ${this.hashFunction(instruction.valueType)}`, `    str x0, ${this.temp(instruction.result)}`];
+            case 'structural_copy':
+                return [...this.load(instruction.value, 'x0'), ...this.address('x1', this.copyFunction(instruction.valueType)),
+                    '    bl valen_copy_with_context', `    str x0, ${this.temp(instruction.result)}`];
             case 'string_concat':
                 return [...this.load(instruction.left, 'x0'), ...this.load(instruction.right, 'x1'),
                     '    bl valen_string_concat', `    str x0, ${this.temp(instruction.result)}`];
@@ -1314,7 +1319,7 @@ export class AArch64Backend {
         for (const type of types) {
             lines.push(`${this.typeLabel(type.name)}:`, type.base ? `    .quad ${this.typeLabel(type.base)}` : '    .quad 0',
                 `    .quad ${this.contractListLabel(type.name)}`, `    .quad ${this.objectEqualityLabel(type.name)}`,
-                `    .quad ${this.objectHashLabel(type.name)}`, '    .quad 0');
+                `    .quad ${this.objectHashLabel(type.name)}`, `    .quad ${this.objectCopyLabel(type.name)}`);
             for (const method of type.virtualMethods ?? []) lines.push(`    .quad ${this.requireFunction(method.target)}`);
         }
         for (const type of types) {
@@ -1332,8 +1337,10 @@ export class AArch64Backend {
 
     structuralTypeRuntime() {
         const lines = [];
-        for (const type of this.emittedTypes) lines.push(...this.objectEqualityFunction(type), ...this.objectHashFunction(type));
-        for (const type of this.arrayTypes) lines.push(...this.arrayEqualityFunction(type), ...this.arrayHashFunction(type));
+        for (const type of this.emittedTypes) lines.push(...this.objectEqualityFunction(type), ...this.objectHashFunction(type),
+            ...this.objectCopyFunction(type));
+        for (const type of this.arrayTypes) lines.push(...this.arrayEqualityFunction(type), ...this.arrayHashFunction(type),
+            ...this.arrayCopyFunction(type), ...this.arrayOwnedSliceFunction(type));
         return lines;
     }
 
@@ -1367,6 +1374,50 @@ export class AArch64Backend {
             '    ldrb w11, [x9, #0]', '    eor x0, x0, x11', '    mul x0, x0, x12', '    add x9, x9, #1',
             '    sub x10, x10, #1', '    b .Lstring_hash_next', '.Lstring_hash_done:', '    ret',
             '.Lstring_hash_null:', '    mov x0, #0', '    ret', ''
+            , '.globl valen_copy_with_context', 'valen_copy_with_context:', '    cbz x0, .Lcopy_context_null',
+            '    sub sp, sp, #64', '    str x19, [sp, #32]', '    str x20, [sp, #40]', '    str x30, [sp, #56]',
+            '    mov x19, x0', '    mov x20, x1', '    str xzr, [sp, #0]', ...this.address('x9', 'valen_gc_roots'),
+            '    ldr x10, [x9, #0]', '    str x10, [sp, #8]', ...this.address('x10', 'valen_copy_context_roots'),
+            '    str x10, [sp, #16]', '    add x10, sp, #0', '    str x10, [sp, #24]', '    add x10, sp, #8',
+            '    str x10, [x9, #0]', '    mov x0, x19', '    add x1, sp, #0', '    blr x20', '    mov x19, x0',
+            ...this.address('x9', 'valen_gc_roots'), '    ldr x10, [sp, #8]', '    str x10, [x9, #0]', '    mov x0, x19',
+            '    ldr x19, [sp, #32]', '    ldr x20, [sp, #40]', '    ldr x30, [sp, #56]', '    add sp, sp, #64',
+            '    ret', '.Lcopy_context_null:', '    mov x0, #0', '    ret', '',
+            '.globl valen_slice_with_context', 'valen_slice_with_context:', '    sub sp, sp, #80',
+            '    str x19, [sp, #32]', '    str x20, [sp, #40]', '    str x21, [sp, #48]', '    str x22, [sp, #56]',
+            '    str x30, [sp, #72]', '    mov x19, x0', '    mov x20, x1', '    mov x21, x2', '    mov x22, x3',
+            '    str xzr, [sp, #0]', ...this.address('x9', 'valen_gc_roots'), '    ldr x10, [x9, #0]',
+            '    str x10, [sp, #8]', ...this.address('x10', 'valen_copy_context_roots'), '    str x10, [sp, #16]',
+            '    add x10, sp, #0', '    str x10, [sp, #24]', '    add x10, sp, #8', '    str x10, [x9, #0]',
+            '    mov x0, x19', '    mov x1, x20', '    mov x2, x21', '    add x3, sp, #0', '    blr x22',
+            '    mov x19, x0', ...this.address('x9', 'valen_gc_roots'), '    ldr x10, [sp, #8]', '    str x10, [x9, #0]',
+            '    mov x0, x19', '    ldr x19, [sp, #32]', '    ldr x20, [sp, #40]', '    ldr x21, [sp, #48]',
+            '    ldr x22, [sp, #56]', '    ldr x30, [sp, #72]', '    add sp, sp, #80', '    ret', '',
+            'valen_copy_context_roots:', '    sub sp, sp, #32', '    str x19, [sp, #0]', '    str x30, [sp, #24]',
+            '    ldr x19, [x0, #0]', '.Lcopy_context_mark:', '    cbz x19, .Lcopy_context_mark_done',
+            '    ldr x0, [x19, #8]', '    bl valen_gc_mark', '    ldr x19, [x19, #16]', '    b .Lcopy_context_mark',
+            '.Lcopy_context_mark_done:', '    ldr x19, [sp, #0]', '    ldr x30, [sp, #24]', '    add sp, sp, #32',
+            '    ret', '', '.globl valen_object_copy', 'valen_object_copy:', '    cbz x0, .Lobject_copy_null',
+            '    ldr x9, [x1, #0]', '.Lobject_copy_scan:', '    cbz x9, .Lobject_copy_enter',
+            '    ldr x10, [x9, #0]', '    cmp x10, x0', '    b.eq .Lobject_copy_found', '    ldr x9, [x9, #16]',
+            '    b .Lobject_copy_scan', '.Lobject_copy_found:', '    ldr x0, [x9, #8]', '    ret',
+            '.Lobject_copy_enter:', '    sub sp, sp, #16', '    str x30, [sp, #8]', '    ldr x9, [x0, #0]',
+            '    ldr x9, [x9, #32]', '    blr x9', '    ldr x30, [sp, #8]', '    add sp, sp, #16', '    ret',
+            '.Lobject_copy_null:', '    mov x0, #0', '    ret', '',
+            'valen_string_copy_context:', '    cbz x0, .Lstring_copy_null', '    ldr x9, [x1, #0]',
+            '.Lstring_copy_scan:', '    cbz x9, .Lstring_copy_enter', '    ldr x10, [x9, #0]', '    cmp x10, x0',
+            '    b.eq .Lstring_copy_found', '    ldr x9, [x9, #16]', '    b .Lstring_copy_scan',
+            '.Lstring_copy_found:', '    ldr x0, [x9, #8]', '    ret', '.Lstring_copy_enter:',
+            '    sub sp, sp, #64', '    str x19, [sp, #0]', '    str x20, [sp, #8]', '    str x21, [sp, #16]',
+            '    str x30, [sp, #56]', '    mov x19, x0', '    mov x20, x1', '    ldr x0, [x19, #8]',
+            '    bl valen_string_new', '    mov x21, x0', '    mov x0, #24', '    bl valen_alloc',
+            '    str x19, [x0, #0]', '    str x21, [x0, #8]', '    ldr x9, [x20, #0]', '    str x9, [x0, #16]',
+            '    str x0, [x20, #0]', '    ldr x9, [x19, #0]', '    ldr x10, [x21, #0]', '    ldr x11, [x19, #8]',
+            '.Lstring_copy_bytes:', '    cbz x11, .Lstring_copy_done', '    ldrb w12, [x9, #0]',
+            '    strb w12, [x10, #0]', '    add x9, x9, #1', '    add x10, x10, #1', '    sub x11, x11, #1',
+            '    b .Lstring_copy_bytes', '.Lstring_copy_done:', '    mov x0, x21', '    ldr x19, [sp, #0]',
+            '    ldr x20, [sp, #8]', '    ldr x21, [sp, #16]', '    ldr x30, [sp, #56]', '    add sp, sp, #64',
+            '    ret', '.Lstring_copy_null:', '    mov x0, #0', '    ret', ''
         ];
     }
 
@@ -1475,6 +1526,82 @@ export class AArch64Backend {
             '    ldr x20, [sp, #8]', '    ldr x21, [sp, #16]', '    ldr x22, [sp, #24]', '    ldr x30, [sp, #72]',
             '    add sp, sp, #80', '    ret', `${done}_null:`, '    mov x0, #0', '    ret', `${done}_cycle:`,
             ...this.constant('x0', -7046029254386353131n), '    ret', `.size ${label}, .-${label}`, ''];
+        return lines;
+    }
+
+    objectCopyFunction(type) {
+        const label = this.objectCopyLabel(type.name);
+        const lines = [`.type ${label}, %function`, `${label}:`, '    sub sp, sp, #64', '    str x19, [sp, #0]',
+            '    str x20, [sp, #8]', '    str x21, [sp, #16]', '    str x30, [sp, #56]', '    mov x19, x0',
+            '    mov x20, x1', ...this.constant('x0', this.typeSizes.get(type.name) ?? 16),
+            ...this.address('x1', this.gcTypeTraceLabel(type.name)), ...this.gcTypeWeakAddress('x2', type.name),
+            ...this.constant('x3', 0), '    bl valen_gc_alloc', '    mov x21, x0', '    ldr x9, [x19, #0]',
+            '    str x9, [x21, #0]', '    mov x9, #1', '    str x9, [x21, #8]', '    mov x0, #24',
+            '    bl valen_alloc', '    str x19, [x0, #0]', '    str x21, [x0, #8]', '    ldr x9, [x20, #0]',
+            '    str x9, [x0, #16]', '    str x0, [x20, #0]'];
+        for (const field of type.fields) {
+            const offset = this.fieldOffsets.get(field.symbol).offset;
+            lines.push(...this.copyAddress(`x19, #${offset}`, field.type, 'x20'),
+                `    ${this.storeMnemonic(field.type)} ${this.valueRegister('x0', field.type)}, [x21, #${offset}]`);
+        }
+        lines.push('    mov x0, x21', '    ldr x19, [sp, #0]', '    ldr x20, [sp, #8]', '    ldr x21, [sp, #16]',
+            '    ldr x30, [sp, #56]', '    add sp, sp, #64', '    ret', `.size ${label}, .-${label}`, '');
+        return lines;
+    }
+
+    copyAddress(address, type, context) {
+        const base = type.endsWith('?') ? type.slice(0, -1) : type;
+        if (base === 'string' || base.startsWith('Array<') || this.program.types.some(item => item.name === base)) return [
+            `    ldr x0, [${address}]`, `    mov x1, ${context}`, `    bl ${this.copyFunction(base)}`];
+        return [`    ${this.loadMnemonic(base)} ${this.valueRegister('x0', base)}, [${address}]`];
+    }
+
+    arrayCopyFunction(type) {
+        const spec = this.arraySpec(type), label = this.arrayCopyLabel(type), loop = `${label}_loop`, done = `${label}_done`;
+        const lines = [`.type ${label}, %function`, `${label}:`, `    cbz x0, ${done}_null`, '    ldr x9, [x1, #0]',
+            `${label}_scan:`, `    cbz x9, ${label}_enter`, '    ldr x10, [x9, #0]', '    cmp x10, x0',
+            `    b.eq ${label}_found`, '    ldr x9, [x9, #16]', `    b ${label}_scan`, `${label}_found:`,
+            '    ldr x0, [x9, #8]', '    ret', `${label}_enter:`, '    sub sp, sp, #80', '    str x19, [sp, #0]',
+            '    str x20, [sp, #8]', '    str x21, [sp, #16]', '    str x22, [sp, #24]', '    str x30, [sp, #72]',
+            '    mov x19, x0', '    mov x20, x1', `    mov x0, #${spec.size}`, '    ldr x1, [x19, #0]',
+            ...this.gcArrayAddress('x2', type, false), ...this.gcArrayAddress('x3', type, true),
+            '    bl valen_array_new', '    mov x21, x0', '    mov x0, #24', '    bl valen_alloc',
+            '    str x19, [x0, #0]', '    str x21, [x0, #8]', '    ldr x9, [x20, #0]', '    str x9, [x0, #16]',
+            '    str x0, [x20, #0]', '    mov x22, #0', `${loop}:`, '    ldr x9, [x19, #0]', '    cmp x22, x9',
+            `    b.cs ${done}`, '    ldr x9, [x19, #16]', `    mov x10, #${spec.size}`, '    mul x10, x22, x10',
+            '    add x9, x9, x10'];
+        lines.push(...this.copyAddress('x9, #0', spec.ownership === 'owned' ? spec.element : 'u64', 'x20'),
+            '    ldr x9, [x21, #16]', `    mov x10, #${spec.size}`, '    mul x10, x22, x10', '    add x9, x9, x10',
+            `    ${this.storeMnemonic(spec.element)} ${this.valueRegister('x0', spec.element)}, [x9, #0]`,
+            '    add x22, x22, #1', `    b ${loop}`, `${done}:`, '    mov x0, x21', '    ldr x19, [sp, #0]',
+            '    ldr x20, [sp, #8]', '    ldr x21, [sp, #16]', '    ldr x22, [sp, #24]', '    ldr x30, [sp, #72]',
+            '    add sp, sp, #80', '    ret', `${done}_null:`, '    mov x0, #0', '    ret',
+            `.size ${label}, .-${label}`, '');
+        return lines;
+    }
+
+    arrayOwnedSliceFunction(type) {
+        const spec = this.arraySpec(type);
+        if (spec.ownership !== 'owned' || !spec.managed) return [];
+        const label = this.arraySliceLabel(type), loop = `${label}_loop`, done = `${label}_done`;
+        const lines = [`.type ${label}, %function`, `${label}:`, '    cmp x1, #0', '    b.lt .Larray_bounds_error',
+            '    cmp x2, #0', '    b.lt .Larray_bounds_error', '    add x9, x1, x2', '    cmp x9, x1',
+            '    b.cc .Larray_bounds_error', '    ldr x10, [x0, #0]', '    cmp x9, x10', '    b.hi .Larray_bounds_error',
+            '    sub sp, sp, #112', '    str x19, [sp, #0]', '    str x20, [sp, #8]', '    str x21, [sp, #16]',
+            '    str x22, [sp, #24]', '    str x23, [sp, #32]', '    str x24, [sp, #40]', '    str x30, [sp, #104]',
+            '    mov x19, x0', '    mov x20, x1', '    mov x21, x2', '    mov x22, x3', `    mov x0, #${spec.size}`,
+            '    mov x1, x21', ...this.gcArrayAddress('x2', type, false), ...this.gcArrayAddress('x3', type, true),
+            '    bl valen_array_new', '    mov x23, x0', '    mov x0, #24', '    bl valen_alloc',
+            '    str x19, [x0, #0]', '    str x23, [x0, #8]', '    ldr x9, [x22, #0]', '    str x9, [x0, #16]',
+            '    str x0, [x22, #0]', '    mov x24, #0', `${loop}:`, '    cmp x24, x21', `    b.cs ${done}`,
+            '    add x9, x20, x24', `    mov x10, #${spec.size}`, '    mul x9, x9, x10', '    ldr x10, [x19, #16]',
+            '    add x9, x10, x9', ...this.copyAddress('x9, #0', spec.element, 'x22'), '    ldr x9, [x23, #16]',
+            `    mov x10, #${spec.size}`, '    mul x10, x24, x10', '    add x9, x9, x10',
+            `    ${this.storeMnemonic(spec.element)} ${this.valueRegister('x0', spec.element)}, [x9, #0]`,
+            '    add x24, x24, #1', `    b ${loop}`, `${done}:`, '    mov x0, x23', '    ldr x19, [sp, #0]',
+            '    ldr x20, [sp, #8]', '    ldr x21, [sp, #16]', '    ldr x22, [sp, #24]', '    ldr x23, [sp, #32]',
+            '    ldr x24, [sp, #40]', '    ldr x30, [sp, #104]', '    add sp, sp, #112', '    ret',
+            `.size ${label}, .-${label}`, ''];
         return lines;
     }
 
@@ -1612,8 +1739,11 @@ export class AArch64Backend {
     contractTableLabel(typeName, contractName) { return `${this.typeLabel(typeName)}_as_${this.mangle(contractName)}`; }
     objectEqualityLabel(typeName) { return `${this.typeLabel(typeName)}_equal`; }
     objectHashLabel(typeName) { return `${this.typeLabel(typeName)}_hash`; }
+    objectCopyLabel(typeName) { return `${this.typeLabel(typeName)}_copy`; }
     arrayEqualityLabel(typeName) { return `.Lvalen_array_equal_${this.mangle(typeName)}`; }
     arrayHashLabel(typeName) { return `.Lvalen_array_hash_${this.mangle(typeName)}`; }
+    arrayCopyLabel(typeName) { return `.Lvalen_array_copy_${this.mangle(typeName)}`; }
+    arraySliceLabel(typeName) { return `.Lvalen_array_slice_${this.mangle(typeName)}`; }
 
     equalityFunction(typeName) {
         const type = typeName?.endsWith('?') ? typeName.slice(0, -1) : typeName;
@@ -1627,6 +1757,13 @@ export class AArch64Backend {
         if (type === 'string') return 'valen_string_hash_context';
         if (type?.startsWith('Array<')) return this.arrayHashLabel(type);
         return 'valen_object_hash';
+    }
+
+    copyFunction(typeName) {
+        const type = typeName?.endsWith('?') ? typeName.slice(0, -1) : typeName;
+        if (type === 'string') return 'valen_string_copy_context';
+        if (type?.startsWith('Array<')) return this.arrayCopyLabel(type);
+        return 'valen_object_copy';
     }
 
     structuralArrayTypes(functions = this.program.functions) {

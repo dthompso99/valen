@@ -9,6 +9,16 @@ Node {{
     }
 }}
 
+Pair {{
+    member left:Node
+    member right:Node
+
+    __(left:Node, right:Node) -> void {
+        self.left = left
+        self.right = right
+    }
+}}
+
 entry {{
     __() -> i32 {
         local first = new Node(7, "cycle")
@@ -29,6 +39,24 @@ entry {{
         if left.hash() != right.hash() { return 5 }
         right[1] = 10
         if left == right { return 6 }
+        local cycleCopy = copy first
+        if cycleCopy === first { return 7 }
+        if cycleCopy.next! !== cycleCopy { return 8 }
+        if cycleCopy != first { return 9 }
+        local shared = new Node(12, "shared")
+        local pair = new Pair(shared, shared)
+        local pairCopy = copy pair
+        if pairCopy === pair { return 10 }
+        if pairCopy.left !== pairCopy.right { return 11 }
+        if pairCopy.left === shared { return 12 }
+        local text = "copy me"
+        local textCopy = copy text
+        if textCopy === text || textCopy != text { return 13 }
+        local references = new Array<ref Node>(0)
+        references.append(shared)
+        local referenceCopy = copy references
+        if referenceCopy === references { return 14 }
+        if referenceCopy[0] !== shared { return 15 }
         return 0
     }
 }}
