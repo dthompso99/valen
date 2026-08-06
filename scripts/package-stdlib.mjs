@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {resolveTarget} from '../bootstrap/target.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const arguments_ = process.argv.slice(2);
@@ -13,7 +14,7 @@ const value = name => {
     return arguments_[index + 1];
 };
 const release = value('--release') ?? 'current';
-const target = value('--target') ?? 'x86_64-linux';
+const target = resolveTarget(value('--target') ?? undefined).name;
 const version = value('--version') ?? '0.1.0';
 const nativeCompiler = value('--compiler');
 const output = path.resolve(value('--output') ?? path.join(root, 'dist/lib/valen'));
@@ -37,10 +38,11 @@ try {
     for (const module of modules) {
         const stem = module.slice(0, -3);
         const object = path.join(directories.objects, `${stem}.o`);
-        if (compiler !== null) compiler.emitLibrary(path.join(directories.source, module), object, version, {sourceRoot: path.join(sysroot, 'source')});
+        if (compiler !== null) compiler.emitLibrary(path.join(directories.source, module), object, version,
+            {sourceRoot: path.join(sysroot, 'source'), target});
         else {
             const result = spawnSync(path.resolve(nativeCompiler), ['--source-root', path.join(sysroot, 'source'),
-                '--library-version', version, '--emit-library', path.join(directories.source, module), '-o', object],
+                '--target', target, '--library-version', version, '--emit-library', path.join(directories.source, module), '-o', object],
             {stdio: 'inherit', env: {...process.env, VALEN_SYSROOT: sysroot}});
             if (result.error) throw result.error;
             if (result.status !== 0) throw new Error(`Valen compiler exited with status ${result.status}`);

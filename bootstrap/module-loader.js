@@ -4,10 +4,12 @@ import {Parser} from './parser.js';
 import {diagnostic, DiagnosticSeverity} from './diagnostics.js';
 import {ModuleInterface} from './module-interface.js';
 import {LibraryMetadata} from './library-metadata.js';
+import {resolveTarget} from './target.js';
 
 export class ModuleLoader {
     constructor({sourceRoot, libraryPath = process.env.VALEN_LIBRARY_PATH ?? process.env.ARGON_LIBRARY_PATH,
-        sysroot = process.env.VALEN_SYSROOT, documents = new Map()} = {}) {
+        sysroot = process.env.VALEN_SYSROOT, documents = new Map(), target} = {}) {
+        this.target = resolveTarget(target);
         this.sourceRoot = sourceRoot ? path.resolve(sourceRoot) : null;
         this.libraryPaths = (libraryPath ?? '').split(path.delimiter).filter(Boolean).map(entry => path.resolve(entry));
         this.sysroot = sysroot ? path.resolve(sysroot) : null;
@@ -170,9 +172,9 @@ export class ModuleLoader {
         try {
             const libraries = module.program.libraries.filter(item => item.visibility !== 'private');
             if (libraries.length !== 1) throw new Error('compiled module must declare exactly one public library');
-            const metadata = LibraryMetadata.parse(fs.readFileSync(metadataPath, 'utf8'), {name: libraries[0].name});
+            const metadata = LibraryMetadata.parse(fs.readFileSync(metadataPath, 'utf8'), {name: libraries[0].name, target: this.target.name});
             const object = fs.readFileSync(objectPath);
-            const actualObject = LibraryMetadata.create({...metadata, object}).objectFingerprint;
+            const actualObject = LibraryMetadata.create({...metadata, object, target: this.target.name}).objectFingerprint;
             if (actualObject !== metadata.objectFingerprint) throw new Error('compiled object fingerprint does not match metadata');
             const expectedInterface = ModuleInterface.create(module);
             const installedInterface = ModuleInterface.parse(fs.readFileSync(interfacePath, 'utf8'));

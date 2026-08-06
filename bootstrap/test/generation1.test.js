@@ -162,6 +162,21 @@ test('generation 1 passes the native compiler conformance suite', async t => {
         assert.equal(compilerDynamic.status, 0, compilerDynamic.stderr);
         assert.doesNotMatch(compilerDynamic.stdout, /NEEDED/, 'generation 1 unexpectedly requires a shared library');
 
+        await t.test('native compiler normalizes and validates explicit targets', () => {
+            const source = path.join(projectRoot, 'bootstrap/test/fixtures/runtime-foundation.ar');
+            const recognized = spawnSync(compilerPath,
+                ['--target', 'arm64-linux', source, '-o', path.join(directory, 'arm64-output')],
+                {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(recognized.status, 69);
+            assert.match(recognized.stderr, /target 'aarch64-linux' is recognized, but its backend is not implemented/);
+
+            const unsupported = spawnSync(compilerPath,
+                ['--target', 'mips-linux', source, '-o', path.join(directory, 'mips-output')],
+                {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(unsupported.status, 64);
+            assert.match(unsupported.stderr, /supported targets: x86_64-linux, aarch64-linux/);
+        });
+
         await t.test('compiled libraries carry validated version and ABI metadata', () => {
             const source = path.join(projectRoot, 'bootstrap/test/fixtures/compiled-library.ar');
             const object = path.join(directory, 'arithmetic-library.o');

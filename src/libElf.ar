@@ -145,11 +145,13 @@ library Elf {{
     }}
 
     Object {{
+        member machine:i64
         member sections:Array<Section>
         member symbols:Array<Symbol>
         member relocations:Array<Relocation>
 
-        __() -> void {
+        __(machine:i64=62) -> void {
+            self.machine = machine
             self.sections = new Array<Section>(0)
             self.symbols = new Array<Symbol>(0)
             self.relocations = new Array<Relocation>(0)
@@ -280,7 +282,7 @@ library Elf {{
 
             output.patch(0, 1179403647, 4)
             output.values[4] = 2; output.values[5] = 1; output.values[6] = 1
-            output.patch16(16, 1); output.patch16(18, 62); output.patch32(20, 1)
+            output.patch16(16, 1); output.patch16(18, self.machine); output.patch32(20, 1)
             output.patch64(40, sectionHeaders)
             output.patch16(52, 64); output.patch16(58, 64)
             output.patch16(60, self.sections.length + 1)

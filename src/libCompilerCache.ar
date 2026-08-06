@@ -18,9 +18,11 @@ library CompilerCache {{
         member directory:string?
         member trace:bool
         member optimizationLevel:i64
+        member target:string
 
-        __(optimizationLevel:i64=1) -> void {
+        __(optimizationLevel:i64=1, target:string="x86_64-linux") -> void {
             self.optimizationLevel = optimizationLevel
+            self.target = target
             self.directory = System.environmentVariable("VALEN_CACHE_PATH")
             if self.directory == null { self.directory = System.environmentVariable("ARGON_CACHE_PATH") }
             local traceValue = System.environmentVariable("VALEN_CACHE_TRACE")
@@ -85,12 +87,12 @@ library CompilerCache {{
 
         path(graph:ModuleLoading.ModuleGraph) -> string? {
             if self.directory == null { return null }
-            return self.directory! + "/x86_64-linux-" + self.fingerprint(graph).toString() + ".cache"
+            return self.directory! + "/" + self.target + "-" + self.fingerprint(graph).toString() + ".cache"
         }
 
         modulePath(module:ModuleLoading.Module, includeRuntime:bool) -> string? {
             if self.directory == null { return null }
-            return self.directory! + "/x86_64-linux-module-" + self.moduleFingerprint(module, includeRuntime).toString() + ".chunk"
+            return self.directory! + "/" + self.target + "-module-" + self.moduleFingerprint(module, includeRuntime).toString() + ".chunk"
         }
 
         loadModuleAssembly(module:ModuleLoading.Module, includeRuntime:bool) -> string? {
@@ -120,7 +122,7 @@ library CompilerCache {{
         moduleFingerprint(module:ModuleLoading.Module, includeRuntime:bool) -> i64 {
             local interfaceBuilder = new ModuleInterfaces.Builder()
             local ownArtifact = interfaceBuilder.create(module)
-            local value = self.mix(1469598103934665603, "valen-module-object-v1:x86_64-linux:O" + self.optimizationLevel.toString())
+            local value = self.mix(1469598103934665603, "valen-module-object-v1:" + self.target + ":O" + self.optimizationLevel.toString())
             if includeRuntime { value = self.mix(value, "runtime") } else { value = self.mix(value, "module") }
             value = self.mix(value, module.path); value = self.mix(value, ownArtifact.implementationFingerprint.toString())
             local index:i64 = 0
@@ -189,7 +191,7 @@ library CompilerCache {{
 
         fingerprint(graph:ModuleLoading.ModuleGraph) -> i64 {
             local value:i64 = 1469598103934665603
-            value = self.mix(value, "valen-cache-v1:x86_64-linux:O" + self.optimizationLevel.toString())
+            value = self.mix(value, "valen-cache-v1:" + self.target + ":O" + self.optimizationLevel.toString())
             local index:i64 = 0
             while index < graph.modules.length {
                 local module = graph.modules[index]

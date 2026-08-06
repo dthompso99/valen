@@ -39,9 +39,10 @@ class StringTable {
     }
 }
 
-/** A deterministic ELF64 little-endian x86-64 relocatable-object writer. */
+/** A deterministic ELF64 little-endian relocatable-object writer. */
 export class ElfObject {
-    constructor() {
+    constructor({machine = 62} = {}) {
+        this.machine = machine;
         this.sections = [];
         this.symbols = [];
         this.relocations = [];
@@ -90,7 +91,7 @@ export class ElfObject {
     static parse(input) {
         const buffer = Buffer.from(input);
         if (buffer.length < ELF_HEADER_SIZE || buffer.subarray(0, 4).toString('hex') !== '7f454c46' ||
-            buffer[4] !== 2 || buffer[5] !== 1 || buffer.readUInt16LE(16) !== 1 || buffer.readUInt16LE(18) !== 62) {
+            buffer[4] !== 2 || buffer[5] !== 1 || buffer.readUInt16LE(16) !== 1 || ![62, 183].includes(buffer.readUInt16LE(18))) {
             throw new Error('Unsupported compiled-library object');
         }
         const headerOffset = Number(buffer.readBigUInt64LE(40));
@@ -119,7 +120,7 @@ export class ElfObject {
         };
         const sectionNames = bytes(headers[nameIndex]);
         headers.forEach(header => { header.name = stringAt(sectionNames, header.nameOffset); });
-        const object = new ElfObject();
+        const object = new ElfObject({machine: buffer.readUInt16LE(18)});
         headers.forEach((header, index) => {
             if (index === 0 || [SHT.SYMTAB, SHT.STRTAB, SHT.RELA].includes(header.type)) return;
             const section = object.addSection(header.name, bytes(header), {type: header.type === SHT.NOBITS ? 'NOBITS' : 'PROGBITS',
@@ -217,7 +218,7 @@ export class ElfObject {
 
         output.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0], 0);
         output.writeUInt16LE(1, 16); // ET_REL
-        output.writeUInt16LE(62, 18); // EM_X86_64
+        output.writeUInt16LE(this.machine, 18);
         output.writeUInt32LE(1, 20);
         writeU64(output, 40, sectionHeaderOffset);
         output.writeUInt16LE(ELF_HEADER_SIZE, 52);

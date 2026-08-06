@@ -24,6 +24,9 @@ library Linking {{
         linkObjects(objects:Array<ref Elf.Object>) -> Array<u8>? {
             if objects.length == 0 { self.error = "No input objects"; return null }
             if objects.length == 1 { return self.link(objects[0]) }
+            local machine = objects[0].machine
+            local machineIndex:i64 = 1
+            while machineIndex < objects.length { if objects[machineIndex].machine != machine { self.error = "Cannot link objects for different target architectures"; return null }; machineIndex = machineIndex + 1 }
             local required = new Array<string>(0)
             local objectIndex:i64 = 0
             while objectIndex < objects.length {
@@ -35,7 +38,7 @@ library Linking {{
                 }
                 objectIndex = objectIndex + 1
             }
-            local merged = new Elf.Object()
+            local merged = new Elf.Object(machine)
             objectIndex = 0
             while objectIndex < objects.length {
                 local object = objects[objectIndex]
@@ -92,6 +95,7 @@ library Linking {{
         symbol(object:Elf.Object, name:string) -> ref Elf.Symbol? { local index:i64 = 0; while index < object.symbols.length { if object.symbols[index].name == name { return object.symbols[index] }; index = index + 1 }; return null }
 
         link(object:Elf.Object) -> Array<u8>? {
+            if object.machine != 62 { self.error = "Unsupported ELF machine " + object.machine.toString(); return null }
             local base:i64 = 4194304
             local page:i64 = 4096
             local fileOffset:i64 = page
@@ -171,7 +175,7 @@ library Linking {{
 
             output.patch(0, 1179403647, 4)
             output.values[4] = 2; output.values[5] = 1; output.values[6] = 1
-            output.patch16(16, 2); output.patch16(18, 62); output.patch32(20, 1)
+            output.patch16(16, 2); output.patch16(18, object.machine); output.patch32(20, 1)
             output.patch64(24, entry); output.patch64(32, 64)
             output.patch16(52, 64); output.patch16(54, 56); output.patch16(56, 2)
             self.programHeader(output, 64, 5, 0, base, readOnlyEnd, readOnlyEnd, page)

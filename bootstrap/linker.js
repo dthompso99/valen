@@ -14,7 +14,9 @@ export class ElfLinker {
     linkObjects(objects, options = {}) {
         if (objects.length === 0) throw new LinkerError('No input objects');
         if (objects.length === 1) return this.link(objects[0], options);
-        const merged = new ElfObject();
+        const machine = objects[0].machine;
+        if (objects.some(object => object.machine !== machine)) throw new LinkerError('Cannot link objects for different target architectures');
+        const merged = new ElfObject({machine});
         const requiredGlobals = new Set(objects.flatMap(object => object.symbols
             .filter(symbol => !symbol.section && symbol.binding !== 'LOCAL').map(symbol => symbol.name)));
         objects.forEach((object, objectIndex) => {
@@ -48,6 +50,7 @@ export class ElfLinker {
     }
 
     link(object, {entry = '_start'} = {}) {
+        if (object.machine !== 62) throw new LinkerError(`Unsupported ELF machine ${object.machine}`);
         const alloc = object.sections.filter(section => (section.flags & 2) !== 0);
         const readOnly = alloc.filter(section => (section.flags & 1) === 0);
         const writable = alloc.filter(section => (section.flags & 1) !== 0);
@@ -105,7 +108,7 @@ export class ElfLinker {
 
         output.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0], 0);
         output.writeUInt16LE(2, 16);
-        output.writeUInt16LE(62, 18);
+        output.writeUInt16LE(object.machine, 18);
         output.writeUInt32LE(1, 20);
         output.writeBigUInt64LE(BigInt(symbols.get(entry)), 24);
         output.writeBigUInt64LE(64n, 32);

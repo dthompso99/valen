@@ -1,20 +1,21 @@
 import fs from 'node:fs';
 import {moduleInterfaceHash} from './module-interface.js';
+import {resolveTarget} from './target.js';
 
 export const LIBRARY_METADATA_VERSION = 1;
 export const VALEN_COMPILER_INTERFACE = 'valen-interface-1';
-export const VALEN_TARGET = 'x86_64-linux';
 export const VALEN_NATIVE_ABI = 'valen-native-1';
 
 const semanticVersion = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const signedHash = value => BigInt.asIntN(64, BigInt(`0x${moduleInterfaceHash(value)}`)).toString();
 
 export class LibraryMetadata {
-    static create({name, version, interfaceFingerprint, implementationFingerprint, object, dependencies = []}) {
+    static create({name, version, interfaceFingerprint, implementationFingerprint, object, dependencies = [], target}) {
+        const selectedTarget = resolveTarget(target);
         if (!semanticVersion.test(version)) throw new Error(`Invalid semantic version '${version}'`);
         if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`Invalid library name '${name}'`);
         return {format: LIBRARY_METADATA_VERSION, name, version, compiler: VALEN_COMPILER_INTERFACE,
-            target: VALEN_TARGET, abi: VALEN_NATIVE_ABI, interfaceFingerprint, implementationFingerprint,
+            target: selectedTarget.name, abi: selectedTarget.abi, interfaceFingerprint, implementationFingerprint,
             objectFingerprint: signedHash(object), dependencies: [...dependencies].sort((a, b) => a.name.localeCompare(b.name))};
     }
 
@@ -28,6 +29,7 @@ export class LibraryMetadata {
     }
 
     static parse(source, expected = {}) {
+        const selectedTarget = resolveTarget(expected.target);
         const lines = source.split('\n');
         if (lines[0] !== `VALEN-LIBRARY-${LIBRARY_METADATA_VERSION}` || lines.at(-2) !== 'VALEN-LIBRARY-END') {
             throw new Error('Unsupported or malformed Valen library metadata');
@@ -53,8 +55,8 @@ export class LibraryMetadata {
             compiler: values.get('compiler'), target: values.get('target'), abi: values.get('abi'),
             interfaceFingerprint: values.get('interface'), implementationFingerprint: values.get('implementation'),
             objectFingerprint: values.get('object'), dependencies};
-        for (const [key, value] of Object.entries({compiler: VALEN_COMPILER_INTERFACE, target: VALEN_TARGET,
-            abi: VALEN_NATIVE_ABI, ...expected})) {
+        for (const [key, value] of Object.entries({compiler: VALEN_COMPILER_INTERFACE, target: selectedTarget.name,
+            abi: selectedTarget.abi, ...expected})) {
             if (value !== undefined && metadata[key] !== value) throw new Error(`Incompatible library ${key}: expected '${value}', found '${metadata[key]}'`);
         }
         return metadata;

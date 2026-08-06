@@ -14,6 +14,7 @@ import Linking from './libLinker.ar'
 import Elf from './libElf.ar'
 import LibraryMetadata from './libLibraryMetadata.ar'
 import ModuleInterfaces from './libModuleInterface.ar'
+import Target from './libTarget.ar'
 
 entry {{
     __() -> i32 {
@@ -24,6 +25,9 @@ entry {{
         local optimizationLevel:i64 = 1
         local configuredSourceRoot:string? = null
         local linkerMode:string = "auto"
+        local targetName:string = "x86_64-linux"
+        local environmentTarget = System.environmentVariable("VALEN_TARGET")
+        if environmentTarget != null { targetName = environmentTarget! }
         local libraryVersion:string? = null
         local argumentIndex:i64 = 1
         while argumentIndex < arguments.length {
@@ -36,6 +40,10 @@ entry {{
             } else if argument == "--source-root" {
                 if argumentIndex + 1 >= arguments.length { System.writeError("valen: --source-root requires a directory\n"); return 64 }
                 configuredSourceRoot = arguments[argumentIndex + 1]
+                argumentIndex = argumentIndex + 1
+            } else if argument == "--target" {
+                if argumentIndex + 1 >= arguments.length { System.writeError("valen: --target requires a target triple\n"); return 64 }
+                targetName = arguments[argumentIndex + 1]
                 argumentIndex = argumentIndex + 1
             } else if argument == "--library-version" {
                 if argumentIndex + 1 >= arguments.length { System.writeError("valen: --library-version requires a semantic version\n"); return 64 }
@@ -59,7 +67,7 @@ entry {{
                 return 0
             }
         }
-        if compilerArguments.length == 3 { if compilerArguments[1] == "--validate-library" { return self.validateCompiledLibrary(compilerArguments[2]) } }
+        if compilerArguments.length == 3 { if compilerArguments[1] == "--validate-library" { return self.validateCompiledLibrary(compilerArguments[2], targetName) } }
 
         local sourcePath:string? = null
         local outputPath:string? = null
@@ -101,6 +109,18 @@ entry {{
             self.writeUsage()
             return 64
         }
+        local targetResolver = new Target.Resolver()
+        local target = targetResolver.resolve(targetName)
+        if target == null {
+            System.writeError("valen: unsupported target '"); System.writeError(targetName)
+            System.writeError("'; supported targets: "); System.writeError(targetResolver.supported()); System.writeError("\n")
+            return 64
+        }
+        targetName = target!.name
+        if targetName != "x86_64-linux" {
+            System.writeError("valen: target '"); System.writeError(targetName); System.writeError("' is recognized, but its backend is not implemented\n")
+            return 69
+        }
         if emitLibrary && libraryVersion == null { System.writeError("valen: --emit-library requires --library-version <major.minor.patch>\n"); return 64 }
 
         local cwd = System.currentDirectory()
@@ -119,7 +139,7 @@ entry {{
             local executable = arguments[0]
             if executable.length > 0 {
                 if executable[0] != 47 { executable = cwd! + "/" + executable }
-                sysroot = self.directoryName(executable) + "/../lib/valen/current/x86_64-linux"
+                sysroot = self.directoryName(executable) + "/../lib/valen/current/" + targetName
             }
         }
         local loader = new ModuleLoading.ModuleLoader(sourceRoot, libraryPath, sysroot)
@@ -128,8 +148,8 @@ entry {{
             Diagnostics.write(graph.diagnostics)
             return 65
         }
-        if !self.validateCompiledArtifacts(graph) { return 65 }
-        local cache = new CompilerCache.Cache(optimizationLevel)
+        if !self.validateCompiledArtifacts(graph, targetName) { return 65 }
+        local cache = new CompilerCache.Cache(optimizationLevel, targetName)
         if cache.enabled() { cache.prepareInterfaces(graph) }
         if outputPath != null && cache.enabled() {
             local cached = cache.load(graph)
@@ -172,7 +192,7 @@ entry {{
             System.write(normalizer.format(ir))
             return 0
         }
-        if emitLibrary { return self.emitCompiledLibrary(graph, ir, outputPath!, libraryVersion!, optimizationLevel) }
+        if emitLibrary { return self.emitCompiledLibrary(graph, ir, outputPath!, libraryVersion!, optimizationLevel, targetName) }
         local backend = new X86_64.Backend(ir, optimizationLevel)
         local runtimeErrors = backend.validateRuntime()
         if runtimeErrors.length > 0 {
@@ -207,7 +227,7 @@ entry {{
         return 0
     }
 
-    emitCompiledLibrary(graph:ModuleLoading.ModuleGraph, ir:Ir.Program, objectPath:string, version:string, optimizationLevel:i64) -> i32 {
+    emitCompiledLibrary(graph:ModuleLoading.ModuleGraph, ir:Ir.Program, objectPath:string, version:string, optimizationLevel:i64, targetName:string) -> i32 {
         if graph.entry == null { System.writeError("valen: compiled library has no source module\n"); return 65 }
         local libraryName:string? = null; local declarationIndex:i64 = 0
         while declarationIndex < graph.entry!.program.declarations.length {
@@ -229,7 +249,7 @@ entry {{
             dependencies.append(new LibraryMetadata.Dependency(imported.name, importedArtifact.interfaceFingerprint.toString()))
             importIndex = importIndex + 1
         }
-        local codec = new LibraryMetadata.Codec()
+        local codec = new LibraryMetadata.Codec(targetName)
         local metadata = codec.create(libraryName!, version, artifact.interfaceFingerprint.toString(), artifact.implementationFingerprint.toString(), object, dependencies)
         if metadata == null { System.writeError("valen: "); System.writeError(codec.error); System.writeError("\n"); return 64 }
         if !codec.write(objectPath + ".vmeta", metadata!) { System.writeError("valen: "); System.writeError(codec.error); System.writeError("\n"); return 74 }
@@ -237,7 +257,7 @@ entry {{
         return 0
     }
 
-    validateCompiledArtifacts(graph:ModuleLoading.ModuleGraph) -> bool {
+    validateCompiledArtifacts(graph:ModuleLoading.ModuleGraph, targetName:string) -> bool {
         local builder = new ModuleInterfaces.Builder()
         local moduleIndex:i64 = 0
         while moduleIndex < graph.modules.length {
@@ -249,7 +269,7 @@ entry {{
                 if objectSource == null || metadataSource == null || interfaceSource == null {
                     System.writeError("valen: installed library artifact disappeared while loading '"); System.writeError(module.path); System.writeError("'\n"); return false
                 }
-                local codec = new LibraryMetadata.Codec(); local metadata = codec.parse(metadataSource!.content)
+                local codec = new LibraryMetadata.Codec(targetName); local metadata = codec.parse(metadataSource!.content)
                 if metadata == null { System.writeError("valen: invalid installed library metadata for '"); System.writeError(module.path); System.writeError("': "); System.writeError(codec.error); System.writeError("\n"); return false }
                 local artifact = builder.create(module)
                 if artifact.interfaceFingerprint.toString() != metadata!.interfaceFingerprint || interfaceSource!.content != artifact.summary {
@@ -282,10 +302,14 @@ entry {{
         return true
     }
 
-    validateCompiledLibrary(path:string) -> i32 {
+    validateCompiledLibrary(path:string, targetName:string) -> i32 {
         local source = Compiler.loadSource(path)
         if source == null { System.writeError("valen: cannot load library metadata; OS error "); System.writeError(System.lastError().toString()); System.writeError("\n"); return 66 }
-        local codec = new LibraryMetadata.Codec(); local metadata = codec.parse(source!.content)
+        local resolver = new Target.Resolver()
+        local target = resolver.resolve(targetName)
+        if target == null { System.writeError("valen: unsupported target '"); System.writeError(targetName); System.writeError("'\n"); return 64 }
+        local normalizedTarget = target!.name
+        local codec = new LibraryMetadata.Codec(normalizedTarget); local metadata = codec.parse(source!.content)
         if metadata == null { System.writeError("valen: "); System.writeError(codec.error); System.writeError("\n"); return 65 }
         if path.length < 7 || path.slice(path.length - 6, 6) != ".vmeta" { System.writeError("valen: library metadata path must end in .vmeta\n"); return 65 }
         local objectSource = Compiler.loadSource(path.slice(0, path.length - 6))
@@ -410,6 +434,7 @@ entry {{
         System.write("usage:\n")
         System.write("  optimization: -O0 (no optional optimization), -O1 (default)\n")
         System.write("  source root: --source-root <directory>\n")
+        System.write("  target: --target <x86_64-linux|aarch64-linux>\n")
         System.write("  linker: --linker auto (default), native, or system\n")
         System.write("  valen <source-file>\n")
         System.write("  valen <source-file> -o <executable>\n")

@@ -1,0 +1,30 @@
+library Target {{
+    Definition {{
+        member name:string
+        member architecture:string
+        member operatingSystem:string
+        member elfMachine:i64
+        member abi:string
+
+        __(name:string, architecture:string, operatingSystem:string, elfMachine:i64) -> void {
+            self.name = name
+            self.architecture = architecture
+            self.operatingSystem = operatingSystem
+            self.elfMachine = elfMachine
+            self.abi = "valen-native-1"
+        }
+    }}
+
+    Resolver {{
+        resolve(value:string) -> ref Definition? {
+            local normalized = value
+            if value == "amd64-linux" || value == "x64-linux" { normalized = "x86_64-linux" }
+            if value == "arm64-linux" { normalized = "aarch64-linux" }
+            if normalized == "x86_64-linux" { return new Definition(normalized, "x86_64", "linux", 62) }
+            if normalized == "aarch64-linux" { return new Definition(normalized, "aarch64", "linux", 183) }
+            return null
+        }
+
+        supported() -> string { return "x86_64-linux, aarch64-linux" }
+    }}
+}}
