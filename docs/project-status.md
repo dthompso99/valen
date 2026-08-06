@@ -47,7 +47,8 @@
   relationships. Arrays use the common 40-byte header and support allocation, length and capacity, checked
   indexing, replacement, append, insert, remove, reserve, and shrink-to-fit across scalar and reference-sized
   elements. Managed object, array, and dynamic-string descriptors use tracked 48-byte GC allocation headers,
-  and functions publish precise managed stack roots. Mark/sweep collection is not yet enabled, so tracked
+  and functions publish precise managed stack roots. Cycle-safe marking follows generated object and managed-array
+  trace callbacks. Sweeping is not yet enabled, so tracked
   descriptors and replaced buffers remain anonymous mappings for process lifetime. Weak object fields and
   weak array elements/slices observe explicit destruction through the common liveness word. Copied slices
   support value elements, explicit reference aliases, and weak aliases;

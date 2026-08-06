@@ -27,12 +27,15 @@ export class AArch64Backend {
         this.symbols = new Map(program.functions.map(fn => [fn.name, this.mangle(fn.name)]));
         this.emittedTypes = moduleId === null ? program.types : program.types.filter(type => type.moduleId === moduleId);
         const functions = moduleId === null ? program.functions : program.functions.filter(fn => fn.moduleId === moduleId);
+        this.arrayTypes = new Set();
         this.stringLiterals = new Map();
         for (const instruction of functions.flatMap(fn => fn.blocks.flatMap(block => block.instructions))) {
             if (instruction.op === 'string_constant') this.internString(instruction.value);
+            if (instruction.type?.startsWith('Array<')) this.arrayTypes.add(instruction.type);
         }
         const lines = ['.text'];
         for (const fn of functions) lines.push(...this.generateFunction(fn));
+        lines.push(...this.gcTypeFunctions(this.emittedTypes), ...this.gcArrayFunctions(this.arrayTypes));
         if (includeRuntime) lines.push(...this.generateStart(), ...this.allocationRuntime(), ...this.arrayRuntime(),
             ...this.stringRuntime(), ...this.builderRuntime());
         lines.push('.Larray_bounds_error:', '    mov x0, #70', '    mov x8, #93', '    svc #0',
@@ -153,7 +156,9 @@ export class AArch64Backend {
                 return this.binary(instruction);
             case 'allocate':
                 return [...this.constant('x0', this.typeSizes.get(instruction.objectType) ?? 16),
-                    ...this.constant('x1', 0), ...this.constant('x2', 0), ...this.constant('x3', 0), '    bl valen_gc_alloc',
+                    ...this.address('x1', this.gcTypeTraceLabel(instruction.objectType)),
+                    ...this.gcTypeWeakAddress('x2', instruction.objectType), ...this.constant('x3', 0),
+                    '    bl valen_gc_alloc',
                     ...this.address('x9', this.typeLabel(instruction.objectType)), '    str x9, [x0, #0]',
                     ...this.constant('x9', 1), '    str x9, [x0, #8]',
                     `    str x0, ${this.temp(instruction.result)}`];
@@ -167,6 +172,7 @@ export class AArch64Backend {
             }
             case 'array_new':
                 return [...this.constant('x0', this.sizeOf(instruction.elementType)), ...this.load(instruction.length, 'x1'),
+                    ...this.gcArrayAddress('x2', instruction.type, false), ...this.gcArrayAddress('x3', instruction.type, true),
                     '    bl valen_array_new', `    str x0, ${this.temp(instruction.result)}`];
             case 'array_length':
                 return [...this.load(instruction.array, 'x9'), '    ldr x9, [x9, #0]',
@@ -217,6 +223,7 @@ export class AArch64Backend {
                 }
                 return [...this.load(instruction.array, 'x0'), ...this.load(instruction.start, 'x1'),
                     ...this.load(instruction.length, 'x2'), ...this.constant('x3', this.sizeOf(instruction.elementType)),
+                    ...this.gcArrayAddress('x4', instruction.type, false), ...this.gcArrayAddress('x5', instruction.type, true),
                     '    bl valen_array_slice', `    str x0, ${this.temp(instruction.result)}`];
             case 'string_length':
                 return [...this.load(instruction.string, 'x9'), '    ldr x9, [x9, #8]',
@@ -259,7 +266,8 @@ export class AArch64Backend {
                 return [...this.load(instruction.value, 'x0'), ...this.constant('x1', this.isUnsigned(instruction.integerType) ? 0 : 1),
                     '    bl valen_integer_to_string', `    str x0, ${this.temp(instruction.result)}`];
             case 'builder_new':
-                return [...this.constant('x0', 1), ...this.constant('x1', 0), '    bl valen_array_new',
+                return [...this.constant('x0', 1), ...this.constant('x1', 0), ...this.constant('x2', 0),
+                    ...this.constant('x3', 0), '    bl valen_array_new',
                     `    str x0, ${this.temp(instruction.result)}`];
             case 'builder_length':
                 return [...this.load(instruction.builder, 'x9'), '    ldr x9, [x9, #0]',
@@ -382,8 +390,9 @@ export class AArch64Backend {
         if (!entry) throw new Error('Program has no entry.__ method');
         const entryType = this.program.types.find(type => type.name === entry.owner);
         const lines = ['.globl _start', '.type _start, %function', '_start:', '    sub sp, sp, #16',
-            ...this.constant('x0', this.typeSizes.get(entry.owner) ?? 16), ...this.constant('x1', 0),
-            ...this.constant('x2', 0), ...this.constant('x3', 0), '    bl valen_gc_alloc',
+            ...this.constant('x0', this.typeSizes.get(entry.owner) ?? 16),
+            ...this.address('x1', this.gcTypeTraceLabel(entry.owner)), ...this.gcTypeWeakAddress('x2', entry.owner),
+            ...this.constant('x3', 0), '    bl valen_gc_alloc',
             ...this.address('x9', this.typeLabel(entry.owner)), '    str x9, [x0, #0]', ...this.constant('x9', 1),
             '    str x9, [x0, #8]', '    str x0, [sp, #0]'];
         if (entryType?.initializer) lines.push(`    bl ${this.symbols.get(entryType.initializer)}`, '    ldr x0, [sp, #0]');
@@ -406,22 +415,31 @@ export class AArch64Backend {
             '    str xzr, [x0, #32]', '    ldr x10, [sp, #24]', '    str x10, [x0, #40]',
             '    str x0, [x9, #0]', '    add x0, x0, #48', '    ldr x30, [sp, #56]', '    add sp, sp, #64',
             '    ret', '.size valen_gc_alloc, .-valen_gc_alloc', '', '.globl valen_gc_mark',
-            '.type valen_gc_mark, %function', 'valen_gc_mark:', '    ret', '.size valen_gc_mark, .-valen_gc_mark',
+            '.type valen_gc_mark, %function', 'valen_gc_mark:', '    cbz x0, .Lgc_mark_return',
+            '    sub sp, sp, #32', '    str x30, [sp, #24]', '    str x0, [sp, #0]',
+            ...this.address('x9', 'valen_gc_heap'), '    ldr x9, [x9, #0]', '.Lgc_mark_find:',
+            '    cbz x9, .Lgc_mark_done', '    add x10, x9, #48', '    ldr x11, [sp, #0]', '    cmp x10, x11',
+            '    b.eq .Lgc_mark_found', '    ldr x9, [x9, #0]', '    b .Lgc_mark_find', '.Lgc_mark_found:',
+            '    ldr x10, [x9, #32]', '    cbnz x10, .Lgc_mark_done', '    mov x10, #1', '    str x10, [x9, #32]',
+            '    ldr x10, [x9, #16]', '    cbz x10, .Lgc_mark_done', '    ldr x0, [sp, #0]', '    blr x10',
+            '.Lgc_mark_done:', '    ldr x30, [sp, #24]', '    add sp, sp, #32', '.Lgc_mark_return:', '    ret',
+            '.size valen_gc_mark, .-valen_gc_mark',
             '.Lallocation_error:', '    mov x0, #72', '    mov x8, #93', '    svc #0', ''];
     }
 
     arrayRuntime() {
         return ['.globl valen_array_new', '.type valen_array_new, %function', 'valen_array_new:',
-            '    sub sp, sp, #48', '    str x30, [sp, #40]', '    cmp x1, #0', '    b.lt .Larray_bounds_error',
-            '    str x0, [sp, #0]', '    str x1, [sp, #8]', '    mov x2, x1', '    cmp x2, #4',
-            '    b.ge .Larray_capacity_ready', '    mov x2, #4', '.Larray_capacity_ready:', '    str x2, [sp, #16]',
-            '    mul x3, x2, x0', '    udiv x4, x3, x0', '    cmp x4, x2', '    b.ne .Larray_bounds_error',
-            '    str x3, [sp, #24]', '    mov x0, #40', '    mov x1, #0', '    mov x2, #0', '    mov x3, #0',
-            '    bl valen_gc_alloc', '    str x0, [sp, #32]',
-            '    ldr x0, [sp, #24]', '    bl valen_alloc', '    mov x5, x0', '    ldr x0, [sp, #32]',
-            '    ldr x1, [sp, #8]', '    str x1, [x0, #0]', '    ldr x1, [sp, #16]', '    str x1, [x0, #8]',
+            '    sub sp, sp, #64', '    str x30, [sp, #56]', '    cmp x1, #0', '    b.lt .Larray_bounds_error',
+            '    str x0, [sp, #0]', '    str x1, [sp, #8]', '    str x2, [sp, #16]', '    str x3, [sp, #24]',
+            '    mov x4, x1', '    cmp x4, #4', '    b.ge .Larray_capacity_ready', '    mov x4, #4',
+            '.Larray_capacity_ready:', '    str x4, [sp, #32]', '    mul x5, x4, x0', '    udiv x6, x5, x0',
+            '    cmp x6, x4', '    b.ne .Larray_bounds_error', '    str x5, [sp, #40]', '    mov x0, #40',
+            '    ldr x1, [sp, #16]', '    ldr x2, [sp, #24]', '    mov x3, #0', '    bl valen_gc_alloc',
+            '    str x0, [sp, #48]', '    ldr x0, [sp, #40]', '    bl valen_alloc', '    mov x5, x0',
+            '    ldr x0, [sp, #48]', '    ldr x1, [sp, #8]', '    str x1, [x0, #0]',
+            '    ldr x1, [sp, #32]', '    str x1, [x0, #8]',
             '    str x5, [x0, #16]', '    ldr x1, [sp, #0]', '    str x1, [x0, #24]', '    mov x1, #1',
-            '    str x1, [x0, #32]', '    ldr x30, [sp, #40]', '    add sp, sp, #48', '    ret',
+            '    str x1, [x0, #32]', '    ldr x30, [sp, #56]', '    add sp, sp, #64', '    ret',
             '.size valen_array_new, .-valen_array_new', '', '.globl valen_array_address',
             '.type valen_array_address, %function', 'valen_array_address:', '    cbz x0, .Larray_bounds_error',
             '    cmp x1, #0', '    b.lt .Larray_bounds_error', '    ldr x3, [x0, #0]', '    cmp x1, x3',
@@ -497,16 +515,17 @@ export class AArch64Backend {
             '    str x3, [x0, #0]', '    mov x0, x5', '    ret', '.size valen_array_remove, .-valen_array_remove', '',
             '.globl valen_array_slice', '.type valen_array_slice, %function', 'valen_array_slice:',
             '    cmp x1, #0', '    b.lt .Larray_bounds_error', '    cmp x2, #0', '    b.lt .Larray_bounds_error',
-            '    add x4, x1, x2', '    cmp x4, x1', '    b.cc .Larray_bounds_error', '    ldr x5, [x0, #0]',
-            '    cmp x4, x5', '    b.hi .Larray_bounds_error', '    sub sp, sp, #64', '    str x30, [sp, #56]',
+            '    add x6, x1, x2', '    cmp x6, x1', '    b.cc .Larray_bounds_error', '    ldr x7, [x0, #0]',
+            '    cmp x6, x7', '    b.hi .Larray_bounds_error', '    sub sp, sp, #80', '    str x30, [sp, #72]',
             '    str x0, [sp, #0]', '    str x1, [sp, #8]', '    str x2, [sp, #16]', '    str x3, [sp, #24]',
-            '    mov x0, x3', '    mov x1, x2', '    bl valen_array_new', '    str x0, [sp, #32]',
+            '    str x4, [sp, #32]', '    str x5, [sp, #40]', '    mov x0, x3', '    mov x1, x2',
+            '    ldr x2, [sp, #32]', '    ldr x3, [sp, #40]', '    bl valen_array_new', '    str x0, [sp, #48]',
             '    ldr x4, [sp, #8]', '    ldr x5, [sp, #24]', '    mul x4, x4, x5', '    ldr x6, [sp, #0]',
             '    ldr x6, [x6, #16]', '    add x6, x6, x4', '    ldr x7, [x0, #16]', '    ldr x4, [sp, #16]',
             '    mul x4, x4, x5', '.Larray_slice_copy:', '    cbz x4, .Larray_slice_done', '    ldrb w8, [x6, #0]',
             '    strb w8, [x7, #0]', '    add x6, x6, #1', '    add x7, x7, #1', '    sub x4, x4, #1',
-            '    b .Larray_slice_copy', '.Larray_slice_done:', '    ldr x0, [sp, #32]', '    ldr x30, [sp, #56]',
-            '    add sp, sp, #64', '    ret', '.size valen_array_slice, .-valen_array_slice', ''];
+            '    b .Larray_slice_copy', '.Larray_slice_done:', '    ldr x0, [sp, #48]', '    ldr x30, [sp, #72]',
+            '    add sp, sp, #80', '    ret', '.size valen_array_slice, .-valen_array_slice', ''];
     }
 
     stringRuntime() {
@@ -672,7 +691,8 @@ export class AArch64Backend {
             '    ret', '.size valen_string_slice, .-valen_string_slice', '', '.globl valen_string_to_bytes',
             '.type valen_string_to_bytes, %function', 'valen_string_to_bytes:', '    sub sp, sp, #48',
             '    str x30, [sp, #40]', '    str x0, [sp, #0]', '    ldr x1, [x0, #8]', '    str x1, [sp, #8]',
-            '    mov x0, #1', '    bl valen_array_new', '    str x0, [sp, #16]', '    ldr x2, [x0, #16]',
+            '    mov x0, #1', '    mov x2, #0', '    mov x3, #0', '    bl valen_array_new',
+            '    str x0, [sp, #16]', '    ldr x2, [x0, #16]',
             '    ldr x0, [sp, #0]', '    ldr x1, [x0, #0]', '    ldr x3, [sp, #8]',
             '.Lstring_to_bytes_copy:', '    cbz x3, .Lstring_to_bytes_done', '    ldrb w4, [x1, #0]',
             '    strb w4, [x2, #0]', '    add x1, x1, #1', '    add x2, x2, #1', '    sub x3, x3, #1',
@@ -914,6 +934,96 @@ export class AArch64Backend {
             `    .byte ${literal.bytes.length ? literal.bytes.join(', ') : 0}`);
         lines.push('.text');
         return lines;
+    }
+
+    gcTypeFunctions(types) {
+        const lines = [];
+        for (const type of types) {
+            const trace = this.gcTypeTraceLabel(type.name);
+            const strong = type.fields.filter(field => field.ownership !== 'member-weak' &&
+                this.isManagedReferenceType(field.type));
+            lines.push(`.type ${trace}, %function`, `${trace}:`, '    ldr x9, [x0, #8]',
+                `    cbz x9, ${trace}_done`, '    sub sp, sp, #32', '    str x30, [sp, #24]',
+                '    str x0, [sp, #16]');
+            for (const field of strong) {
+                const offset = this.fieldOffsets.get(field.symbol).offset;
+                lines.push('    ldr x9, [sp, #16]', `    ldr x0, [x9, #${offset}]`, '    bl valen_gc_mark');
+            }
+            lines.push('    ldr x30, [sp, #24]', '    add sp, sp, #32', `${trace}_done:`, '    ret',
+                `.size ${trace}, .-${trace}`, '');
+            const weak = type.fields.filter(field => field.ownership === 'member-weak' &&
+                this.isManagedReferenceType(field.type));
+            if (weak.length === 0) continue;
+            const callback = this.gcTypeWeakLabel(type.name);
+            lines.push(`.type ${callback}, %function`, `${callback}:`);
+            for (const field of weak) {
+                const offset = this.fieldOffsets.get(field.symbol).offset;
+                const keep = `${callback}_keep_${offset}`;
+                lines.push(`    ldr x9, [x0, #${offset}]`, `    cbz x9, ${keep}`, '    ldr x10, [x9, #8]',
+                    `    cbz x10, ${callback}_clear_${offset}`, '    sub x10, x9, #48', '    ldr x10, [x10, #32]',
+                    `    cbnz x10, ${keep}`, `${callback}_clear_${offset}:`, `    str xzr, [x0, #${offset}]`, `${keep}:`);
+            }
+            lines.push('    ret', `.size ${callback}, .-${callback}`, '');
+        }
+        return lines;
+    }
+
+    gcArrayFunctions(types) {
+        const lines = [];
+        for (const type of types) {
+            const spec = this.arraySpec(type);
+            if (!spec.managed) continue;
+            if (spec.ownership === 'weak') {
+                const callback = this.gcArrayWeakLabel(type);
+                lines.push(`.type ${callback}, %function`, `${callback}:`, '    ldr x9, [x0, #32]',
+                    `    cbz x9, ${callback}_done`, '    ldr x9, [x0, #16]', '    ldr x10, [x0, #0]',
+                    '    mov x11, #0', `${callback}_loop:`, `    cmp x11, x10`, `    b.cs ${callback}_done`,
+                    `    mov x12, #${spec.size}`, '    mul x12, x11, x12', '    add x12, x9, x12',
+                    '    ldr x13, [x12, #0]', `    cbz x13, ${callback}_next`, '    ldr x14, [x13, #8]',
+                    `    cbz x14, ${callback}_clear`, '    sub x14, x13, #48', '    ldr x14, [x14, #32]',
+                    `    cbnz x14, ${callback}_next`, `${callback}_clear:`, '    str xzr, [x12, #0]',
+                    `${callback}_next:`, '    add x11, x11, #1', `    b ${callback}_loop`,
+                    `${callback}_done:`, '    ret', `.size ${callback}, .-${callback}`, '');
+                continue;
+            }
+            const callback = this.gcArrayTraceLabel(type);
+            lines.push(`.type ${callback}, %function`, `${callback}:`, '    ldr x9, [x0, #32]',
+                `    cbz x9, ${callback}_done`, '    sub sp, sp, #48', '    str x30, [sp, #40]',
+                '    str x0, [sp, #32]', '    str xzr, [sp, #24]', `${callback}_loop:`,
+                '    ldr x9, [sp, #32]', '    ldr x10, [sp, #24]', '    ldr x11, [x9, #0]',
+                `    cmp x10, x11`, `    b.cs ${callback}_finish`, '    ldr x9, [x9, #16]',
+                `    mov x11, #${spec.size}`, '    mul x10, x10, x11', '    add x9, x9, x10', '    ldr x0, [x9, #0]',
+                '    bl valen_gc_mark', '    ldr x10, [sp, #24]', '    add x10, x10, #1',
+                '    str x10, [sp, #24]', `    b ${callback}_loop`, `${callback}_finish:`,
+                '    ldr x30, [sp, #40]', '    add sp, sp, #48', `${callback}_done:`, '    ret',
+                `.size ${callback}, .-${callback}`, '');
+        }
+        return lines;
+    }
+
+    arraySpec(type) {
+        let element = type.slice('Array<'.length, -1), ownership = 'owned';
+        if (element.startsWith('ref ')) { ownership = 'ref'; element = element.slice(4); }
+        else if (element.startsWith('weak ')) { ownership = 'weak'; element = element.slice(5); }
+        return {element, ownership, managed: this.isManagedReferenceType(element), size: this.sizeOf(element)};
+    }
+
+    gcTypeTraceLabel(type) { return `${this.typeLabel(type)}_gc_trace`; }
+    gcTypeWeakLabel(type) { return `${this.typeLabel(type)}_gc_weak`; }
+    gcArrayTraceLabel(type) { return `.Lvalen_array_${this.mangle(type)}_gc_trace`; }
+    gcArrayWeakLabel(type) { return `.Lvalen_array_${this.mangle(type)}_gc_weak`; }
+
+    gcTypeWeakAddress(register, typeName) {
+        const type = this.program.types.find(candidate => candidate.name === typeName);
+        return type?.fields.some(field => field.ownership === 'member-weak' && this.isManagedReferenceType(field.type))
+            ? this.address(register, this.gcTypeWeakLabel(typeName)) : this.constant(register, 0);
+    }
+
+    gcArrayAddress(register, typeName, weak) {
+        const spec = typeName?.startsWith('Array<') ? this.arraySpec(typeName) : null;
+        const enabled = spec?.managed && (weak ? spec.ownership === 'weak' : spec.ownership !== 'weak');
+        return enabled ? this.address(register, weak ? this.gcArrayWeakLabel(typeName) : this.gcArrayTraceLabel(typeName))
+            : this.constant(register, 0);
     }
 
     gcData() {

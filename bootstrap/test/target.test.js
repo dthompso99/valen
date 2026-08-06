@@ -412,7 +412,10 @@ test('bootstrap compiler tracks AArch64 managed allocations and precise roots', 
     assert.match(objects.assembly, /valen_gc_roots:/);
     assert.match(objects.assembly, /__gc_roots:/);
     assert.match(objects.assembly, /bl valen_gc_mark/);
+    assert.match(objects.assembly, /_gc_trace:/);
+    assert.match(objects.assembly, /valen_gc_mark:[\s\S]*\.Lgc_mark_find:[\s\S]*blr x10/);
     assert.match(objects.assembly, /add x0, x0, #48/);
     assert.match(builders.assembly, /valen_array_new:[\s\S]*bl valen_gc_alloc/);
     assert.match(builders.assembly, /valen_string_new:[\s\S]*bl valen_gc_alloc/);
+    assert.match(builders.assembly, /valen_array_new:[\s\S]*ldr x1, \[sp, #16\][\s\S]*ldr x2, \[sp, #24\]/);
 });
