@@ -1,0 +1,36 @@
+Item {{
+    member value:i64
+
+    __(value:i64) -> void { self.value = value }
+}}
+
+entry {{
+    __() -> i32 {
+        local bytes = new Array<u8>(3)
+        bytes[0] = 10
+        bytes[1] = 200
+        bytes[2] = 30
+        if bytes.length != 3 { return 1 }
+        if bytes[0] + bytes[1] + bytes[2] != 240 { return 2 }
+
+        local halves = new Array<i16>(2)
+        halves[0] = -300
+        halves[1] = 700
+        if halves[0] + halves[1] != 400 { return 3 }
+
+        local words = new Array<u32>(2)
+        words[0] = 4000000000
+        words[1] = 7
+        if words[0] != 4000000000 || words[1] != 7 { return 4 }
+
+        local decimals = new Array<f64>(2)
+        decimals[0] = 1.25
+        decimals[1] = 2.75
+        if decimals[0] + decimals[1] != 4.0 { return 5 }
+
+        local items = new Array<Item>(1)
+        items[0] = new Item(42)
+        if items[0].value != 42 { return 6 }
+        return 0
+    }
+}}

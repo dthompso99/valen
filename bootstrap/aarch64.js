@@ -30,8 +30,9 @@ export class AArch64Backend {
         const functions = moduleId === null ? program.functions : program.functions.filter(fn => fn.moduleId === moduleId);
         const lines = ['.text'];
         for (const fn of functions) lines.push(...this.generateFunction(fn));
-        if (includeRuntime) lines.push(...this.generateStart(), ...this.allocationRuntime());
-        lines.push('.Ldivision_by_zero_error:', '    mov x0, #73', '    mov x8, #93', '    svc #0',
+        if (includeRuntime) lines.push(...this.generateStart(), ...this.allocationRuntime(), ...this.arrayRuntime());
+        lines.push('.Larray_bounds_error:', '    mov x0, #70', '    mov x8, #93', '    svc #0',
+            '.Ldivision_by_zero_error:', '    mov x0, #73', '    mov x8, #93', '    svc #0',
             '.Loptional_unwrap_error:', '    mov x0, #71', '    mov x8, #93', '    svc #0',
             '.Lcontract_dispatch_error:', '    mov x0, #75', '    mov x8, #93', '    svc #0',
             '.Lfloat_conversion_error:', '    mov x0, #76', '    mov x8, #93', '    svc #0', '');
@@ -128,6 +129,36 @@ export class AArch64Backend {
             case 'destroy_object': {
                 const done = `${this.blockLabel(`destroy_done_${instruction.value.name}`)}`;
                 return [...this.load(instruction.value, 'x9'), `    cbz x9, ${done}`, '    str xzr, [x9, #8]', `${done}:`];
+            }
+            case 'destroy_array': {
+                const done = `.Larray_destroy_done_${this.runtimeLabel++}`;
+                return [...this.load(instruction.value, 'x9'), `    cbz x9, ${done}`, '    str xzr, [x9, #32]', `${done}:`];
+            }
+            case 'array_new':
+                return [...this.constant('x0', this.sizeOf(instruction.elementType)), ...this.load(instruction.length, 'x1'),
+                    '    bl valen_array_new', `    str x0, ${this.temp(instruction.result)}`];
+            case 'array_length':
+                return [...this.load(instruction.array, 'x9'), '    ldr x9, [x9, #0]',
+                    `    str x9, ${this.temp(instruction.result)}`];
+            case 'array_load': {
+                if (instruction.elementOwnership === 'weak') throw new Error('aarch64-linux bootstrap backend does not yet support weak array elements');
+                return [...this.load(instruction.array, 'x0'), ...this.load(instruction.index, 'x1'),
+                    ...this.constant('x2', this.sizeOf(instruction.elementType)), '    bl valen_array_address',
+                    `    ${this.loadMnemonic(instruction.elementType)} ${this.valueRegister('x9', instruction.elementType)}, [x0, #0]`,
+                    ...this.normalize('x9', instruction.elementType), `    str x9, ${this.temp(instruction.result)}`];
+            }
+            case 'array_store': {
+                if (instruction.elementOwnership === 'weak') throw new Error('aarch64-linux bootstrap backend does not yet support weak array elements');
+                const lines = [...this.load(instruction.array, 'x0'), ...this.load(instruction.index, 'x1'),
+                    ...this.constant('x2', this.sizeOf(instruction.elementType)), '    bl valen_array_address'];
+                const baseType = instruction.elementType?.endsWith('?') ? instruction.elementType.slice(0, -1) : instruction.elementType;
+                if (instruction.elementOwnership === 'owned' && this.typeSizes.has(baseType)) {
+                    const empty = `.Larray_replace_empty_${this.runtimeLabel++}`;
+                    lines.push('    ldr x9, [x0, #0]', `    cbz x9, ${empty}`, '    str xzr, [x9, #8]', `${empty}:`);
+                }
+                lines.push(...this.load(instruction.value, 'x9'),
+                    `    ${this.storeMnemonic(instruction.elementType)} ${this.valueRegister('x9', instruction.elementType)}, [x0, #0]`);
+                return lines;
             }
             case 'call':
                 return this.call(instruction, false);
@@ -249,6 +280,24 @@ export class AArch64Backend {
             '    mov x2, #3', '    mov x3, #34', '    mov x4, #-1', '    mov x5, #0', '    mov x8, #222', '    svc #0',
             '    mov x9, #-4095', '    cmp x0, x9', '    b.cs .Lallocation_error', '    ret', '.size valen_alloc, .-valen_alloc',
             '.Lallocation_error:', '    mov x0, #72', '    mov x8, #93', '    svc #0', ''];
+    }
+
+    arrayRuntime() {
+        return ['.globl valen_array_new', '.type valen_array_new, %function', 'valen_array_new:',
+            '    sub sp, sp, #48', '    str x30, [sp, #40]', '    cmp x1, #0', '    b.lt .Larray_bounds_error',
+            '    str x0, [sp, #0]', '    str x1, [sp, #8]', '    mov x2, x1', '    cmp x2, #4',
+            '    b.ge .Larray_capacity_ready', '    mov x2, #4', '.Larray_capacity_ready:', '    str x2, [sp, #16]',
+            '    mul x3, x2, x0', '    udiv x4, x3, x0', '    cmp x4, x2', '    b.ne .Larray_bounds_error',
+            '    str x3, [sp, #24]', '    mov x0, #40', '    bl valen_alloc', '    str x0, [sp, #32]',
+            '    ldr x0, [sp, #24]', '    bl valen_alloc', '    mov x5, x0', '    ldr x0, [sp, #32]',
+            '    ldr x1, [sp, #8]', '    str x1, [x0, #0]', '    ldr x1, [sp, #16]', '    str x1, [x0, #8]',
+            '    str x5, [x0, #16]', '    ldr x1, [sp, #0]', '    str x1, [x0, #24]', '    mov x1, #1',
+            '    str x1, [x0, #32]', '    ldr x30, [sp, #40]', '    add sp, sp, #48', '    ret',
+            '.size valen_array_new, .-valen_array_new', '', '.globl valen_array_address',
+            '.type valen_array_address, %function', 'valen_array_address:', '    cbz x0, .Larray_bounds_error',
+            '    cmp x1, #0', '    b.lt .Larray_bounds_error', '    ldr x3, [x0, #0]', '    cmp x1, x3',
+            '    b.cs .Larray_bounds_error', '    mul x1, x1, x2', '    ldr x0, [x0, #16]', '    add x0, x0, x1',
+            '    ret', '.size valen_array_address, .-valen_array_address', ''];
     }
 
     call(instruction, dynamic) {

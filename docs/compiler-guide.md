@@ -41,8 +41,10 @@ source -> tokens -> AST -> module graph -> semantic symbols
   allocation and constructor lowering. Their headers point to ABI-compatible type descriptors whose
   method slots drive inherited and overridden virtual dispatch. Descriptor-owned contract lists and method
   tables provide contract-typed dispatch, while base and contract walks implement runtime type tests and
-  checked reference casts. It is the cross-compilation foothold for the full runtime and self-hosted backend,
-  not yet a general AArch64 language target.
+  checked reference casts. Fixed-size arrays preserve the common 40-byte header and provide allocation,
+  length, width-correct loads and stores, and checked indexing with runtime status 70. It is the
+  cross-compilation foothold for the full runtime and self-hosted backend, not yet a general AArch64 language
+  target.
 
 Native executable builds can reuse validated backend artifacts by setting
 `VALEN_CACHE_PATH` to an existing writable directory. Cache keys include every loaded module's

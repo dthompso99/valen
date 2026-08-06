@@ -204,3 +204,22 @@ test('bootstrap compiler emits AArch64 contract dispatch and checked type relati
     assert.match(subtypeResult.assembly, /mov x0, x9/);
     assert.match(subtypeResult.assembly, /cbz x9, \.Loptional_unwrap_error/);
 });
+
+test('bootstrap compiler emits fixed-size AArch64 arrays with checked indexing', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-arrays-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-arrays.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'arrays'), {target: 'aarch64-linux'});
+    const boundsSource = fileURLToPath(new URL('fixtures/aarch64-array-bounds.ar', import.meta.url));
+    const bounds = new Compiler().compile(boundsSource, path.join(directory, 'array-bounds'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'arrays')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /bl valen_array_new/);
+    assert.match(result.assembly, /bl valen_array_address/);
+    assert.match(result.assembly, /strb w9, \[x0, #0\]/);
+    assert.match(result.assembly, /strh w9, \[x0, #0\]/);
+    assert.match(result.assembly, /str w9, \[x0, #0\]/);
+    assert.match(result.assembly, /str x9, \[x0, #0\]/);
+    assert.match(bounds.assembly, /b\.cs \.Larray_bounds_error/);
+    assert.match(bounds.assembly, /mov x0, #70/);
+});
