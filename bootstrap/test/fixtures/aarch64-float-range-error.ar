@@ -1,0 +1,6 @@
+entry {{
+    __() -> i32 {
+        local impossible = 256.0 as u8
+        return impossible as i32
+    }
+}}

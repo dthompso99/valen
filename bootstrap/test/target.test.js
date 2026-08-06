@@ -81,6 +81,18 @@ sample:
 `);
     assert.equal(Buffer.from(object.sections.find(section => section.name === '.text').data).toString('hex'),
         '2001679e0028611e0020611e0040621e2001629e0900669ec0035fd6');
+
+    const conversion = new AArch64Assembler().assembleObject(`.text
+sample:
+    fcmp d0, d0
+    b.vs conversion_error
+    fcvtzs x9, d0
+    fcvtzu x9, d0
+conversion_error:
+    ret
+`);
+    assert.equal(Buffer.from(conversion.sections.find(section => section.name === '.text').data).toString('hex'),
+        '0020601e660000540900789e0900799ec0035fd6');
 });
 
 test('bootstrap compiler cross-compiles primitive AArch64 programs', t => {
@@ -113,4 +125,14 @@ test('bootstrap compiler cross-compiles scalar AArch64 floating point', t => {
     assert.match(result.assembly, /scvtf d0, x9/);
     assert.match(result.assembly, /ucvtf s0, x9/);
     assert.match(result.assembly, /fcmp d0, d1/);
+    assert.match(result.assembly, /fcvtzs x9, d0/);
+    assert.match(result.assembly, /fcvtzu x9, d0/);
+    assert.match(result.assembly, /b\.vs \.Lfloat_conversion_error/);
+
+    for (const fixture of ['float-conversion-failing.ar', 'aarch64-float-range-error.ar']) {
+        const failing = new Compiler().compile(fileURLToPath(new URL(`fixtures/${fixture}`, import.meta.url)),
+            path.join(directory, fixture), {target: 'aarch64-linux'});
+        assert.match(failing.assembly, /mov x0, #76/);
+        assert.match(failing.assembly, /b\.ge \.Lfloat_conversion_error|b\.vs \.Lfloat_conversion_error/);
+    }
 });

@@ -18,7 +18,8 @@ export class AArch64Backend {
         const lines = ['.text'];
         for (const fn of functions) lines.push(...this.generateFunction(fn));
         if (includeRuntime) lines.push(...this.generateStart());
-        lines.push('.Ldivision_by_zero_error:', '    mov x0, #73', '    mov x8, #93', '    svc #0', '');
+        lines.push('.Ldivision_by_zero_error:', '    mov x0, #73', '    mov x8, #93', '    svc #0',
+            '.Lfloat_conversion_error:', '    mov x0, #76', '    mov x8, #93', '    svc #0', '');
         lines.push('.section .note.GNU-stack,"",@progbits');
         return `${lines.join('\n')}\n`;
     }
@@ -167,9 +168,29 @@ export class AArch64Backend {
         } else if (!this.isFloat(from) && this.isFloat(to)) {
             lines.push(`    ${this.isUnsigned(from) ? 'ucvtf' : 'scvtf'} ${to === 'f32' ? 's0' : 'd0'}, x9`,
                 `    fmov ${to === 'f32' ? 'w9, s0' : 'x9, d0'}`);
-        } else if (this.isFloat(from)) throw new Error('aarch64-linux bootstrap backend does not yet support checked floating-point to integer conversion');
+        } else if (this.isFloat(from)) lines.push(...this.floatToInteger(from, to));
         else lines.push(...this.normalize('x9', to));
         lines.push(`    str x9, ${this.temp(instruction.result)}`);
+        return lines;
+    }
+
+    floatToInteger(from, to) {
+        if (!/^[iu](8|16|32|64)$/.test(to)) throw new Error(`aarch64-linux bootstrap backend cannot convert floating point to '${to}'`);
+        const lines = [from === 'f32' ? '    fmov s0, w9' : '    fmov d0, x9'];
+        if (from === 'f32') lines.push('    fcvt d0, s0');
+        lines.push('    fcmp d0, d0', '    b.vs .Lfloat_conversion_error');
+        const bits = Number(to.slice(1));
+        if (to.startsWith('u')) {
+            lines.push(...this.floatConstant('x10', 0, 'f64'), '    fmov d1, x10', '    fcmp d0, d1',
+                '    b.mi .Lfloat_conversion_error', ...this.floatConstant('x10', 2 ** bits, 'f64'),
+                '    fmov d1, x10', '    fcmp d0, d1', '    b.ge .Lfloat_conversion_error', '    fcvtzu x9, d0');
+        } else {
+            const boundary = 2 ** (bits - 1);
+            lines.push(...this.floatConstant('x10', -boundary, 'f64'), '    fmov d1, x10', '    fcmp d0, d1',
+                '    b.mi .Lfloat_conversion_error', ...this.floatConstant('x10', boundary, 'f64'),
+                '    fmov d1, x10', '    fcmp d0, d1', '    b.ge .Lfloat_conversion_error', '    fcvtzs x9, d0');
+        }
+        lines.push(...this.normalize('x9', to));
         return lines;
     }
 

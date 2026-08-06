@@ -16,10 +16,15 @@ entry {{
         local unsigned:u64 = 9
         if (unsigned as f32) != (9.0 as f32) { return 5 }
 
+        if (7.75 as i64) != 7 { return 6 }
+        if (-12.75 as i8) != -12 { return 7 }
+        if (255.75 as u8) != 255 { return 8 }
+        if (9223372036854775808.0 as u64) != 9223372036854775808 { return 9 }
+
         local nan = 0.0 / 0.0
-        if nan == nan { return 6 }
-        if !(nan != nan) { return 7 }
-        if nan < 1.0 || nan <= 1.0 || nan > 1.0 || nan >= 1.0 { return 8 }
+        if nan == nan { return 10 }
+        if !(nan != nan) { return 11 }
+        if nan < 1.0 || nan <= 1.0 || nan > 1.0 || nan >= 1.0 { return 12 }
         return 0
     }
 }}

@@ -148,6 +148,10 @@ export class AArch64Assembler {
             const base = (match[1] === 'scvtf' ? 0x9e220000 : 0x9e230000) + (match[2][0] === 'd' ? 0x00400000 : 0);
             return {word: base | (register(match[3]) << 5) | scalarRegister(match[2])};
         }
+        if ((match = line.match(/^(fcvtzs|fcvtzu) (x(?:[0-9]|[12][0-9]|30)), ([sd](?:[0-9]|[12][0-9]|3[01]))$/))) {
+            const base = (match[1] === 'fcvtzs' ? 0x9e380000 : 0x9e390000) + (match[3][0] === 'd' ? 0x00400000 : 0);
+            return {word: base | (scalarRegister(match[3]) << 5) | register(match[2])};
+        }
         if ((match = line.match(/^mov (x(?:[0-9]|[12][0-9]|30)), (x(?:[0-9]|[12][0-9]|30))$/))) {
             return {word: 0xaa0003e0 | (register(match[2]) << 16) | register(match[1])};
         }
@@ -174,6 +178,12 @@ export class AArch64Assembler {
         if ((match = line.match(/^cbz (x(?:[0-9]|[12][0-9]|30)), ([A-Za-z0-9_.$]+)$/))) {
             const displacement = this.displacement(labels, match[2], offset, 19);
             return {word: 0xb4000000 | (displacement << 5) | register(match[1])};
+        }
+        if ((match = line.match(/^b\.([a-z]{2}) ([A-Za-z0-9_.$]+)$/))) {
+            const condition = conditionCodes.get(match[1]);
+            if (condition === undefined) throw new Error(`Invalid AArch64 condition '${match[1]}'`);
+            const displacement = this.displacement(labels, match[2], offset, 19);
+            return {word: 0x54000000 | (displacement << 5) | condition};
         }
         if ((match = line.match(/^(b|bl) ([A-Za-z0-9_.$]+)$/))) {
             if (!labels.has(match[2])) {

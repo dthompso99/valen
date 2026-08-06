@@ -23,4 +23,6 @@ On x86-64 Linux, floating arguments use the independent SysV SSE argument class
 (`xmm0` through `xmm7`), while integer and reference arguments use the general
 register class. Overflow arguments use eight-byte stack slots in source order.
 `f32` and `f64` results are returned in `xmm0`. The same convention applies at
-the C FFI boundary.
+the C FFI boundary. The generation-0 AArch64 backend similarly uses the independent
+AAPCS64 `s0`/`d0` through `s7`/`d7` floating register bank and returns floating
+results in `s0` or `d0`; stack-passed AArch64 arguments and its C FFI remain **WIP**.
