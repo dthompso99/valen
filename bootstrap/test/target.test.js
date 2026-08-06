@@ -243,3 +243,20 @@ test('bootstrap compiler grows and compacts AArch64 arrays', t => {
     assert.match(result.assembly, /str x1, \[x5, #0\]/);
     assert.match(negative.assembly, /b\.lt \.Larray_bounds_error/);
 });
+
+test('bootstrap compiler inserts and removes AArch64 array elements', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-array-mutation-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/array-insert-remove.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'mutation'), {target: 'aarch64-linux'});
+    const boundsSource = fileURLToPath(new URL('fixtures/array-remove-bounds.ar', import.meta.url));
+    const bounds = new Compiler().compile(boundsSource, path.join(directory, 'remove-bounds'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'mutation')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /bl valen_array_insert/);
+    assert.match(result.assembly, /bl valen_array_remove/);
+    assert.match(result.assembly, /\.Larray_insert_move:/);
+    assert.match(result.assembly, /\.Larray_remove_move:/);
+    assert.match(result.assembly, /\.Larray_remove_clear:/);
+    assert.match(bounds.assembly, /b\.cs \.Larray_bounds_error/);
+});

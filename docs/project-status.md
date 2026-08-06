@@ -45,10 +45,10 @@
   virtual method slots, contract tables, and contract method tables, enabling inherited, overridden, and
   contract-typed dispatch. Runtime type tests and checked reference casts walk both base links and contract
   relationships. Arrays use the common 40-byte header and support allocation, length and capacity, checked
-  indexing, replacement, append, reserve, and shrink-to-fit across scalar and reference-sized elements. The
-  generation-0 allocator currently retains replaced buffers as anonymous mappings for process lifetime;
-  array insertion, removal, and slicing, structural hooks, tracing GC, weak references, strings, native
-  facilities, and self-hosting remain WIP on AArch64.
+  indexing, replacement, append, insert, remove, reserve, and shrink-to-fit across scalar and reference-sized
+  elements. The generation-0 allocator currently retains replaced buffers as anonymous mappings for process
+  lifetime; array slicing, structural hooks, tracing GC, weak references, strings, native facilities, and
+  self-hosting remain WIP on AArch64.
 - x86-64 Linux executables own their `_start` adapter, link without an implicit C runtime, and
   reject target-native symbols that the backend cannot provide.
 - **WIP:** general freestanding capability manifests, runtime hooks, and non-Linux code generation

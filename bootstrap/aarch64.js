@@ -166,6 +166,14 @@ export class AArch64Backend {
             case 'array_append':
                 return [...this.load(instruction.array, 'x0'), ...this.load(instruction.value, 'x1'),
                     ...this.constant('x2', this.sizeOf(instruction.elementType)), '    bl valen_array_append'];
+            case 'array_insert':
+                return [...this.load(instruction.array, 'x0'), ...this.load(instruction.index, 'x1'),
+                    ...this.load(instruction.value, 'x2'), ...this.constant('x3', this.sizeOf(instruction.elementType)),
+                    '    bl valen_array_insert'];
+            case 'array_remove':
+                return [...this.load(instruction.array, 'x0'), ...this.load(instruction.index, 'x1'),
+                    ...this.constant('x2', this.sizeOf(instruction.elementType)), '    bl valen_array_remove',
+                    ...this.normalize('x0', instruction.type), `    str x0, ${this.temp(instruction.result)}`];
             case 'array_reserve':
                 return [...this.load(instruction.array, 'x0'), ...this.load(instruction.capacity, 'x1'),
                     ...this.constant('x2', this.sizeOf(instruction.elementType)), '    bl valen_array_reserve'];
@@ -341,7 +349,43 @@ export class AArch64Backend {
             '.Larray_append_store_2:', '    strh w1, [x5, #0]', '    b .Larray_append_done',
             '.Larray_append_store_4:', '    str w1, [x5, #0]', '.Larray_append_done:', '    add x3, x3, #1',
             '    str x3, [x0, #0]', '    ldr x30, [sp, #40]', '    add sp, sp, #48', '    ret',
-            '.size valen_array_append, .-valen_array_append', ''];
+            '.size valen_array_append, .-valen_array_append', '', '.globl valen_array_insert',
+            '.type valen_array_insert, %function', 'valen_array_insert:', '    cmp x1, #0',
+            '    b.lt .Larray_bounds_error', '    ldr x4, [x0, #0]', '    cmp x1, x4',
+            '    b.hi .Larray_bounds_error', '    sub sp, sp, #64', '    str x30, [sp, #56]',
+            '    str x0, [sp, #0]', '    str x1, [sp, #8]', '    str x2, [sp, #16]', '    str x3, [sp, #24]',
+            '    str x4, [sp, #32]', '    ldr x5, [x0, #8]', '    cmp x4, x5', '    b.cc .Larray_insert_shift',
+            '    cmp x5, #4', '    b.ge .Larray_insert_double', '    mov x1, #4', '    b .Larray_insert_grow',
+            '.Larray_insert_double:', '    add x1, x5, x5', '    cmp x1, x5', '    b.cc .Larray_bounds_error',
+            '.Larray_insert_grow:', '    mov x2, x3', '    bl valen_array_reserve', '.Larray_insert_shift:',
+            '    ldr x0, [sp, #0]', '    ldr x1, [sp, #8]', '    ldr x2, [sp, #16]', '    ldr x3, [sp, #24]',
+            '    ldr x4, [sp, #32]', '    sub x5, x4, x1', '    mul x5, x5, x3', '    mul x6, x1, x3',
+            '    ldr x7, [x0, #16]', '    add x6, x7, x6', '    add x7, x6, x3', '    cbz x5, .Larray_insert_store',
+            '    add x6, x6, x5', '    add x7, x7, x5', '.Larray_insert_move:', '    sub x6, x6, #1',
+            '    sub x7, x7, #1', '    ldrb w8, [x6, #0]', '    strb w8, [x7, #0]', '    sub x5, x5, #1',
+            '    cbnz x5, .Larray_insert_move', '.Larray_insert_store:', '    mul x5, x1, x3',
+            '    ldr x6, [x0, #16]', '    add x6, x6, x5', '    cmp x3, #1', '    b.eq .Larray_insert_store_1',
+            '    cmp x3, #2', '    b.eq .Larray_insert_store_2', '    cmp x3, #4', '    b.eq .Larray_insert_store_4',
+            '    str x2, [x6, #0]', '    b .Larray_insert_done', '.Larray_insert_store_1:', '    strb w2, [x6, #0]',
+            '    b .Larray_insert_done', '.Larray_insert_store_2:', '    strh w2, [x6, #0]',
+            '    b .Larray_insert_done', '.Larray_insert_store_4:', '    str w2, [x6, #0]', '.Larray_insert_done:',
+            '    add x4, x4, #1', '    str x4, [x0, #0]', '    ldr x30, [sp, #56]', '    add sp, sp, #64',
+            '    ret', '.size valen_array_insert, .-valen_array_insert', '', '.globl valen_array_remove',
+            '.type valen_array_remove, %function', 'valen_array_remove:', '    cmp x1, #0',
+            '    b.lt .Larray_bounds_error', '    ldr x3, [x0, #0]', '    cmp x1, x3',
+            '    b.cs .Larray_bounds_error', '    mul x4, x1, x2', '    ldr x6, [x0, #16]', '    add x4, x6, x4',
+            '    cmp x2, #1', '    b.eq .Larray_remove_load_1', '    cmp x2, #2', '    b.eq .Larray_remove_load_2',
+            '    cmp x2, #4', '    b.eq .Larray_remove_load_4', '    ldr x5, [x4, #0]', '    b .Larray_remove_shift',
+            '.Larray_remove_load_1:', '    ldrb w5, [x4, #0]', '    b .Larray_remove_shift',
+            '.Larray_remove_load_2:', '    ldrh w5, [x4, #0]', '    b .Larray_remove_shift',
+            '.Larray_remove_load_4:', '    ldr w5, [x4, #0]', '.Larray_remove_shift:', '    sub x3, x3, #1',
+            '    sub x6, x3, x1', '    mul x6, x6, x2', '    add x7, x4, x2', '.Larray_remove_move:',
+            '    cbz x6, .Larray_remove_clear_start', '    ldrb w8, [x7, #0]', '    strb w8, [x4, #0]',
+            '    add x7, x7, #1', '    add x4, x4, #1', '    sub x6, x6, #1', '    b .Larray_remove_move',
+            '.Larray_remove_clear_start:', '    mul x6, x3, x2', '    ldr x7, [x0, #16]', '    add x7, x7, x6',
+            '    mov x8, #0', '    mov x6, x2', '.Larray_remove_clear:', '    strb w8, [x7, #0]',
+            '    add x7, x7, #1', '    sub x6, x6, #1', '    cbnz x6, .Larray_remove_clear',
+            '    str x3, [x0, #0]', '    mov x0, x5', '    ret', '.size valen_array_remove, .-valen_array_remove', ''];
     }
 
     call(instruction, dynamic) {
