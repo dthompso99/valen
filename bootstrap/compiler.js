@@ -73,8 +73,12 @@ export class Compiler {
         const emitted = this.emitObject(sourcePath, objectPath, {assemblyPath, sourceRoot, optimizationLevel, target: target.name});
         if (!['auto', 'native', 'system'].includes(linker)) throw new Error(`Unsupported linker '${linker}'`);
         const {ir} = emitted;
-        if (linker === 'native' || linker === 'auto' && ir.foreignLibraries.length === 0) {
-            if (ir.foreignLibraries.length) throw new Error('Native linker cannot resolve foreign libraries; use --linker system');
+        const internalThreadLibraries = target.name === 'aarch64-linux' && ir.externals.some(item => item.runtimeSymbol === 'valen_Operations_threadStart')
+            ? new Set(['pthread', 'c']) : new Set();
+        const foreignLibraries = ir.foreignLibraries.filter(library => !internalThreadLibraries.has(library) ||
+            ir.externals.some(item => item.foreignLibrary === library));
+        if (linker === 'native' || linker === 'auto' && foreignLibraries.length === 0) {
+            if (foreignLibraries.length) throw new Error('Native linker cannot resolve foreign libraries; use --linker system');
             const moduleIds = [...new Set(ir.functions.map(fn => fn.moduleId).filter(Boolean))];
             const entryModule = ir.functions.find(fn => fn.name === ir.entry)?.moduleId;
             const objects = moduleIds.length > 1 ? moduleIds.map(moduleId => {
@@ -92,7 +96,7 @@ export class Compiler {
         }
         const compiledObjects = [...emitted.graph.modules.values()].filter(module => module.compiledArtifact)
             .map(module => module.compiledArtifact.objectPath);
-        const libraries = ir.foreignLibraries.map(library => `-l${library}`);
+        const libraries = foreignLibraries.map(library => `-l${library}`);
         const result = spawnSync('cc', ['-nostdlib', '-no-pie', objectPath, ...compiledObjects, '-o', outputPath, ...libraries], {encoding: 'utf8'});
         if (result.error) throw result.error;
         if (result.status !== 0) throw new Error(result.stderr || `cc exited with status ${result.status}`);

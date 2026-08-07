@@ -511,6 +511,21 @@ test('bootstrap compiler emits AArch64 synchronization primitives', t => {
     assert.match(result.assembly, /valen_Operations_atomicAdd:[\s\S]*stlxr w11/);
 });
 
+test('bootstrap compiler emits AArch64 workers with coordinated tracing collection', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-threading-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/threading.ar', import.meta.url));
+    const sourceRoot = fileURLToPath(new URL('../../', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'threading'), {target: 'aarch64-linux', sourceRoot});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'threading')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /valen_Operations_threadStart:[\s\S]*mov x8, #220/);
+    assert.match(result.assembly, /valen_Operations_threadJoin:[\s\S]*valen_gc_mutator_leave/);
+    assert.match(result.assembly, /valen_gc_safepoint:[\s\S]*valen_gc_parked/);
+    assert.match(result.assembly, /valen_gc_collect:[\s\S]*valen_gc_request[\s\S]*\.Lgc_collect_wait:/);
+    assert.match(result.assembly, /valen_gc_root_push:[\s\S]*valen_gc_heap_lock/);
+});
+
 test('bootstrap compiler collects AArch64 object graphs and clears weak references', t => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-gc-'));
     t.after(() => fs.rmSync(directory, {recursive: true, force: true}));

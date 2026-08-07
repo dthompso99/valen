@@ -48,9 +48,11 @@ export class AArch64Backend {
             }
         }
         this.runtimeSymbols = new Set(program.externals.map(external => external.runtimeSymbol));
+        this.threading = this.runtimeSymbols.has('valen_Operations_threadStart');
         this.emittedTypes = moduleId === null ? program.types : program.types.filter(type => type.moduleId === moduleId);
         const functions = moduleId === null ? program.functions : program.functions.filter(fn => fn.moduleId === moduleId);
         this.arrayTypes = this.structuralArrayTypes(functions);
+        if (this.runtimeSymbols.has('valen_System_arguments')) this.arrayTypes.add('Array<string>');
         this.stringLiterals = new Map();
         for (const instruction of functions.flatMap(fn => fn.blocks.flatMap(block => block.instructions))) {
             if (instruction.op === 'string_constant') this.internString(instruction.value);
@@ -113,16 +115,35 @@ export class AArch64Backend {
                 `    str x9, ${this.named(location.value.name)}`);
             else lines.push(`    str ${location.register}, ${this.named(location.value.name)}`);
         }
-        lines.push(...this.address('x9', 'valen_gc_roots'), '    ldr x10, [x9, #0]',
-            `    str x10, [sp, #${rootOffset}]`, ...this.address('x10', rootTrace),
+        lines.push(...this.address('x10', rootTrace),
             `    str x10, [sp, #${rootOffset + 8}]`, '    add x10, sp, #0',
-            `    str x10, [sp, #${rootOffset + 16}]`, `    add x10, sp, #${rootOffset}`, '    str x10, [x9, #0]');
-        for (const block of fn.blocks) {
+            `    str x10, [sp, #${rootOffset + 16}]`);
+        if (this.threading) lines.push(...this.address('x9', 'valen_gc_workers'), '    ldr x10, [x9, #0]',
+            `    cbnz x10, ${symbol}__gc_push_slow`, ...this.address('x9', 'valen_gc_roots'), '    ldr x10, [x9, #0]',
+            `    str x10, [sp, #${rootOffset}]`, `    add x10, sp, #${rootOffset}`, '    str x10, [x9, #0]',
+            `    b ${symbol}__gc_push_done`, `${symbol}__gc_push_slow:`, `    add x0, sp, #${rootOffset}`,
+            '    bl valen_gc_root_push', `${symbol}__gc_push_done:`, '    bl valen_gc_safepoint');
+        else lines.push(...this.address('x9', 'valen_gc_roots'), '    ldr x10, [x9, #0]',
+            `    str x10, [sp, #${rootOffset}]`, `    add x10, sp, #${rootOffset}`, '    str x10, [x9, #0]');
+        const blockOrder = new Map(fn.blocks.map((block, index) => [block.label, index]));
+        for (let blockIndex = 0; blockIndex < fn.blocks.length; blockIndex++) {
+            const block = fn.blocks[blockIndex];
             if (block.label !== 'entry') lines.push(`${this.blockLabel(block.label)}:`);
-            for (const instruction of block.instructions) lines.push(...this.instruction(instruction, end));
+            for (const instruction of block.instructions) {
+                if (this.threading && (instruction.op === 'jump' && blockOrder.get(instruction.target) <= blockIndex ||
+                    instruction.op === 'branch' && (blockOrder.get(instruction.thenTarget) <= blockIndex ||
+                        blockOrder.get(instruction.elseTarget) <= blockIndex))) lines.push('    bl valen_gc_safepoint');
+                lines.push(...this.instruction(instruction, end));
+            }
         }
-        lines.push(`${end}:`, ...this.address('x9', 'valen_gc_roots'), `    ldr x10, [sp, #${rootOffset}]`,
-            '    str x10, [x9, #0]', `    ldr x29, [sp, #${frameSize}]`, `    ldr x30, [sp, #${frameSize + 8}]`,
+        lines.push(`${end}:`);
+        if (this.threading) lines.push(...this.address('x9', 'valen_gc_workers'), '    ldr x10, [x9, #0]',
+            `    cbnz x10, ${symbol}__gc_pop_slow`, ...this.address('x9', 'valen_gc_roots'),
+            `    ldr x10, [sp, #${rootOffset}]`, '    str x10, [x9, #0]', `    b ${symbol}__gc_pop_done`,
+            `${symbol}__gc_pop_slow:`, `    str x0, [sp, #${rootOffset + 24}]`, `    add x0, sp, #${rootOffset}`,
+            '    bl valen_gc_root_pop', `    ldr x0, [sp, #${rootOffset + 24}]`, `${symbol}__gc_pop_done:`);
+        else lines.push(...this.address('x9', 'valen_gc_roots'), `    ldr x10, [sp, #${rootOffset}]`, '    str x10, [x9, #0]');
+        lines.push(`    ldr x29, [sp, #${frameSize}]`, `    ldr x30, [sp, #${frameSize + 8}]`,
             `    add sp, sp, #${total}`, '    ret', `.size ${symbol}, .-${symbol}`, '',
             `.type ${rootTrace}, %function`, `${rootTrace}:`, '    sub sp, sp, #32', '    str x30, [sp, #24]',
             '    str x0, [sp, #16]');
@@ -453,6 +474,7 @@ export class AArch64Backend {
             '    add x12, x9, #8', ...this.address('x11', 'valen_process_argv'), '    str x12, [x11, #0]',
             '    add x13, x10, #1', '    lsl x13, x13, #3', '    add x13, x12, x13',
             ...this.address('x11', 'valen_process_envp'), '    str x13, [x11, #0]', '    sub sp, sp, #16',
+            ...(this.threading ? ['    bl valen_gc_mutator_register'] : []),
             ...this.constant('x0', this.typeSizes.get(entry.owner) ?? 16),
             ...this.address('x1', this.gcTypeTraceLabel(entry.owner)), ...this.gcTypeWeakAddress('x2', entry.owner),
             ...this.constant('x3', 0), '    bl valen_gc_alloc',
@@ -473,19 +495,25 @@ export class AArch64Backend {
             '    str x2, [sp, #16]', '    str x3, [sp, #24]', '    bl valen_gc_maybe_collect',
             '    ldr x0, [sp, #0]', '    add x0, x0, #48', '    ldr x9, [sp, #0]',
             '    cmp x0, x9', '    b.cc .Lallocation_error', '    str x0, [sp, #32]', '    bl valen_alloc',
-            '    str x0, [sp, #40]', ...this.address('x9', 'valen_gc_heap'), '    ldr x10, [x9, #0]',
+            '    str x0, [sp, #40]', ...(this.threading ? ['    bl valen_gc_heap_lock', '    ldr x0, [sp, #40]'] : []),
+            ...this.address('x9', 'valen_gc_heap'), '    ldr x10, [x9, #0]',
             '    str x10, [x0, #0]', '    ldr x10, [sp, #32]', '    str x10, [x0, #8]',
             '    ldr x10, [sp, #8]', '    str x10, [x0, #16]', '    ldr x10, [sp, #16]', '    str x10, [x0, #24]',
             '    str xzr, [x0, #32]', '    ldr x10, [sp, #24]', '    str x10, [x0, #40]',
             '    str x0, [x9, #0]', ...this.address('x9', 'valen_gc_bytes'), '    ldr x10, [x9, #0]',
             '    ldr x11, [sp, #32]', '    add x10, x10, x11', '    str x10, [x9, #0]',
+            ...(this.threading ? [...this.address('x9', 'valen_gc_lock'), '    mov x10, #0', '    stlr w10, [x9]'] : []),
             '    add x0, x0, #48', '    ldr x30, [sp, #56]', '    add sp, sp, #64',
             '    ret', '.size valen_gc_alloc, .-valen_gc_alloc', '', '.globl valen_gc_maybe_collect',
             '.type valen_gc_maybe_collect, %function', 'valen_gc_maybe_collect:',
+            ...(this.threading ? ['    sub sp, sp, #16', '    str x30, [sp, #8]', '    bl valen_gc_safepoint',
+                '    ldr x30, [sp, #8]', '    add sp, sp, #16'] : []),
             ...this.address('x9', 'valen_gc_bytes'), '    ldr x10, [x9, #0]',
             ...this.address('x9', 'valen_gc_threshold'), '    ldr x9, [x9, #0]', '    cmp x10, x9',
             '    b.cc .Lgc_maybe_collect_done', '    b valen_gc_collect', '.Lgc_maybe_collect_done:', '    ret',
-            '.size valen_gc_maybe_collect, .-valen_gc_maybe_collect', '', '.globl valen_gc_mark',
+            '.size valen_gc_maybe_collect, .-valen_gc_maybe_collect', '',
+            ...(this.threading ? this.gcCoordinationRuntime() : []),
+            '.globl valen_gc_mark',
             '.type valen_gc_mark, %function', 'valen_gc_mark:', '    cbz x0, .Lgc_mark_return',
             '    sub sp, sp, #32', '    str x30, [sp, #24]', '    str x0, [sp, #0]',
             ...this.address('x9', 'valen_gc_heap'), '    ldr x9, [x9, #0]', '.Lgc_mark_find:',
@@ -512,7 +540,23 @@ export class AArch64Backend {
             '    ldr x0, [x9, #32]', '    ret', '.Lgc_is_marked_static:',
             '    mov x0, #1', '    ret', '.Lgc_is_marked_no:', '    mov x0, #0', '    ret',
             '.size valen_gc_is_marked, .-valen_gc_is_marked', '', '.globl valen_gc_collect',
-            '.type valen_gc_collect, %function', 'valen_gc_collect:', '    sub sp, sp, #64',
+            '.type valen_gc_collect, %function', 'valen_gc_collect:',
+            ...(this.threading ? ['    sub sp, sp, #16', '    str x30, [sp, #8]', ...this.address('x9', 'valen_gc_workers'),
+                '    ldr x10, [x9, #0]', '    cbz x10, .Lgc_collect_coordination_done',
+                ...this.address('x9', 'valen_gc_collecting'), '.Lgc_collect_claim:', '    ldaxr w10, [x9]',
+                '    cbnz w10, .Lgc_collect_already_running', '    mov x11, #1', '    stlxr w12, w11, [x9]',
+                '    cbnz w12, .Lgc_collect_claim', '    bl valen_gc_state_lock', ...this.address('x9', 'valen_gc_request'),
+                '    mov x10, #1', '    stlr w10, [x9]', ...this.address('x9', 'valen_gc_mutators'),
+                '    ldr x10, [x9, #0]', '    cbz x10, .Lgc_collect_target_zero', '    sub x10, x10, #1',
+                '.Lgc_collect_target_zero:', ...this.address('x9', 'valen_gc_target'), '    str x10, [x9, #0]',
+                '    bl valen_gc_state_unlock', '.Lgc_collect_wait:', ...this.address('x9', 'valen_gc_parked'),
+                '    ldar w10, [x9]', ...this.address('x11', 'valen_gc_target'), '    ldr w11, [x11, #0]',
+                '    cmp x10, x11', '    b.cs .Lgc_collect_coordination_done', '    mov x0, x9', '    mov x1, #128',
+                '    mov x2, x10', '    mov x3, #0', '    mov x4, #0', '    mov x5, #0', '    mov x8, #98',
+                '    svc #0', '    b .Lgc_collect_wait', '.Lgc_collect_already_running:', '    clrex',
+                '    ldr x30, [sp, #8]', '    add sp, sp, #16', '    b valen_gc_safepoint',
+                '.Lgc_collect_coordination_done:', '    ldr x30, [sp, #8]', '    add sp, sp, #16'] : []),
+            '    sub sp, sp, #64',
             '    str x30, [sp, #56]', ...this.address('x9', 'valen_gc_roots'), '    ldr x9, [x9, #0]',
             '    str x9, [sp, #0]', '.Lgc_collect_roots:', '    ldr x9, [sp, #0]',
             '    cbz x9, .Lgc_collect_weak_start', '    ldr x10, [x9, #8]', '    ldr x0, [x9, #16]',
@@ -538,7 +582,7 @@ export class AArch64Backend {
             ...this.address('x9', 'valen_gc_bytes'), '    ldr x10, [x9, #0]', '    lsl x10, x10, #1',
             ...this.constant('x11', 1048576), '    cmp x10, x11', '    b.cs .Lgc_collect_threshold_ready',
             '    mov x10, x11', '.Lgc_collect_threshold_ready:', ...this.address('x9', 'valen_gc_threshold'),
-            '    str x10, [x9, #0]', '    ldr x30, [sp, #56]',
+            '    str x10, [x9, #0]', ...(this.threading ? ['    bl valen_gc_collection_release'] : []), '    ldr x30, [sp, #56]',
             '    add sp, sp, #64', '    ret', '.size valen_gc_collect, .-valen_gc_collect', '',
             '.globl valen_gc_native_handle_finalize', 'valen_gc_native_handle_finalize:',
             '    ldr x9, [x0, #16]', '    cmp x9, #0', '    b.lt .Lgc_native_handle_done', '    mov x10, x0',
@@ -546,6 +590,64 @@ export class AArch64Backend {
             '    str xzr, [x10, #8]', '.Lgc_native_handle_done:', '    ret',
             '.size valen_gc_native_handle_finalize, .-valen_gc_native_handle_finalize',
             '.Lallocation_error:', '    mov x0, #72', '    mov x8, #93', '    svc #0', ''];
+    }
+
+    gcCoordinationRuntime() {
+        return ['valen_gc_heap_lock:', ...this.address('x9', 'valen_gc_lock'), '.Lgc_heap_lock_retry:',
+            '    ldaxr w10, [x9]', '    cbnz w10, .Lgc_heap_lock_retry', '    mov x11, #1',
+            '    stlxr w12, w11, [x9]', '    cbnz w12, .Lgc_heap_lock_retry', '    ret', '',
+            'valen_gc_state_lock:', ...this.address('x9', 'valen_gc_state_guard'), '.Lgc_state_lock_retry:',
+            '    ldaxr w10, [x9]', '    cbnz w10, .Lgc_state_lock_retry', '    mov x11, #1',
+            '    stlxr w12, w11, [x9]', '    cbnz w12, .Lgc_state_lock_retry', '    ret', '',
+            'valen_gc_state_unlock:', ...this.address('x9', 'valen_gc_state_guard'), '    mov x10, #0',
+            '    stlr w10, [x9]', '    ret', '',
+            'valen_gc_mutator_register:', 'valen_gc_mutator_enter:', '    sub sp, sp, #16', '    str x30, [sp, #8]',
+            '    bl valen_gc_state_lock', ...this.address('x9', 'valen_gc_mutators'), '    ldr x10, [x9, #0]',
+            '    add x10, x10, #1', '    str x10, [x9, #0]', '    bl valen_gc_state_unlock',
+            '    ldr x30, [sp, #8]', '    add sp, sp, #16', '    b valen_gc_safepoint', '',
+            'valen_gc_mutator_unregister:', 'valen_gc_mutator_leave:', '    sub sp, sp, #16', '    str x30, [sp, #8]',
+            '.Lgc_mutator_leave_retry:', '    bl valen_gc_state_lock', ...this.address('x9', 'valen_gc_request'),
+            '    ldar w10, [x9]', '    cbnz w10, .Lgc_mutator_leave_park', ...this.address('x9', 'valen_gc_mutators'),
+            '    ldr x10, [x9, #0]', '    sub x10, x10, #1', '    str x10, [x9, #0]',
+            '    bl valen_gc_state_unlock', '    ldr x30, [sp, #8]', '    add sp, sp, #16', '    ret',
+            '.Lgc_mutator_leave_park:', '    bl valen_gc_state_unlock', '    bl valen_gc_safepoint',
+            '    b .Lgc_mutator_leave_retry', '',
+            '.globl valen_gc_safepoint', 'valen_gc_safepoint:', ...this.address('x9', 'valen_gc_workers'),
+            '    ldr x10, [x9, #0]', '    cbz x10, .Lgc_safepoint_done', ...this.address('x9', 'valen_gc_request'),
+            '    ldar w10, [x9]', '    cbz w10, .Lgc_safepoint_done', ...this.address('x11', 'valen_gc_parked'),
+            '.Lgc_safepoint_park:', '    ldaxr w12, [x11]', '    add x13, x12, #1', '    stlxr w14, w13, [x11]',
+            '    cbnz w14, .Lgc_safepoint_park', '    mov x0, x11', '    mov x1, #129', '    mov x2, #1',
+            '    mov x3, #0', '    mov x4, #0', '    mov x5, #0', '    mov x8, #98', '    svc #0',
+            '.Lgc_safepoint_wait:', ...this.address('x9', 'valen_gc_request'), '    ldar w10, [x9]',
+            '    cbz w10, .Lgc_safepoint_release', '    mov x0, x9', '    mov x1, #128', '    mov x2, #1',
+            '    mov x3, #0', '    mov x4, #0', '    mov x5, #0', '    mov x8, #98', '    svc #0',
+            '    b .Lgc_safepoint_wait', '.Lgc_safepoint_release:', ...this.address('x11', 'valen_gc_parked'),
+            '.Lgc_safepoint_unpark:', '    ldaxr w12, [x11]', '    sub x13, x12, #1', '    stlxr w14, w13, [x11]',
+            '    cbnz w14, .Lgc_safepoint_unpark', '    mov x0, x11', '    mov x1, #129', '    mov x2, #1',
+            '    mov x3, #0', '    mov x4, #0', '    mov x5, #0', '    mov x8, #98', '    svc #0',
+            '.Lgc_safepoint_done:', '    ret', '',
+            'valen_gc_root_push:', '    sub sp, sp, #32', '    str x19, [sp, #0]', '    str x30, [sp, #24]',
+            '    mov x19, x0', '    bl valen_gc_heap_lock', ...this.address('x9', 'valen_gc_roots'),
+            '    ldr x10, [x9, #0]', '    str x10, [x19, #0]', '    str x19, [x9, #0]',
+            ...this.address('x9', 'valen_gc_lock'), '    mov x10, #0', '    stlr w10, [x9]',
+            '    ldr x19, [sp, #0]', '    ldr x30, [sp, #24]', '    add sp, sp, #32', '    ret', '',
+            'valen_gc_root_pop:', '    sub sp, sp, #32', '    str x19, [sp, #0]', '    str x30, [sp, #24]',
+            '    mov x19, x0', '    bl valen_gc_heap_lock', ...this.address('x9', 'valen_gc_roots'),
+            '.Lgc_root_pop_find:', '    ldr x10, [x9, #0]', '    cbz x10, .Lgc_root_pop_done',
+            '    cmp x10, x19', '    b.eq .Lgc_root_pop_remove', '    mov x9, x10', '    b .Lgc_root_pop_find',
+            '.Lgc_root_pop_remove:', '    ldr x10, [x19, #0]', '    str x10, [x9, #0]',
+            '.Lgc_root_pop_done:', ...this.address('x9', 'valen_gc_lock'), '    mov x10, #0', '    stlr w10, [x9]',
+            '    ldr x19, [sp, #0]', '    ldr x30, [sp, #24]', '    add sp, sp, #32', '    ret', '',
+            'valen_gc_collection_release:', ...this.address('x9', 'valen_gc_collecting'), '    ldar w10, [x9]',
+            '    cbz w10, .Lgc_collection_release_done', ...this.address('x9', 'valen_gc_request'),
+            '    mov x10, #0', '    stlr w10, [x9]', '    mov x0, x9', '    mov x1, #129',
+            ...this.constant('x2', 2147483647), '    mov x3, #0', '    mov x4, #0', '    mov x5, #0',
+            '    mov x8, #98', '    svc #0', '.Lgc_collection_release_wait:', ...this.address('x9', 'valen_gc_parked'),
+            '    ldar w10, [x9]', '    cbz w10, .Lgc_collection_release_clear', '    mov x0, x9', '    mov x1, #128',
+            '    mov x2, x10', '    mov x3, #0', '    mov x4, #0', '    mov x5, #0', '    mov x8, #98',
+            '    svc #0', '    b .Lgc_collection_release_wait', '.Lgc_collection_release_clear:',
+            ...this.address('x9', 'valen_gc_collecting'), '    mov x10, #0', '    stlr w10, [x9]',
+            '.Lgc_collection_release_done:', '    ret', ''];
     }
 
     arrayRuntime() {
@@ -1309,8 +1411,10 @@ export class AArch64Backend {
             '    mov x9, #1000', '    udiv x10, x22, x9', '    str x10, [sp, #64]', '    mul x11, x10, x9',
             '    sub x11, x22, x11', ...this.constant('x12', 1000000), '    mul x11, x11, x12',
             '    str x11, [sp, #72]', '    add x2, sp, #64', '    b .Levent_wait_call',
-            '.Levent_wait_infinite:', '    mov x2, #0', '.Levent_wait_call:', '    mov x0, x23', '    mov x1, x19',
-            '    mov x3, #0', '    mov x4, #8', '    mov x8, #73', '    svc #0', '    cmp x0, #0',
+            '.Levent_wait_infinite:', '    mov x2, #0', '.Levent_wait_call:',
+            ...(this.threading ? ['    str x2, [sp, #80]', '    bl valen_gc_mutator_leave', '    ldr x2, [sp, #80]'] : []),
+            '    mov x0, x23', '    mov x1, x19', '    mov x3, #0', '    mov x4, #8', '    mov x8, #73', '    svc #0',
+            ...(this.threading ? ['    str x0, [sp, #88]', '    bl valen_gc_mutator_enter', '    ldr x0, [sp, #88]'] : []), '    cmp x0, #0',
             '    b.le .Levent_wait_none', '    mov x24, #0', '.Levent_wait_scan:', '    cmp x24, x19',
             '    b.cs .Levent_wait_none', '    lsl x9, x24, #3', '    add x10, x23, x9', '    ldrh w11, [x10, #6]',
             '    cbnz x11, .Levent_wait_ready', '    add x24, x24, #1', '    b .Levent_wait_scan',
@@ -1337,19 +1441,66 @@ export class AArch64Backend {
             throw new Error(`Operations runtime requires field ${suffix}`);
         };
         const mutex = offset('Mutex.state'), condition = offset('Condition.sequence'), atomic = offset('Atomic.value');
+        const handle = has => has('threadStart') || has('threadJoin') ? offset('ThreadOperation.handle') : 0;
+        const worker = this.program.functions.find(fn => fn.displayName === 'Operations.ThreadOperation.runWorker');
         const lines = [];
         const has = name => this.runtimeSymbols.has(`valen_Operations_${name}`);
+        const threadHandle = handle(has);
         if (has('threadAvailable')) lines.push('.globl valen_Operations_threadAvailable', 'valen_Operations_threadAvailable:',
-            '    mov x0, #0', '    ret', '');
-        if (has('threadStart')) lines.push('.globl valen_Operations_threadStart', 'valen_Operations_threadStart:',
-            '    mov x0, #0', '    ret', '');
-        if (has('threadJoin')) lines.push('.globl valen_Operations_threadJoin', 'valen_Operations_threadJoin:', '    ret', '');
+            '    mov x0, #1', '    ret', '');
+        if (has('threadStart')) {
+            if (!worker || !this.symbols.has(worker.name)) throw new Error('Operations runtime requires ThreadOperation.runWorker');
+            lines.push('.globl valen_Operations_threadStart', 'valen_Operations_threadStart:',
+                '    sub sp, sp, #80', '    str x19, [sp, #0]', '    str x20, [sp, #8]', '    str x21, [sp, #16]',
+                '    str x30, [sp, #72]', '    mov x19, x0', ...this.constant('x0', 1048576), '    bl valen_alloc',
+                '    mov x20, x0', '    mov x9, #1', '    str x9, [x20, #0]', '    str x19, [x20, #8]',
+                '    str xzr, [x20, #16]', ...this.address('x9', 'valen_thread_root_trace'), '    str x9, [x20, #24]',
+                '    str x20, [x20, #32]', '    add x0, x20, #16', '    bl valen_gc_root_push',
+                ...this.address('x9', 'valen_gc_workers'), '.Loperations_worker_increment:', '    ldaxr x10, [x9]',
+                '    add x11, x10, #1', '    stlxr w12, x11, [x9]', '    cbnz w12, .Loperations_worker_increment',
+                `    str x20, [x19, #${threadHandle}]`, ...this.constant('x9', 1048560), '    add x21, x20, x9',
+                '    str x19, [x21, #0]', '    str x20, [x21, #8]', ...this.constant('x0', 331520),
+                '    mov x1, x21', '    mov x2, #0', '    mov x3, #0', '    mov x4, #0', '    mov x8, #220',
+                '    svc #0', '    cbz x0, .Loperations_thread_child', '    cmp x0, #0',
+                '    b.lt .Loperations_thread_start_failed', '    mov x0, #1', '    ldr x19, [sp, #0]',
+                '    ldr x20, [sp, #8]', '    ldr x21, [sp, #16]', '    ldr x30, [sp, #72]',
+                '    add sp, sp, #80', '    ret', '.Loperations_thread_start_failed:',
+                ...this.address('x9', 'valen_gc_workers'), '.Loperations_worker_failed_decrement:', '    ldaxr x10, [x9]',
+                '    sub x11, x10, #1', '    stlxr w12, x11, [x9]', '    cbnz w12, .Loperations_worker_failed_decrement',
+                '    add x0, x20, #16', '    bl valen_gc_root_pop', `    str xzr, [x19, #${threadHandle}]`,
+                '    mov x0, x20', ...this.constant('x1', 1048576), '    mov x8, #215', '    svc #0',
+                '    mov x0, #0', '    ldr x19, [sp, #0]', '    ldr x20, [sp, #8]', '    ldr x21, [sp, #16]',
+                '    ldr x30, [sp, #72]', '    add sp, sp, #80', '    ret', '.Loperations_thread_child:',
+                '    ldr x20, [sp, #0]', '    ldr x19, [sp, #8]', '    bl valen_gc_mutator_register', '    mov x0, x20',
+                `    bl ${this.symbols.get(worker.name)}`, '    add x0, x19, #16', '    bl valen_gc_root_pop',
+                '    bl valen_gc_mutator_unregister', ...this.address('x9', 'valen_gc_workers'),
+                '.Loperations_worker_decrement:', '    ldaxr x10, [x9]', '    sub x11, x10, #1',
+                '    stlxr w12, x11, [x9]', '    cbnz w12, .Loperations_worker_decrement',
+                '    mov x9, #0', '    stlr w9, [x19]', '    mov x0, x19', '    mov x1, #129',
+                ...this.constant('x2', 2147483647), '    mov x3, #0', '    mov x4, #0', '    mov x5, #0',
+                '    mov x8, #98', '    svc #0', '    mov x0, #0', '    mov x8, #93', '    svc #0', '',
+                'valen_thread_root_trace:', '    ldr x0, [x0, #8]', '    b valen_gc_mark', '');
+        }
+        if (has('threadJoin')) lines.push('.globl valen_Operations_threadJoin', 'valen_Operations_threadJoin:',
+            '    sub sp, sp, #48', '    str x19, [sp, #0]', '    str x20, [sp, #8]', '    str x30, [sp, #40]',
+            '    mov x19, x0', `    ldr x20, [x19, #${threadHandle}]`, '    cbz x20, .Loperations_thread_join_done',
+            '    bl valen_gc_mutator_leave', '.Loperations_thread_join_wait:', '    ldar w10, [x20]',
+            '    cbz w10, .Loperations_thread_join_ready', '    mov x0, x20', '    mov x1, #128', '    mov x2, #1',
+            '    mov x3, #0', '    mov x4, #0', '    mov x5, #0', '    mov x8, #98', '    svc #0',
+            '    b .Loperations_thread_join_wait', '.Loperations_thread_join_ready:', '    bl valen_gc_mutator_enter',
+            `    str xzr, [x19, #${threadHandle}]`, '    mov x0, x20', ...this.constant('x1', 1048576),
+            '    mov x8, #215', '    svc #0', '.Loperations_thread_join_done:', '    ldr x19, [sp, #0]',
+            '    ldr x20, [sp, #8]', '    ldr x30, [sp, #40]', '    add sp, sp, #48', '    ret', '');
         if (has('mutexLock')) lines.push('.globl valen_Operations_mutexLock', 'valen_Operations_mutexLock:',
-            `    add x9, x0, #${mutex}`, '.Loperations_mutex_retry:', '    ldaxr w10, [x9]',
-            '    cbnz w10, .Loperations_mutex_wait', '    mov x11, #1', '    stlxr w12, w11, [x9]',
-            '    cbnz w12, .Loperations_mutex_retry', '    ret', '.Loperations_mutex_wait:',
-            '    mov x0, x9', '    mov x1, #128', '    mov x2, #1', '    mov x3, #0', '    mov x4, #0',
-            '    mov x5, #0', '    mov x8, #98', '    svc #0', '    b .Loperations_mutex_retry', '');
+            '    sub sp, sp, #32', '    str x19, [sp, #0]', '    str x30, [sp, #24]',
+            `    add x19, x0, #${mutex}`, '.Loperations_mutex_retry:', '    ldaxr w10, [x19]',
+            '    cbnz w10, .Loperations_mutex_wait', '    mov x11, #1', '    stlxr w12, w11, [x19]',
+            '    cbnz w12, .Loperations_mutex_retry', '    ldr x19, [sp, #0]', '    ldr x30, [sp, #24]',
+            '    add sp, sp, #32', '    ret', '.Loperations_mutex_wait:',
+            ...(this.threading ? ['    bl valen_gc_mutator_leave'] : []),
+            '    mov x0, x19', '    mov x1, #128', '    mov x2, #1', '    mov x3, #0', '    mov x4, #0',
+            '    mov x5, #0', '    mov x8, #98', '    svc #0', ...(this.threading ? ['    bl valen_gc_mutator_enter'] : []),
+            '    b .Loperations_mutex_retry', '');
         if (has('mutexUnlock')) lines.push('.globl valen_Operations_mutexUnlock', 'valen_Operations_mutexUnlock:',
             `    add x0, x0, #${mutex}`, '    mov x9, #0', '    stlr w9, [x0]', '    mov x1, #129',
             '    mov x2, #1', '    mov x3, #0', '    mov x4, #0', '    mov x5, #0', '    mov x8, #98', '    svc #0', '    ret', '');
@@ -1357,9 +1508,11 @@ export class AArch64Backend {
             '    sub sp, sp, #48', '    str x19, [sp, #0]', '    str x20, [sp, #8]', '    str x30, [sp, #40]',
             '    mov x19, x0', '    mov x20, x1', `    add x9, x19, #${condition}`, '    ldar w10, [x9]',
             '    str x10, [sp, #16]', '    mov x0, x20', '    bl valen_Operations_mutexUnlock',
-            `    add x0, x19, #${condition}`, '    mov x1, #128', '    ldr x2, [sp, #16]', '    mov x3, #0',
+            ...(this.threading ? ['    bl valen_gc_mutator_leave'] : []), `    add x0, x19, #${condition}`,
+            '    mov x1, #128', '    ldr x2, [sp, #16]', '    mov x3, #0',
             '    mov x4, #0', '    mov x5, #0', '    mov x8, #98', '    svc #0', '    mov x0, x20',
-            '    bl valen_Operations_mutexLock', '    ldr x19, [sp, #0]', '    ldr x20, [sp, #8]',
+            ...(this.threading ? ['    bl valen_gc_mutator_enter'] : []), '    mov x0, x20', '    bl valen_Operations_mutexLock',
+            '    ldr x19, [sp, #0]', '    ldr x20, [sp, #8]',
             '    ldr x30, [sp, #40]', '    add sp, sp, #48', '    ret', '');
         const notify = (name, count) => lines.push(`.globl valen_Operations_${name}`, `valen_Operations_${name}:`,
             `    add x0, x0, #${condition}`, '.Loperations_condition_increment_' + name + ':', '    ldaxr w9, [x0]',
@@ -1592,21 +1745,26 @@ export class AArch64Backend {
             '.Lstring_hash_null:', '    mov x0, #0', '    ret', ''
             , '.globl valen_copy_with_context', 'valen_copy_with_context:', '    cbz x0, .Lcopy_context_null',
             '    sub sp, sp, #64', '    str x19, [sp, #32]', '    str x20, [sp, #40]', '    str x30, [sp, #56]',
-            '    mov x19, x0', '    mov x20, x1', '    str xzr, [sp, #0]', ...this.address('x9', 'valen_gc_roots'),
-            '    ldr x10, [x9, #0]', '    str x10, [sp, #8]', ...this.address('x10', 'valen_copy_context_roots'),
+            '    mov x19, x0', '    mov x20, x1', '    str xzr, [sp, #0]', '    str xzr, [sp, #8]',
+            ...this.address('x10', 'valen_copy_context_roots'),
             '    str x10, [sp, #16]', '    add x10, sp, #0', '    str x10, [sp, #24]', '    add x10, sp, #8',
-            '    str x10, [x9, #0]', '    mov x0, x19', '    add x1, sp, #0', '    blr x20', '    mov x19, x0',
-            ...this.address('x9', 'valen_gc_roots'), '    ldr x10, [sp, #8]', '    str x10, [x9, #0]', '    mov x0, x19',
+            '    mov x0, x10', ...(this.threading ? ['    bl valen_gc_root_push'] : [...this.address('x9', 'valen_gc_roots'),
+                '    ldr x11, [x9, #0]', '    str x11, [x10, #0]', '    str x10, [x9, #0]']),
+            '    mov x0, x19', '    add x1, sp, #0', '    blr x20', '    mov x19, x0', '    add x0, sp, #8',
+            ...(this.threading ? ['    bl valen_gc_root_pop'] : [...this.address('x9', 'valen_gc_roots'),
+                '    ldr x10, [sp, #8]', '    str x10, [x9, #0]']), '    mov x0, x19',
             '    ldr x19, [sp, #32]', '    ldr x20, [sp, #40]', '    ldr x30, [sp, #56]', '    add sp, sp, #64',
             '    ret', '.Lcopy_context_null:', '    mov x0, #0', '    ret', '',
             '.globl valen_slice_with_context', 'valen_slice_with_context:', '    sub sp, sp, #80',
             '    str x19, [sp, #32]', '    str x20, [sp, #40]', '    str x21, [sp, #48]', '    str x22, [sp, #56]',
             '    str x30, [sp, #72]', '    mov x19, x0', '    mov x20, x1', '    mov x21, x2', '    mov x22, x3',
-            '    str xzr, [sp, #0]', ...this.address('x9', 'valen_gc_roots'), '    ldr x10, [x9, #0]',
-            '    str x10, [sp, #8]', ...this.address('x10', 'valen_copy_context_roots'), '    str x10, [sp, #16]',
-            '    add x10, sp, #0', '    str x10, [sp, #24]', '    add x10, sp, #8', '    str x10, [x9, #0]',
+            '    str xzr, [sp, #0]', '    str xzr, [sp, #8]', ...this.address('x10', 'valen_copy_context_roots'),
+            '    str x10, [sp, #16]', '    add x10, sp, #0', '    str x10, [sp, #24]', '    add x10, sp, #8',
+            '    mov x0, x10', ...(this.threading ? ['    bl valen_gc_root_push'] : [...this.address('x9', 'valen_gc_roots'),
+                '    ldr x11, [x9, #0]', '    str x11, [x10, #0]', '    str x10, [x9, #0]']),
             '    mov x0, x19', '    mov x1, x20', '    mov x2, x21', '    add x3, sp, #0', '    blr x22',
-            '    mov x19, x0', ...this.address('x9', 'valen_gc_roots'), '    ldr x10, [sp, #8]', '    str x10, [x9, #0]',
+            '    mov x19, x0', '    add x0, sp, #8', ...(this.threading ? ['    bl valen_gc_root_pop'] : [
+                ...this.address('x9', 'valen_gc_roots'), '    ldr x10, [sp, #8]', '    str x10, [x9, #0]']),
             '    mov x0, x19', '    ldr x19, [sp, #32]', '    ldr x20, [sp, #40]', '    ldr x21, [sp, #48]',
             '    ldr x22, [sp, #56]', '    ldr x30, [sp, #72]', '    add sp, sp, #80', '    ret', '',
             'valen_copy_context_roots:', '    sub sp, sp, #32', '    str x19, [sp, #0]', '    str x30, [sp, #24]',
@@ -1945,7 +2103,15 @@ export class AArch64Backend {
         return ['.section .data', '.align 8', '.globl valen_gc_roots', 'valen_gc_roots:', '    .quad 0',
             '.globl valen_gc_heap', 'valen_gc_heap:', '    .quad 0', '.globl valen_gc_bytes',
             'valen_gc_bytes:', '    .quad 0', '.globl valen_gc_threshold', 'valen_gc_threshold:',
-            '    .quad 1048576', '.globl valen_filesystem_error', 'valen_filesystem_error:', '    .quad 0',
+            '    .quad 1048576', '.globl valen_gc_lock', 'valen_gc_lock:', '    .quad 0',
+            '.globl valen_gc_state_guard', 'valen_gc_state_guard:', '    .quad 0',
+            '.globl valen_gc_workers', 'valen_gc_workers:', '    .quad 0',
+            '.globl valen_gc_mutators', 'valen_gc_mutators:', '    .quad 0',
+            '.globl valen_gc_parked', 'valen_gc_parked:', '    .quad 0',
+            '.globl valen_gc_request', 'valen_gc_request:', '    .quad 0',
+            '.globl valen_gc_target', 'valen_gc_target:', '    .quad 0',
+            '.globl valen_gc_collecting', 'valen_gc_collecting:', '    .quad 0',
+            '.globl valen_filesystem_error', 'valen_filesystem_error:', '    .quad 0',
             '.globl valen_process_argc', 'valen_process_argc:', '    .quad 0', '.globl valen_process_argv',
             'valen_process_argv:', '    .quad 0', '.globl valen_process_envp', 'valen_process_envp:', '    .quad 0',
             '.globl valen_network_error', 'valen_network_error:', '    .quad 0', '.text'];
