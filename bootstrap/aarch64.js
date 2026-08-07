@@ -19,7 +19,8 @@ export class AArch64Backend {
             'valen_Network_listen', 'valen_Network_accept', 'valen_Network_receive', 'valen_Network_send',
             'valen_Network_sendSome', 'valen_Network_closeListener', 'valen_Network_closeConnection',
             'valen_Network_lastError', 'valen_Network_listenerDescriptor', 'valen_Network_connectionDescriptor',
-            'valen_Network_makeListenerNonblocking', 'valen_Network_makeConnectionNonblocking']);
+            'valen_Network_makeListenerNonblocking', 'valen_Network_makeConnectionNonblocking',
+            'valen_EventLoop_available', 'valen_EventLoop_wait', 'valen_EventLoop_monotonicMilliseconds']);
         this.program = program;
         this.runtimeLabel = 0;
         this.fieldOffsets = new Map();
@@ -929,6 +930,7 @@ export class AArch64Backend {
         if (this.runtimeSymbols.has('valen_System_fileDescriptor')) lines.push(...this.descriptorRuntime('valen_System_fileDescriptor'));
         if (this.runtimeSymbols.has('valen_System_makeFileNonblocking')) lines.push(...this.nonblockingRuntime('valen_System_makeFileNonblocking'));
         if ([...this.runtimeSymbols].some(symbol => symbol.startsWith('valen_Network_'))) lines.push(...this.networkRuntime());
+        if ([...this.runtimeSymbols].some(symbol => symbol.startsWith('valen_EventLoop_'))) lines.push(...this.eventLoopRuntime());
         return lines;
     }
 
@@ -1281,6 +1283,47 @@ export class AArch64Backend {
 
     clearNetworkError() { return [...this.address('x9', 'valen_network_error'), '    str xzr, [x9, #0]']; }
     storeNetworkError(register) { return [...this.address('x10', 'valen_network_error'), `    str ${register}, [x10, #0]`]; }
+
+    eventLoopRuntime() {
+        const lines = [];
+        if (this.runtimeSymbols.has('valen_EventLoop_available')) lines.push(
+            '.globl valen_EventLoop_available', 'valen_EventLoop_available:', '    mov x0, #1', '    ret', '');
+        if (this.runtimeSymbols.has('valen_EventLoop_wait')) lines.push(
+            '.globl valen_EventLoop_wait', 'valen_EventLoop_wait:', '    sub sp, sp, #112',
+            '    str x19, [sp, #0]', '    str x20, [sp, #8]', '    str x21, [sp, #16]', '    str x22, [sp, #24]',
+            '    str x23, [sp, #32]', '    str x24, [sp, #40]', '    str x30, [sp, #104]',
+            '    ldr x19, [x0, #0]', '    ldr x9, [x1, #0]', '    cmp x19, x9', '    b.ne .Levent_wait_early',
+            '    cbz x19, .Levent_wait_early', '    ldr x20, [x0, #16]', '    ldr x21, [x1, #16]', '    mov x22, x2',
+            '    mov x9, #8', '    mul x0, x19, x9', '    str x0, [sp, #48]', '    bl valen_alloc',
+            '    mov x23, x0', '    mov x24, #0', '.Levent_wait_fill:', '    cmp x24, x19',
+            '    b.cs .Levent_wait_poll', '    lsl x9, x24, #3', '    add x10, x20, x9', '    ldr x11, [x10, #0]',
+            '    add x10, x21, x9', '    ldr x12, [x10, #0]', '    add x10, x23, x9', '    str w11, [x10, #0]',
+            '    strh w12, [x10, #4]', '    mov x11, #0', '    strh w11, [x10, #6]', '    add x24, x24, #1',
+            '    b .Levent_wait_fill', '.Levent_wait_poll:', '    cmp x22, #0', '    b.lt .Levent_wait_infinite',
+            '    mov x9, #1000', '    udiv x10, x22, x9', '    str x10, [sp, #64]', '    mul x11, x10, x9',
+            '    sub x11, x22, x11', ...this.constant('x12', 1000000), '    mul x11, x11, x12',
+            '    str x11, [sp, #72]', '    add x2, sp, #64', '    b .Levent_wait_call',
+            '.Levent_wait_infinite:', '    mov x2, #0', '.Levent_wait_call:', '    mov x0, x23', '    mov x1, x19',
+            '    mov x3, #0', '    mov x4, #8', '    mov x8, #73', '    svc #0', '    cmp x0, #0',
+            '    b.le .Levent_wait_none', '    mov x24, #0', '.Levent_wait_scan:', '    cmp x24, x19',
+            '    b.cs .Levent_wait_none', '    lsl x9, x24, #3', '    add x10, x23, x9', '    ldrh w11, [x10, #6]',
+            '    cbnz x11, .Levent_wait_ready', '    add x24, x24, #1', '    b .Levent_wait_scan',
+            '.Levent_wait_ready:', '    mov x22, x24', '    b .Levent_wait_cleanup',
+            '.Levent_wait_none:', '    mov x22, #-1', '.Levent_wait_cleanup:', '    mov x0, x23', '    ldr x1, [sp, #48]',
+            '    mov x8, #215', '    svc #0', '    mov x0, x22', '    b .Levent_wait_done',
+            '.Levent_wait_early:', '    mov x0, #-1', '.Levent_wait_done:', '    ldr x19, [sp, #0]',
+            '    ldr x20, [sp, #8]', '    ldr x21, [sp, #16]', '    ldr x22, [sp, #24]', '    ldr x23, [sp, #32]',
+            '    ldr x24, [sp, #40]', '    ldr x30, [sp, #104]', '    add sp, sp, #112', '    ret', '');
+        if (this.runtimeSymbols.has('valen_EventLoop_monotonicMilliseconds')) lines.push(
+            '.globl valen_EventLoop_monotonicMilliseconds', 'valen_EventLoop_monotonicMilliseconds:',
+            '    sub sp, sp, #32', '    str x30, [sp, #24]', '    mov x0, #1', '    add x1, sp, #0',
+            '    mov x8, #113', '    svc #0', '    cmp x0, #0', '    b.lt .Levent_monotonic_error',
+            '    ldr x9, [sp, #0]', '    mov x10, #1000', '    mul x9, x9, x10', '    ldr x10, [sp, #8]',
+            ...this.constant('x11', 1000000), '    udiv x10, x10, x11', '    add x0, x9, x10',
+            '    b .Levent_monotonic_done', '.Levent_monotonic_error:', '    mov x0, #-1',
+            '.Levent_monotonic_done:', '    ldr x30, [sp, #24]', '    add sp, sp, #32', '    ret', '');
+        return lines;
+    }
 
     call(instruction, dynamic) {
         const lines = this.loadCallArguments(instruction.arguments);

@@ -1,0 +1,37 @@
+library Network {{
+    native listen(port:u16, backlog:i32) -> Listener?
+    native accept(listener:Listener) -> Connection?
+    native send(connection:Connection, input:string) -> i64
+    native closeListener(own listener:Listener) -> i64
+    native closeConnection(own connection:Connection) -> i64
+    native listenerDescriptor(listener:Listener) -> i64
+    native makeListenerNonblocking(listener:Listener) -> bool
+
+    Listener {{ member descriptor:i64 }}
+    Connection {{ member descriptor:i64 }}
+}}
+
+library EventLoop {{
+    native available() -> bool
+    native wait(descriptors:Array<i64>, interests:Array<i64>, timeout:i64) -> i64
+    native monotonicMilliseconds() -> i64
+}}
+
+entry {{
+    __() -> i32 {
+        if !EventLoop.available() { return 1 }
+        local listener = Network.listen(39877, 4)
+        if listener == null || !Network.makeListenerNonblocking(listener!) { return 2 }
+        local descriptors = [Network.listenerDescriptor(listener!)]
+        local interests = [1]
+        local started = EventLoop.monotonicMilliseconds()
+        if EventLoop.wait(descriptors, interests, 5000) != 0 { return 3 }
+        if EventLoop.monotonicMilliseconds() < started { return 4 }
+        local connection = Network.accept(listener!)
+        if connection == null { return 5 }
+        if Network.send(connection!, "READY") != 5 { return 6 }
+        if Network.closeConnection(connection!) != 0 { return 7 }
+        if Network.closeListener(listener!) != 0 { return 8 }
+        return 0
+    }
+}}
