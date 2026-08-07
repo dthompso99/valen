@@ -1,0 +1,46 @@
+import AArch64Object from '../../../src/libAArch64Object.ar'
+
+test AArch64ObjectEncoderTests {{
+    encodesInstructionsDataSymbolsAndRelocations() -> void {
+        local assembler = new AArch64Object.Assembler()
+        local object = assembler.assembleObject(".text\n.globl _start\n.extern external_call\n_start:\n    mov x0, #42\n    add x1, x0, #8\n    cbz x1, done\n    bl external_call\n    b _start\ndone:\n    ret\n.data\n.align 8\nvalue:\n    .quad _start\n    .byte 1, 2, 255\n")
+        expect(object != null)
+        expect(object!.machine == 183)
+        expect(object!.sections.length == 2)
+        expect(object!.sections[0].name == ".text")
+        expect(object!.sections[0].data.length == 24)
+        expect(object!.sections[0].data[0] == 64 && object!.sections[0].data[1] == 5 && object!.sections[0].data[2] == 128 && object!.sections[0].data[3] == 210)
+        expect(object!.sections[0].data[20] == 192 && object!.sections[0].data[21] == 3 && object!.sections[0].data[22] == 95 && object!.sections[0].data[23] == 214)
+        expect(object!.sections[1].alignment == 8)
+        expect(object!.sections[1].data.length == 11)
+        expect(object!.sections[1].data[8] == 1 && object!.sections[1].data[9] == 2 && object!.sections[1].data[10] == 255)
+        expect(object!.relocations.length == 2)
+        expect(object!.relocations[0].sectionName == ".text" && object!.relocations[0].offset == 12 && object!.relocations[0].type == 283)
+        expect(object!.relocations[1].sectionName == ".data" && object!.relocations[1].offset == 0 && object!.relocations[1].type == 257)
+        local bytes = object!.build()
+        expect(bytes[0] == 127 && bytes[1] == 69 && bytes[2] == 76 && bytes[3] == 70)
+        expect(bytes[18] == 183 && bytes[19] == 0)
+    }
+
+    coversExtendedInstructionFamilies() -> void {
+        local assembler = new AArch64Object.Assembler()
+        local object = assembler.assembleObject(".text\nstart:\n    adrp x0, value\n    add x0, x0, :lo12:value\n    sub sp, sp, #16\n    and x1, x2, x3\n    lsl x4, x5, #7\n    str x4, [sp, #8]\n    ldar x6, [x7]\n    ldaxr w8, [x9]\n    stlr x10, [x11]\n    stlxr w12, x13, [x14]\n    movz x15, #4660, lsl #16\n    movk x15, #22136\n    fmov d0, x0\n    fadd d1, d2, d3\n    fcmp d1, d2\n    fcvt s4, d5\n    scvtf d6, x7\n    fcvtzu x8, d9\n    cmp x8, #9\n    cset x9, ne\n    b.eq done\n    blr x10\n    clrex\n    svc #0\ndone:\n    ret\n.data\nvalue:\n    .quad 7\n")
+        expect(object != null)
+        expect(object!.sections[0].data.length == 100)
+        local expected = [2415919104, 2432696320, 3506455551, 2315452481, 3547979940,
+            4177528804, 3370122470, 2287992104, 3365928298, 3356294605,
+            3533850255, 4069183247, 2657550336, 509814849, 509747232,
+            509755556, 2657222886, 2658730280, 4043318559, 2594113513,
+            1409286272, 3594453312, 3573759839, 3556769793, 3596551104]
+        local index:i64 = 0
+        while index < expected.length {
+            local offset = index * 4
+            local actual:i64 = (object!.sections[0].data[offset] as i64) + (object!.sections[0].data[offset + 1] as i64) * 256 + (object!.sections[0].data[offset + 2] as i64) * 65536 + (object!.sections[0].data[offset + 3] as i64) * 16777216
+            expect(actual == expected[index])
+            index = index + 1
+        }
+        expect(object!.relocations.length == 2)
+        expect(object!.relocations[0].type == 275)
+        expect(object!.relocations[1].type == 277)
+    }
+}}

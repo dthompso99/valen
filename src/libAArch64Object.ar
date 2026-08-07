@@ -1,0 +1,310 @@
+import Elf from './libElf.ar'
+import X86Object from './libX86Object.ar'
+
+library AArch64Object {{
+    Label {{
+        member name:string
+        member section:string
+        member offset:i64
+        __(name:string, section:string, offset:i64) -> void { self.name = name; self.section = section; self.offset = offset }
+    }}
+
+    Instruction {{
+        member line:string
+        member offset:i64
+        __(line:string, offset:i64) -> void { self.line = line; self.offset = offset }
+    }}
+
+    DataEntry {{
+        member offset:i64
+        member size:i64
+        member value:string
+        __(offset:i64, size:i64, value:string) -> void { self.offset = offset; self.size = size; self.value = value }
+    }}
+
+    Encoder {{
+        member parser:X86Object.Parser
+        member labels:Array<Label>
+        member object:Elf.Object
+        member error:string
+
+        __(parser:X86Object.Parser, labels:Array<Label>, object:Elf.Object) -> void {
+            self.parser = parser; self.labels = labels; self.object = object; self.error = ""
+        }
+
+        register(value:string) -> i64 {
+            if value == "sp" || value == "xzr" || value == "wzr" { return 31 }
+            if value.length < 2 { return -1 }
+            local prefix = value[0]
+            if prefix != 120 && prefix != 119 && prefix != 115 && prefix != 100 { return -1 }
+            local result = self.parser.integer(value.slice(1, value.length - 1))
+            if result < 0 || result > 31 { return -1 }
+            if (prefix == 120 || prefix == 119) && result == 31 { return -1 }
+            return result
+        }
+
+        immediate(value:string) -> i64 {
+            if value.length == 0 || value[0] != 35 { self.error = "invalid immediate '" + value + "'"; return 0 }
+            return self.parser.integer(value.slice(1, value.length - 1))
+        }
+
+        condition(value:string) -> i64 {
+            if value == "eq" { return 0 }; if value == "ne" { return 1 }; if value == "cs" { return 2 }; if value == "cc" { return 3 }
+            if value == "mi" { return 4 }; if value == "pl" { return 5 }; if value == "vs" { return 6 }; if value == "vc" { return 7 }
+            if value == "hi" { return 8 }; if value == "ls" { return 9 }; if value == "ge" { return 10 }; if value == "lt" { return 11 }
+            if value == "gt" { return 12 }; if value == "le" { return 13 }; return -1
+        }
+
+        label(name:string) -> ref Label? {
+            local index:i64 = 0
+            while index < self.labels.length { if self.labels[index].name == name && self.labels[index].section == ".text" { return self.labels[index] }; index = index + 1 }
+            return null
+        }
+
+        displacement(name:string, offset:i64, bits:i64) -> i64 {
+            local target = self.label(name)
+            if target == null { self.error = "undefined AArch64 label '" + name + "'"; return 0 }
+            local bytes = target!.offset - offset
+            local value = bytes / 4
+            local limit:i64 = 1 << (bits - 1)
+            if bytes - value * 4 != 0 || value < -limit || value >= limit { self.error = "AArch64 branch to '" + name + "' is out of range"; return 0 }
+            if value < 0 { value = value + (1 << bits) }
+            return value
+        }
+
+        memory(value:string) -> Array<string> {
+            local result = new Array<string>(0)
+            if value.length < 3 || value[0] != 91 || value[value.length - 1] != 93 { return copy result }
+            local inner = value.slice(1, value.length - 2); local comma = self.parser.find(inner, 44)
+            if comma < 0 { result.append(self.parser.trim(inner)); return result }
+            result.append(self.parser.trim(inner.slice(0, comma)))
+            result.append(self.parser.trim(inner.slice(comma + 1, inner.length - comma - 1)))
+            return copy result
+        }
+
+        encode(line:string, offset:i64) -> i64 {
+            local space = self.parser.find(line, 32); local mnemonic = line; local values = new Array<string>(0)
+            if space >= 0 { mnemonic = line.slice(0, space); values = self.operands(line.slice(space + 1, line.length - space - 1)) }
+            if mnemonic == "ret" && values.length == 0 { return 3596551104 }
+            if mnemonic == "clrex" && values.length == 0 { return 3573759839 }
+            if mnemonic == "svc" && values.length == 1 && values[0] == "#0" { return 3556769793 }
+            if mnemonic == "adrp" && values.length == 2 {
+                local destination = self.register(values[0]); if destination < 0 { return self.fail(line) }
+                self.object.addRelocation(".text", offset, values[1], 275, 0); return 2415919104 | destination
+            }
+            if mnemonic == "add" && values.length == 3 && self.parser.starts(values[2], ":lo12:") {
+                local destination = self.register(values[0]); local source = self.register(values[1]); if destination < 0 || source < 0 { return self.fail(line) }
+                self.object.addRelocation(".text", offset, values[2].slice(6, values[2].length - 6), 277, 0)
+                return 2432696320 | (source << 5) | destination
+            }
+            if (mnemonic == "add" || mnemonic == "sub") && values.length == 3 && values[2][0] == 35 {
+                local destination = self.register(values[0]); local source = self.register(values[1]); local value = self.immediate(values[2])
+                if destination < 0 || source < 0 || value < 0 || value > 4095 { return self.fail(line) }
+                local base:i64 = 2432696320; if mnemonic == "sub" { base = 3506438144 }
+                return base | (value << 10) | (source << 5) | destination
+            }
+            if (mnemonic == "add" || mnemonic == "sub" || mnemonic == "and" || mnemonic == "orr" || mnemonic == "eor" || mnemonic == "lsl" || mnemonic == "lsr" || mnemonic == "asr" || mnemonic == "mul" || mnemonic == "sdiv" || mnemonic == "udiv") && values.length == 3 && values[2][0] != 35 {
+                local destination = self.register(values[0]); local left = self.register(values[1]); local right = self.register(values[2])
+                if destination < 0 || left < 0 || right < 0 { return self.fail(line) }
+                local base:i64 = 2332033024
+                if mnemonic == "sub" { base = 3405774848 }; if mnemonic == "and" { base = 2315255808 }; if mnemonic == "orr" { base = 2852126720 }
+                if mnemonic == "eor" { base = 3388997632 }; if mnemonic == "lsl" { base = 2596282368 }; if mnemonic == "lsr" { base = 2596283392 }
+                if mnemonic == "asr" { base = 2596284416 }; if mnemonic == "mul" { base = 2600500224 }; if mnemonic == "sdiv" { base = 2596277248 }; if mnemonic == "udiv" { base = 2596276224 }
+                return base | (right << 16) | (left << 5) | destination
+            }
+            if (mnemonic == "lsl" || mnemonic == "lsr" || mnemonic == "asr") && values.length == 3 {
+                local destination = self.register(values[0]); local source = self.register(values[1]); local shift = self.immediate(values[2])
+                if destination < 0 || source < 0 || shift < 0 || shift > 63 { return self.fail(line) }
+                if mnemonic == "lsl" { return 3544186880 | (((64 - shift) & 63) << 16) | ((63 - shift) << 10) | (source << 5) | destination }
+                local base:i64 = 3544186880; if mnemonic == "asr" { base = 2470445056 }
+                return base | (shift << 16) | (63 << 10) | (source << 5) | destination
+            }
+            if (mnemonic == "ldrb" || mnemonic == "strb" || mnemonic == "ldrh" || mnemonic == "strh" || mnemonic == "ldr" || mnemonic == "str") && values.length == 2 {
+                local target = self.register(values[0]); local address = self.memory(values[1])
+                if target < 0 || address.length != 2 { return self.fail(line) }
+                local baseRegister = self.register(address[0]); local value = self.immediate(address[1]); local size:i64 = 4; local base:i64 = 3107979264
+                if mnemonic == "ldrb" { size = 1; base = 960495616 }; if mnemonic == "strb" { size = 1; base = 956301312 }
+                if mnemonic == "ldrh" { size = 2; base = 2034237440 }; if mnemonic == "strh" { size = 2; base = 2030043136 }
+                if mnemonic == "str" { base = 3103784960 }
+                if values[0][0] == 120 || values[0] == "xzr" { size = 8; if mnemonic == "ldr" { base = 4181721088 } else { base = 4177526784 } }
+                if baseRegister < 0 || value < 0 || value - (value / size) * size != 0 || value / size > 4095 { return self.fail(line) }
+                return base | ((value / size) << 10) | (baseRegister << 5) | target
+            }
+            if (mnemonic == "ldar" || mnemonic == "ldaxr" || mnemonic == "stlr") && values.length == 2 {
+                local target = self.register(values[0]); local address = self.memory(values[1]); if target < 0 || address.length != 1 { return self.fail(line) }
+                local baseRegister = self.register(address[0]); if baseRegister < 0 { return self.fail(line) }
+                local wide = values[0][0] == 120; local base:i64 = 2296380416
+                if mnemonic == "ldar" && wide { base = 3370122240 }; if mnemonic == "ldaxr" { base = 2287991808; if wide { base = 3361733632 } }
+                if mnemonic == "stlr" { base = 2292186112; if wide { base = 3365927936 } }
+                return base | (baseRegister << 5) | target
+            }
+            if mnemonic == "stlxr" && values.length == 3 {
+                local status = self.register(values[0]); local valueRegister = self.register(values[1]); local address = self.memory(values[2])
+                if status < 0 || valueRegister < 0 || address.length != 1 { return self.fail(line) }; local baseRegister = self.register(address[0]); if baseRegister < 0 { return self.fail(line) }
+                local base:i64 = 2281765888; if values[1][0] == 120 { base = 3355507712 }
+                return base | (status << 16) | (baseRegister << 5) | valueRegister
+            }
+            if mnemonic == "mov" && values.length == 2 && values[1][0] == 35 {
+                local destination = self.register(values[0]); local value = self.immediate(values[1]); if destination < 0 { return self.fail(line) }
+                if value >= 0 && value <= 65535 { return 3531603968 | (value << 5) | destination }
+                if value < 0 && value >= -65536 { return 2457862144 | (((-value - 1) & 65535) << 5) | destination }; return self.fail(line)
+            }
+            if (mnemonic == "movz" || mnemonic == "movk") && (values.length == 2 || values.length == 3) {
+                local destination = self.register(values[0]); local value = self.immediate(values[1]); local shift:i64 = 0
+                if values.length == 3 { if !self.parser.starts(values[2], "lsl ") { return self.fail(line) }; shift = self.immediate(values[2].slice(4, values[2].length - 4)) }
+                if destination < 0 || value < 0 || value > 65535 || (shift != 0 && shift != 16 && shift != 32 && shift != 48) { return self.fail(line) }
+                local base:i64 = 3531603968; if mnemonic == "movk" { base = 4068474880 }
+                return base | ((shift / 16) << 21) | (value << 5) | destination
+            }
+            if mnemonic == "fmov" && values.length == 2 {
+                local destination = self.register(values[0]); local source = self.register(values[1]); if destination < 0 || source < 0 { return self.fail(line) }
+                local base:i64 = 0
+                if values[0][0] == 115 && values[1][0] == 119 { base = 505872384 }
+                if values[0][0] == 100 && values[1][0] == 120 { base = 2657550336 }
+                if values[0][0] == 119 && values[1][0] == 115 { base = 505806848 }
+                if values[0][0] == 120 && values[1][0] == 100 { base = 2657484800 }
+                if base == 0 { return self.fail(line) }; return base | (source << 5) | destination
+            }
+            if (mnemonic == "fadd" || mnemonic == "fsub" || mnemonic == "fmul" || mnemonic == "fdiv") && values.length == 3 {
+                if values[0][0] != values[1][0] || values[0][0] != values[2][0] { return self.fail(line) }
+                local destination = self.register(values[0]); local left = self.register(values[1]); local right = self.register(values[2]); if destination < 0 || left < 0 || right < 0 { return self.fail(line) }
+                local base:i64 = 505423872; if mnemonic == "fsub" { base = 505427968 }; if mnemonic == "fmul" { base = 505415680 }; if mnemonic == "fdiv" { base = 505419776 }
+                if values[0][0] == 100 { base = base + 4194304 }; return base | (right << 16) | (left << 5) | destination
+            }
+            if mnemonic == "fcmp" && values.length == 2 {
+                if values[0][0] != values[1][0] { return self.fail(line) }; local left = self.register(values[0]); local right = self.register(values[1]); if left < 0 || right < 0 { return self.fail(line) }
+                local base:i64 = 505421824; if values[0][0] == 100 { base = base + 4194304 }; return base | (right << 16) | (left << 5)
+            }
+            if mnemonic == "fcvt" && values.length == 2 {
+                local destination = self.register(values[0]); local source = self.register(values[1]); if destination < 0 || source < 0 { return self.fail(line) }
+                local base:i64 = 0; if values[0][0] == 100 && values[1][0] == 115 { base = 505593856 }; if values[0][0] == 115 && values[1][0] == 100 { base = 509755392 }
+                if base == 0 { return self.fail(line) }; return base | (source << 5) | destination
+            }
+            if (mnemonic == "scvtf" || mnemonic == "ucvtf") && values.length == 2 {
+                local destination = self.register(values[0]); local source = self.register(values[1]); if destination < 0 || source < 0 || values[1][0] != 120 { return self.fail(line) }
+                local base:i64 = 2653028352; if mnemonic == "ucvtf" { base = 2653093888 }; if values[0][0] == 100 { base = base + 4194304 }
+                return base | (source << 5) | destination
+            }
+            if (mnemonic == "fcvtzs" || mnemonic == "fcvtzu") && values.length == 2 {
+                local destination = self.register(values[0]); local source = self.register(values[1]); if destination < 0 || source < 0 || values[0][0] != 120 { return self.fail(line) }
+                local base:i64 = 2654470144; if mnemonic == "fcvtzu" { base = 2654535680 }; if values[1][0] == 100 { base = base + 4194304 }
+                return base | (source << 5) | destination
+            }
+            if mnemonic == "mov" && values.length == 2 {
+                local destination = self.register(values[0]); local source = self.register(values[1]); if destination < 0 || source < 0 || values[0][0] != 120 || values[1][0] != 120 { return self.fail(line) }
+                return 2852127712 | (source << 16) | destination
+            }
+            if mnemonic == "neg" && values.length == 2 {
+                local destination = self.register(values[0]); local source = self.register(values[1]); if destination < 0 || source < 0 { return self.fail(line) }; return 3405775840 | (source << 16) | destination
+            }
+            if mnemonic == "cmp" && values.length == 2 {
+                local left = self.register(values[0]); if left < 0 { return self.fail(line) }
+                if values[1][0] == 35 { local value = self.immediate(values[1]); if value < 0 || value > 4095 { return self.fail(line) }; return 4043309087 | (value << 10) | (left << 5) }
+                local right = self.register(values[1]); if right < 0 { return self.fail(line) }; return 3942645791 | (right << 16) | (left << 5)
+            }
+            if mnemonic == "cset" && values.length == 2 {
+                local destination = self.register(values[0]); local condition = self.condition(values[1]); if destination < 0 || condition < 0 { return self.fail(line) }
+                return 2594113504 | ((condition ^ 1) << 12) | destination
+            }
+            if (mnemonic == "cbz" || mnemonic == "cbnz") && values.length == 2 {
+                local source = self.register(values[0]); local displacement = self.displacement(values[1], offset, 19); if source < 0 || self.error.length > 0 { return self.fail(line) }
+                local base:i64 = 872415232; if mnemonic == "cbnz" { base = 889192448 }; if values[0][0] == 120 { base = base + 2147483648 }
+                return base | (displacement << 5) | source
+            }
+            if self.parser.starts(mnemonic, "b.") && values.length == 1 {
+                local condition = self.condition(mnemonic.slice(2, mnemonic.length - 2)); local displacement = self.displacement(values[0], offset, 19)
+                if condition < 0 || self.error.length > 0 { return self.fail(line) }; return 1409286144 | (displacement << 5) | condition
+            }
+            if (mnemonic == "b" || mnemonic == "bl") && values.length == 1 {
+                local target = self.label(values[0])
+                if target == null { if mnemonic == "bl" { self.object.addRelocation(".text", offset, values[0], 283, 0); return 2483027968 }; return self.fail(line) }
+                local displacement = self.displacement(values[0], offset, 26); if self.error.length > 0 { return self.fail(line) }
+                local base:i64 = 335544320; if mnemonic == "bl" { base = 2483027968 }; return base | displacement
+            }
+            if mnemonic == "blr" && values.length == 1 { local source = self.register(values[0]); if source < 0 { return self.fail(line) }; return 3594452992 | (source << 5) }
+            return self.fail(line)
+        }
+
+        fail(line:string) -> i64 { if self.error.length == 0 { self.error = "unsupported AArch64 instruction '" + line + "'" }; return -1 }
+
+        operands(value:string) -> Array<string> {
+            local result = new Array<string>(0); local start:i64 = 0; local depth:i64 = 0; local index:i64 = 0
+            while index <= value.length {
+                local split = index == value.length
+                if !split { if value[index] == 91 { depth = depth + 1 }; if value[index] == 93 { depth = depth - 1 }; split = value[index] == 44 && depth == 0 }
+                if split { local part = self.parser.trim(value.slice(start, index - start)); if part.length > 0 { result.append(part) }; start = index + 1 }
+                index = index + 1
+            }
+            return copy result
+        }
+    }}
+
+    Assembler {{
+        member parser:X86Object.Parser
+        member labels:Array<Label>
+        member globals:Array<string>
+        member externals:Array<string>
+        member instructions:Array<Instruction>
+        member dataEntries:Array<DataEntry>
+        member dataSize:i64
+        member dataAlignment:i64
+        member error:string
+
+        __() -> void { self.parser = new X86Object.Parser(); self.reset() }
+        reset() -> void {
+            self.labels = new Array<Label>(0); self.globals = new Array<string>(0); self.externals = new Array<string>(0)
+            self.instructions = new Array<Instruction>(0); self.dataEntries = new Array<DataEntry>(0); self.dataSize = 0; self.dataAlignment = 1; self.error = ""
+        }
+        assemble(source:string) -> Array<u8>? { local object = self.assembleObject(source); if object == null { return null }; return object!.build() }
+
+        assembleObject(source:string) -> Elf.Object? {
+            self.reset(); local section = ".text"; local textOffset:i64 = 0; local start:i64 = 0
+            while start <= source.length {
+                local end = start; while end < source.length { if source[end] == 10 { break }; end = end + 1 }
+                local line = self.parser.trim(source.slice(start, end - start))
+                if line.length > 0 {
+                    if line == ".text" { section = ".text" }
+                    else if line == ".data" || line == ".section .data" { section = ".data" }
+                    else if self.parser.starts(line, ".section ") { section = "" }
+                    else if self.parser.starts(line, ".type ") || self.parser.starts(line, ".size ") { }
+                    else if self.parser.starts(line, ".globl ") { self.addUnique(self.globals, self.parser.trim(line.slice(7, line.length - 7))) }
+                    else if self.parser.starts(line, ".extern ") { self.addUnique(self.externals, self.parser.trim(line.slice(8, line.length - 8))) }
+                    else if self.parser.starts(line, ".align ") {
+                        if section == ".data" { local alignment = self.parser.integer(self.parser.trim(line.slice(7, line.length - 7))); if alignment < 1 { self.error = line; return null }; while self.dataSize - (self.dataSize / alignment) * alignment != 0 { self.dataSize = self.dataSize + 1 }; if alignment > self.dataAlignment { self.dataAlignment = alignment } }
+                    }
+                    else if line[line.length - 1] == 58 {
+                        if section.length == 0 { self.error = line; return null }; local name = line.slice(0, line.length - 1)
+                        if self.findLabel(name) != null { self.error = line; return null }; local offset = textOffset; if section == ".data" { offset = self.dataSize }; self.labels.append(new Label(name, section, offset))
+                    }
+                    else if self.parser.starts(line, ".quad ") {
+                        if section != ".data" { self.error = line; return null }; self.dataEntries.append(new DataEntry(self.dataSize, 8, self.parser.trim(line.slice(6, line.length - 6)))); self.dataSize = self.dataSize + 8
+                    }
+                    else if self.parser.starts(line, ".byte ") {
+                        if section != ".data" { self.error = line; return null }; local values = self.operands(line.slice(6, line.length - 6)); local index:i64 = 0
+                        while index < values.length { local value = self.parser.integer(values[index]); if value < 0 || value > 255 { self.error = line; return null }; self.dataEntries.append(new DataEntry(self.dataSize, 1, values[index])); self.dataSize = self.dataSize + 1; index = index + 1 }
+                    }
+                    else if section == ".text" { self.instructions.append(new Instruction(line, textOffset)); textOffset = textOffset + 4 }
+                    else { self.error = line; return null }
+                }
+                if end == source.length { break }; start = end + 1
+            }
+            local object = new Elf.Object(183); local text = new Elf.Bytes(); local encoder = new Encoder(self.parser, self.labels, object); local index:i64 = 0
+            while index < self.instructions.length { local instruction = self.instructions[index]; local word = encoder.encode(instruction.line, instruction.offset); if word < 0 { self.error = encoder.error; return null }; text.u32(word); index = index + 1 }
+            object.addSection(".text", text.values, 1, 6, 4)
+            if self.dataSize > 0 {
+                local data = new Elf.Bytes(); data.zeros(self.dataSize); index = 0
+                while index < self.dataEntries.length { local entry = self.dataEntries[index]; if entry.size == 1 { data.values[entry.offset] = self.parser.integer(entry.value) as u8 } else if self.parser.isNumber(entry.value) { data.patch64(entry.offset, self.parser.integer(entry.value)) } else { object.addRelocation(".data", entry.offset, entry.value, 257, 0) }; index = index + 1 }
+                object.addSection(".data", data.values, 1, 3, self.dataAlignment)
+            }
+            index = 0; while index < self.labels.length { local label = self.labels[index]; local binding:i64 = 0; if self.contains(self.globals, label.name) { binding = 1 }; local type:i64 = 1; if label.section == ".text" && binding == 1 { type = 2 }; if label.section == ".text" && binding == 0 { type = 0 }; object.addSymbol(label.name, label.section, label.offset, 0, binding, type); index = index + 1 }
+            index = 0; while index < self.externals.length { if self.findLabel(self.externals[index]) == null { object.addSymbol(self.externals[index], null, 0, 0, 1, 0) }; index = index + 1 }
+            index = 0; while index < object.relocations.length { local name = object.relocations[index].symbolName; if self.findLabel(name) == null && !self.contains(self.externals, name) { object.addSymbol(name, null, 0, 0, 1, 0); self.externals.append(name) }; index = index + 1 }
+            return object
+        }
+
+        findLabel(name:string) -> ref Label? { local index:i64 = 0; while index < self.labels.length { if self.labels[index].name == name { return self.labels[index] }; index = index + 1 }; return null }
+        contains(values:Array<string>, value:string) -> bool { local index:i64 = 0; while index < values.length { if values[index] == value { return true }; index = index + 1 }; return false }
+        addUnique(values:Array<string>, value:string) -> void { if !self.contains(values, value) { values.append(value) } }
+        operands(value:string) -> Array<string> { local encoder = new Encoder(self.parser, self.labels, new Elf.Object(183)); return encoder.operands(value) }
+    }}
+}}

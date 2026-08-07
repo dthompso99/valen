@@ -42,7 +42,8 @@ export const validPrograms = [
     {name: 'exhaustive enum matching', source: 'bootstrap/test/fixtures/enum-match.ar'},
     {name: 'checked integer parsing', source: 'bootstrap/test/fixtures/integer-parsing.ar'},
     {name: 'native test runner', source: 'bootstrap/test/fixtures/native-tests.ar'},
-    {name: 'self-hosted x86 object parser', source: 'bootstrap/test/fixtures/x86-object-parser.ar'}
+    {name: 'self-hosted x86 object parser', source: 'bootstrap/test/fixtures/x86-object-parser.ar'},
+    {name: 'self-hosted AArch64 object encoder', source: 'bootstrap/test/fixtures/aarch64-object-encoder.ar'}
 ];
 
 export const expectedFailures = [
