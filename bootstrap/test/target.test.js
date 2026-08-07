@@ -453,6 +453,18 @@ test('bootstrap compiler emits cycle-safe AArch64 structural equality and hashin
     assert.match(result.assembly, /\.quad .*_hash/);
 });
 
+test('bootstrap compiler emits the native AArch64 test runner', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-tests-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/native-tests-failing.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'tests'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'tests')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /valen_test_failures:/);
+    assert.match(result.assembly, /valen_test_failure_message:/);
+    assert.match(result.assembly, /mov x8, #64/);
+});
+
 test('bootstrap compiler collects AArch64 object graphs and clears weak references', t => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-gc-'));
     t.after(() => fs.rmSync(directory, {recursive: true, force: true}));

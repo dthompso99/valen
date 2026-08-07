@@ -58,6 +58,7 @@ export class AArch64Backend {
             '.Lfloat_conversion_error:', '    mov x0, #76', '    mov x8, #93', '    svc #0', '');
         lines.push(...this.typeData(this.emittedTypes), ...this.stringData());
         if (includeRuntime) lines.push(...this.gcData());
+        if (includeRuntime && program.functions.some(fn => fn.name === '$valen.test.run')) lines.push(...this.testData());
         lines.push('.section .note.GNU-stack,"",@progbits');
         return `${lines.join('\n')}\n`;
     }
@@ -312,6 +313,17 @@ export class AArch64Backend {
             case 'builder_build':
                 return [...this.load(instruction.builder, 'x0'), '    bl valen_builder_build',
                     `    str x0, ${this.temp(instruction.result)}`];
+            case 'test_expect': {
+                const done = `.Ltest_expect_done_${this.runtimeLabel++}`;
+                return [...this.load(instruction.condition, 'x9'), `    cbnz x9, ${done}`,
+                    ...this.address('x10', 'valen_test_failures'), '    ldr x11, [x10, #0]',
+                    '    add x11, x11, #1', '    str x11, [x10, #0]', '    mov x0, #2',
+                    ...this.address('x1', 'valen_test_failure_message'), '    mov x2, #12', '    mov x8, #64',
+                    '    svc #0', `${done}:`];
+            }
+            case 'test_failures':
+                return [...this.address('x9', 'valen_test_failures'), '    ldr x9, [x9, #0]',
+                    `    str x9, ${this.temp(instruction.result)}`];
             case 'call':
                 return this.call(instruction, false);
             case 'virtual_call':
@@ -1732,6 +1744,12 @@ export class AArch64Backend {
             '    .quad 1048576', '.globl valen_filesystem_error', 'valen_filesystem_error:', '    .quad 0',
             '.globl valen_process_argc', 'valen_process_argc:', '    .quad 0', '.globl valen_process_argv',
             'valen_process_argv:', '    .quad 0', '.globl valen_process_envp', 'valen_process_envp:', '    .quad 0', '.text'];
+    }
+
+    testData() {
+        return ['.section .data', 'valen_test_failure_message:',
+            '    .byte 116, 101, 115, 116, 32, 102, 97, 105, 108, 101, 100, 10',
+            '.section .data', '.align 8', 'valen_test_failures:', '    .quad 0', '.text'];
     }
 
     typeLabel(typeName) { return `.Lvalen_type_${this.mangle(typeName)}`; }

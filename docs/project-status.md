@@ -35,40 +35,13 @@
 ## WIP: runtime and concurrency
 
 - Poll-backed readiness operations and an event-loop executor for files and networking
-- **WIP:** the generation-0 `aarch64-linux` backend cross-compiles primitive integer and control-flow
-  programs with full-width constants, conversions, checked division, loops, direct calls, and scalar
-  floating-point arithmetic and comparisons into internally encoded, internally linked static ELF
-  executables. Float-to-integer conversions reject NaN and out-of-range values with runtime status 76.
-  Direct calls support AAPCS64 integer, floating, and overflow stack arguments. Basic objects share the
-  x86-64 16-byte header and packed field layout, zero-initialize storage, run field initializers before
-  constructors, and preserve reference identity. ABI-compatible type descriptors carry base links and
-  virtual method slots, contract tables, and contract method tables, enabling inherited, overridden, and
-  contract-typed dispatch. Runtime type tests and checked reference casts walk both base links and contract
-  relationships. Arrays use the common 40-byte header and support allocation, length and capacity, checked
-  indexing, replacement, append, insert, remove, reserve, and shrink-to-fit across scalar and reference-sized
-  elements. Managed object, array, and dynamic-string descriptors use tracked 48-byte GC allocation headers,
-  and functions publish precise managed stack roots. Cycle-safe marking follows generated object and managed-array
-  trace callbacks. Explicit collection traverses precise roots, clears weak references, finalizes array and
-  dynamic-string buffers, and unmaps unreachable descriptors. Allocation pressure triggers collection using
-  an adaptive live-heap threshold with a 1 MiB floor.
-  Replaced buffers remain anonymous mappings for process lifetime. Weak object fields and
-  weak array elements/slices observe explicit destruction and collection. Copied slices
-  support value elements, explicit reference aliases, and weak aliases;
-  deep-copy slices of owned managed elements remain WIP with structural hooks and tracing GC. AArch64 strings
-  support UTF-8 literals, byte length and indexing, equality, concatenation, copied byte slices, and copied
-  conversion to and from byte arrays. Unicode code-point length/index operations decode validated UTF-8
-  and replace malformed bytes. Grapheme length/index operations share the x86-64 rules for combining
-  marks, variation selectors, emoji modifiers, ZWJ sequences, regional-indicator pairs, and CRLF.
-  Decimal formatting covers every signed and unsigned integer width. Capacity-growing builders append
-  strings, byte arrays, and individual bytes, produce immutable snapshots, and support interpolation.
-  Freestanding console output, signed-integer printing, process exit, garbage collection, and foundational
-  open/read/write/close filesystem operations with error reporting are available as native facilities.
-  Linux process arguments, current-directory discovery, and environment lookup are also available.
-  Byte-array writes, synchronization, atomic replacement, removal, and executable permissions complete the
-  compiler-facing filesystem mutation surface. Networking, threading, foreign calls, and
-  self-hosting remain WIP on AArch64. The freestanding system-linker adapter can invoke `/usr/bin/cc`
-  with ordinary libraries and direct `@object` inputs using `clone`, `execve`, and `wait4`.
-  Bounds-checked bulk byte copying and lexicographic comparison match the x86-64 runtime surface.
+- The generation-0 `aarch64-linux` backend internally encodes and links freestanding static ELF executables.
+  It implements the shared scalar, object, inheritance, contract, optional, collection, UTF-8/Unicode string,
+  builder, structural equality/hash/copy, precise tracing-GC, weak-reference, filesystem, process-state,
+  bulk-memory, system-linker, and native-test-runner semantics. AAPCS64 calls support integer, floating-point,
+  and overflow stack arguments. Owned managed slices deep-copy with cycle and alias preservation; reference and
+  weak slices preserve identity. The backend and runtime are exercised natively on AArch64 in addition to
+  cross-compilation tests. Networking, threading, foreign calls, and self-hosting remain **WIP** on AArch64.
 - x86-64 Linux executables own their `_start` adapter, link without an implicit C runtime, and
   reject target-native symbols that the backend cannot provide.
 - **WIP:** general freestanding capability manifests, runtime hooks, and non-Linux code generation
