@@ -20,7 +20,12 @@ export class AArch64Backend {
             'valen_Network_sendSome', 'valen_Network_closeListener', 'valen_Network_closeConnection',
             'valen_Network_lastError', 'valen_Network_listenerDescriptor', 'valen_Network_connectionDescriptor',
             'valen_Network_makeListenerNonblocking', 'valen_Network_makeConnectionNonblocking',
-            'valen_EventLoop_available', 'valen_EventLoop_wait', 'valen_EventLoop_monotonicMilliseconds']);
+            'valen_EventLoop_available', 'valen_EventLoop_wait', 'valen_EventLoop_monotonicMilliseconds',
+            'valen_Operations_threadAvailable', 'valen_Operations_threadStart', 'valen_Operations_threadJoin',
+            'valen_Operations_mutexLock', 'valen_Operations_mutexUnlock',
+            'valen_Operations_conditionWait', 'valen_Operations_conditionNotifyOne', 'valen_Operations_conditionNotifyAll',
+            'valen_Operations_atomicLoad', 'valen_Operations_atomicStore', 'valen_Operations_atomicExchange',
+            'valen_Operations_atomicCompareExchange', 'valen_Operations_atomicAdd']);
         this.program = program;
         this.runtimeLabel = 0;
         this.fieldOffsets = new Map();
@@ -931,6 +936,7 @@ export class AArch64Backend {
         if (this.runtimeSymbols.has('valen_System_makeFileNonblocking')) lines.push(...this.nonblockingRuntime('valen_System_makeFileNonblocking'));
         if ([...this.runtimeSymbols].some(symbol => symbol.startsWith('valen_Network_'))) lines.push(...this.networkRuntime());
         if ([...this.runtimeSymbols].some(symbol => symbol.startsWith('valen_EventLoop_'))) lines.push(...this.eventLoopRuntime());
+        if ([...this.runtimeSymbols].some(symbol => symbol.startsWith('valen_Operations_'))) lines.push(...this.operationsRuntime());
         return lines;
     }
 
@@ -1322,6 +1328,61 @@ export class AArch64Backend {
             ...this.constant('x11', 1000000), '    udiv x10, x10, x11', '    add x0, x9, x10',
             '    b .Levent_monotonic_done', '.Levent_monotonic_error:', '    mov x0, #-1',
             '.Levent_monotonic_done:', '    ldr x30, [sp, #24]', '    add sp, sp, #32', '    ret', '');
+        return lines;
+    }
+
+    operationsRuntime() {
+        const offset = suffix => {
+            for (const [name, field] of this.fieldOffsets) if (name.endsWith(`::Operations.${suffix}`)) return field.offset;
+            throw new Error(`Operations runtime requires field ${suffix}`);
+        };
+        const mutex = offset('Mutex.state'), condition = offset('Condition.sequence'), atomic = offset('Atomic.value');
+        const lines = [];
+        const has = name => this.runtimeSymbols.has(`valen_Operations_${name}`);
+        if (has('threadAvailable')) lines.push('.globl valen_Operations_threadAvailable', 'valen_Operations_threadAvailable:',
+            '    mov x0, #0', '    ret', '');
+        if (has('threadStart')) lines.push('.globl valen_Operations_threadStart', 'valen_Operations_threadStart:',
+            '    mov x0, #0', '    ret', '');
+        if (has('threadJoin')) lines.push('.globl valen_Operations_threadJoin', 'valen_Operations_threadJoin:', '    ret', '');
+        if (has('mutexLock')) lines.push('.globl valen_Operations_mutexLock', 'valen_Operations_mutexLock:',
+            `    add x9, x0, #${mutex}`, '.Loperations_mutex_retry:', '    ldaxr w10, [x9]',
+            '    cbnz w10, .Loperations_mutex_wait', '    mov x11, #1', '    stlxr w12, w11, [x9]',
+            '    cbnz w12, .Loperations_mutex_retry', '    ret', '.Loperations_mutex_wait:',
+            '    mov x0, x9', '    mov x1, #128', '    mov x2, #1', '    mov x3, #0', '    mov x4, #0',
+            '    mov x5, #0', '    mov x8, #98', '    svc #0', '    b .Loperations_mutex_retry', '');
+        if (has('mutexUnlock')) lines.push('.globl valen_Operations_mutexUnlock', 'valen_Operations_mutexUnlock:',
+            `    add x0, x0, #${mutex}`, '    mov x9, #0', '    stlr w9, [x0]', '    mov x1, #129',
+            '    mov x2, #1', '    mov x3, #0', '    mov x4, #0', '    mov x5, #0', '    mov x8, #98', '    svc #0', '    ret', '');
+        if (has('conditionWait')) lines.push('.globl valen_Operations_conditionWait', 'valen_Operations_conditionWait:',
+            '    sub sp, sp, #48', '    str x19, [sp, #0]', '    str x20, [sp, #8]', '    str x30, [sp, #40]',
+            '    mov x19, x0', '    mov x20, x1', `    add x9, x19, #${condition}`, '    ldar w10, [x9]',
+            '    str x10, [sp, #16]', '    mov x0, x20', '    bl valen_Operations_mutexUnlock',
+            `    add x0, x19, #${condition}`, '    mov x1, #128', '    ldr x2, [sp, #16]', '    mov x3, #0',
+            '    mov x4, #0', '    mov x5, #0', '    mov x8, #98', '    svc #0', '    mov x0, x20',
+            '    bl valen_Operations_mutexLock', '    ldr x19, [sp, #0]', '    ldr x20, [sp, #8]',
+            '    ldr x30, [sp, #40]', '    add sp, sp, #48', '    ret', '');
+        const notify = (name, count) => lines.push(`.globl valen_Operations_${name}`, `valen_Operations_${name}:`,
+            `    add x0, x0, #${condition}`, '.Loperations_condition_increment_' + name + ':', '    ldaxr w9, [x0]',
+            '    add x10, x9, #1', '    stlxr w11, w10, [x0]', `    cbnz w11, .Loperations_condition_increment_${name}`,
+            '    mov x1, #129', ...this.constant('x2', count), '    mov x3, #0', '    mov x4, #0', '    mov x5, #0',
+            '    mov x8, #98', '    svc #0', '    ret', '');
+        if (has('conditionNotifyOne')) notify('conditionNotifyOne', 1);
+        if (has('conditionNotifyAll')) notify('conditionNotifyAll', 2147483647);
+        if (has('atomicLoad')) lines.push('.globl valen_Operations_atomicLoad', 'valen_Operations_atomicLoad:',
+            `    add x9, x0, #${atomic}`, '    ldar x0, [x9]', '    ret', '');
+        if (has('atomicStore')) lines.push('.globl valen_Operations_atomicStore', 'valen_Operations_atomicStore:',
+            `    add x9, x0, #${atomic}`, '    stlr x1, [x9]', '    ret', '');
+        if (has('atomicExchange')) lines.push('.globl valen_Operations_atomicExchange', 'valen_Operations_atomicExchange:',
+            `    add x9, x0, #${atomic}`, '.Loperations_atomic_exchange:', '    ldaxr x0, [x9]',
+            '    stlxr w10, x1, [x9]', '    cbnz w10, .Loperations_atomic_exchange', '    ret', '');
+        if (has('atomicCompareExchange')) lines.push('.globl valen_Operations_atomicCompareExchange',
+            'valen_Operations_atomicCompareExchange:', `    add x9, x0, #${atomic}`, '.Loperations_atomic_compare:',
+            '    ldaxr x10, [x9]', '    cmp x10, x1', '    b.ne .Loperations_atomic_compare_failed',
+            '    stlxr w11, x2, [x9]', '    cbnz w11, .Loperations_atomic_compare', '    mov x0, #1', '    ret',
+            '.Loperations_atomic_compare_failed:', '    clrex', '    mov x0, #0', '    ret', '');
+        if (has('atomicAdd')) lines.push('.globl valen_Operations_atomicAdd', 'valen_Operations_atomicAdd:',
+            `    add x9, x0, #${atomic}`, '.Loperations_atomic_add:', '    ldaxr x10, [x9]', '    add x0, x10, x1',
+            '    stlxr w11, x0, [x9]', '    cbnz w11, .Loperations_atomic_add', '    ret', '');
         return lines;
     }
 

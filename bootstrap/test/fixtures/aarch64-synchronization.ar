@@ -1,0 +1,61 @@
+library Operations {{
+    native threadAvailable() -> bool
+    native mutexLock(mutex:Mutex) -> void
+    native mutexUnlock(mutex:Mutex) -> void
+    native conditionNotifyOne(condition:Condition) -> void
+    native conditionNotifyAll(condition:Condition) -> void
+    native atomicLoad(atomic:Atomic) -> i64
+    native atomicStore(atomic:Atomic, value:i64) -> void
+    native atomicExchange(atomic:Atomic, value:i64) -> i64
+    native atomicCompareExchange(atomic:Atomic, expected:i64, replacement:i64) -> bool
+    native atomicAdd(atomic:Atomic, value:i64) -> i64
+
+    Mutex {{
+        private member state:i32
+        __() -> void { self.state = 0 }
+        lock() -> void { Operations.mutexLock(self) }
+        unlock() -> void { Operations.mutexUnlock(self) }
+    }}
+
+    Condition {{
+        private member sequence:i32
+        __() -> void { self.sequence = 0 }
+        notifyOne() -> void { Operations.conditionNotifyOne(self) }
+        notifyAll() -> void { Operations.conditionNotifyAll(self) }
+    }}
+
+    Atomic {{
+        private member value:i64
+        __(value:i64=0) -> void { self.value = value }
+        load() -> i64 { return Operations.atomicLoad(self) }
+        store(value:i64) -> void { Operations.atomicStore(self, value) }
+        exchange(value:i64) -> i64 { return Operations.atomicExchange(self, value) }
+        compareExchange(expected:i64, replacement:i64) -> bool {
+            return Operations.atomicCompareExchange(self, expected, replacement)
+        }
+        add(value:i64) -> i64 { return Operations.atomicAdd(self, value) }
+    }}
+}}
+
+entry {{
+    __() -> i32 {
+        local atomic = new Operations.Atomic(4)
+        if atomic.load() != 4 { return 1 }
+        if atomic.add(3) != 7 { return 2 }
+        if !atomic.compareExchange(7, 11) { return 3 }
+        if atomic.compareExchange(7, 12) { return 4 }
+        if atomic.exchange(9) != 11 { return 5 }
+        atomic.store(5)
+        if atomic.load() != 5 { return 6 }
+
+        local mutex = new Operations.Mutex()
+        mutex.lock()
+        mutex.unlock()
+        local condition = new Operations.Condition()
+        condition.notifyOne()
+        condition.notifyAll()
+
+        if Operations.threadAvailable() { return 7 }
+        return 0
+    }
+}}

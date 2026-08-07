@@ -498,6 +498,19 @@ test('bootstrap compiler emits the AArch64 readiness event loop', t => {
     assert.match(result.assembly, /mov x8, #113/);
 });
 
+test('bootstrap compiler emits AArch64 synchronization primitives', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-synchronization-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-synchronization.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'synchronization'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'synchronization')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /valen_Operations_mutexLock:[\s\S]*ldaxr w10[\s\S]*mov x8, #98/);
+    assert.match(result.assembly, /valen_Operations_conditionNotifyAll:[\s\S]*stlxr w11/);
+    assert.match(result.assembly, /valen_Operations_atomicCompareExchange:[\s\S]*ldaxr x10/);
+    assert.match(result.assembly, /valen_Operations_atomicAdd:[\s\S]*stlxr w11/);
+});
+
 test('bootstrap compiler collects AArch64 object graphs and clears weak references', t => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-gc-'));
     t.after(() => fs.rmSync(directory, {recursive: true, force: true}));

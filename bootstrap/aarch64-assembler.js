@@ -155,6 +155,20 @@ export class AArch64Assembler {
             const base = match[1] === 'ldr' ? 0xf9400000 : 0xf9000000;
             return {word: base | ((value / 8) << 10) | (register(match[3]) << 5) | register(match[2])};
         }
+        if ((match = line.match(/^(ldar|ldaxr) ([wx](?:[0-9]|[12][0-9]|30)), \[(x(?:[0-9]|[12][0-9]|30))\]$/))) {
+            const width = match[2][0], base = match[1] === 'ldar'
+                ? (width === 'x' ? 0xc8dffc00 : 0x88dffc00)
+                : (width === 'x' ? 0xc85ffc00 : 0x885ffc00);
+            return {word: base | (register(match[3]) << 5) | wordRegister(match[2])};
+        }
+        if ((match = line.match(/^stlr ([wx](?:[0-9]|[12][0-9]|30)), \[(x(?:[0-9]|[12][0-9]|30))\]$/))) {
+            const base = match[1][0] === 'x' ? 0xc89ffc00 : 0x889ffc00;
+            return {word: base | (register(match[2]) << 5) | wordRegister(match[1])};
+        }
+        if ((match = line.match(/^stlxr (w(?:[0-9]|[12][0-9]|30)), ([wx](?:[0-9]|[12][0-9]|30)), \[(x(?:[0-9]|[12][0-9]|30))\]$/))) {
+            const base = match[2][0] === 'x' ? 0xc800fc00 : 0x8800fc00;
+            return {word: base | (wordRegister(match[1]) << 16) | (register(match[3]) << 5) | wordRegister(match[2])};
+        }
         if ((match = line.match(/^mov (x(?:[0-9]|[12][0-9]|30)), (#-?(?:0x[0-9a-f]+|[0-9]+))$/i))) {
             const destination = register(match[1]), value = immediate(match[2]);
             if (value >= 0 && value <= 65535) return {word: 0xd2800000 | (value << 5) | destination};
@@ -224,13 +238,13 @@ export class AArch64Assembler {
             if (condition === undefined) throw new Error(`Invalid AArch64 condition '${match[2]}'`);
             return {word: 0x9a9f07e0 | ((condition ^ 1) << 12) | register(match[1])};
         }
-        if ((match = line.match(/^cbnz (x(?:[0-9]|[12][0-9]|30)), ([A-Za-z0-9_.$]+)$/))) {
+        if ((match = line.match(/^cbnz ([wx](?:[0-9]|[12][0-9]|30)), ([A-Za-z0-9_.$]+)$/))) {
             const displacement = this.displacement(labels, match[2], offset, 19);
-            return {word: 0xb5000000 | (displacement << 5) | register(match[1])};
+            return {word: (match[1][0] === 'x' ? 0xb5000000 : 0x35000000) | (displacement << 5) | wordRegister(match[1])};
         }
-        if ((match = line.match(/^cbz (x(?:[0-9]|[12][0-9]|30)), ([A-Za-z0-9_.$]+)$/))) {
+        if ((match = line.match(/^cbz ([wx](?:[0-9]|[12][0-9]|30)), ([A-Za-z0-9_.$]+)$/))) {
             const displacement = this.displacement(labels, match[2], offset, 19);
-            return {word: 0xb4000000 | (displacement << 5) | register(match[1])};
+            return {word: (match[1][0] === 'x' ? 0xb4000000 : 0x34000000) | (displacement << 5) | wordRegister(match[1])};
         }
         if ((match = line.match(/^b\.([a-z]{2}) ([A-Za-z0-9_.$]+)$/))) {
             const condition = conditionCodes.get(match[1]);
@@ -247,6 +261,7 @@ export class AArch64Assembler {
             return {word: (match[1] === 'bl' ? 0x94000000 : 0x14000000) | displacement};
         }
         if ((match = line.match(/^blr (x(?:[0-9]|[12][0-9]|30))$/))) return {word: 0xd63f0000 | (register(match[1]) << 5)};
+        if (line === 'clrex') return {word: 0xd5033f5f};
         if (line === 'ret') return {word: 0xd65f03c0};
         if (line === 'svc #0') return {word: 0xd4000001};
         throw new Error(`Unsupported AArch64 instruction '${line}'`);
