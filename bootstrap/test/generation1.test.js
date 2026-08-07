@@ -167,8 +167,8 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             const recognized = spawnSync(compilerPath,
                 ['--target', 'arm64-linux', source, '-o', path.join(directory, 'arm64-output')],
                 {encoding: 'utf8', env: environment, cwd: projectRoot});
-            assert.equal(recognized.status, 69);
-            assert.match(recognized.stderr, /target 'aarch64-linux' is recognized, but its backend is not implemented/);
+            assert.equal(recognized.status, 0, recognized.stderr);
+            assert.equal(fs.readFileSync(path.join(directory, 'arm64-output')).readUInt16LE(18), 183);
 
             const unsupported = spawnSync(compilerPath,
                 ['--target', 'mips-linux', source, '-o', path.join(directory, 'mips-output')],

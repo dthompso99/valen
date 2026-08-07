@@ -1,0 +1,76 @@
+import fs from 'node:fs';
+import {AArch64Backend} from '../bootstrap/aarch64.js';
+
+const runtimeNames = [
+    'valen_System_collectGarbage', 'valen_System_print', 'valen_System_write', 'valen_System_writeError',
+    'valen_System_exit', 'valen_System_openRead', 'valen_System_openWrite', 'valen_System_read',
+    'valen_System_writeFile', 'valen_System_close', 'valen_System_lastError', 'valen_System_arguments',
+    'valen_System_currentDirectory', 'valen_System_environmentVariable', 'valen_System_enableProcessArena',
+    'valen_System_writeBytes', 'valen_System_sync', 'valen_System_replaceFile', 'valen_System_removeFile',
+    'valen_System_makeExecutable', 'valen_System_link', 'valen_System_memoryCopy', 'valen_System_memoryCompare',
+    'valen_System_fileDescriptor', 'valen_System_makeFileNonblocking', 'valen_Network_listen',
+    'valen_Network_accept', 'valen_Network_receive', 'valen_Network_send', 'valen_Network_sendSome',
+    'valen_Network_closeListener', 'valen_Network_closeConnection', 'valen_Network_lastError',
+    'valen_Network_listenerDescriptor', 'valen_Network_connectionDescriptor',
+    'valen_Network_makeListenerNonblocking', 'valen_Network_makeConnectionNonblocking',
+    'valen_EventLoop_available', 'valen_EventLoop_wait', 'valen_EventLoop_monotonicMilliseconds',
+    'valen_System_enableShutdownSignals', 'valen_System_shutdownRequested'
+];
+const operationNames = ['threadAvailable', 'threadStart', 'threadJoin', 'mutexLock', 'mutexUnlock', 'conditionWait',
+    'conditionNotifyOne', 'conditionNotifyAll', 'atomicLoad', 'atomicStore', 'atomicExchange',
+    'atomicCompareExchange', 'atomicAdd'];
+
+const runtimeTypes = [
+    {name: 'Operations.Mutex', fields: [{symbol: 'runtime::Operations.Mutex.state', type: 'i32'}], methods: [], contracts: []},
+    {name: 'Operations.Condition', fields: [{symbol: 'runtime::Operations.Condition.sequence', type: 'i32'}], methods: [], contracts: []},
+    {name: 'Operations.Atomic', fields: [{symbol: 'runtime::Operations.Atomic.value', type: 'i64'}], methods: [], contracts: []},
+    {name: 'Operations.ThreadOperation', fields: [
+        {symbol: 'runtime::Operations.ThreadOperation.work', type: 'i64'},
+        {symbol: 'runtime::Operations.ThreadOperation.terminal', type: 'i64'},
+        {symbol: 'runtime::Operations.ThreadOperation.handle', type: 'i64'}
+    ], methods: [], contracts: []}
+];
+const worker = {name: 'Operations.ThreadOperation.runWorker', displayName: 'Operations.ThreadOperation.runWorker',
+    ownerType: 'Operations.ThreadOperation', parameters: [], blocks: [{label: 'entry', instructions: [{op: 'return', value: null}]}], returnType: 'void'};
+const program = {types: runtimeTypes, functions: [worker], externals: runtimeNames.map(runtimeSymbol => ({name: runtimeSymbol,
+    runtimeSymbol, foreignLibrary: null})), compiledModules: [], entry: null};
+const backend = new AArch64Backend();
+backend.generate(program, {includeRuntime: false});
+const lines = [
+    ...backend.arrayRuntime(), ...backend.stringRuntime(),
+    ...backend.builderRuntime(), ...backend.gcArrayFunctions(backend.arrayTypes),
+    ...backend.structuralCoreRuntime(), ...backend.systemRuntime(),
+    '.Larray_bounds_error:', '    mov x0, #70', '    mov x8, #93', '    svc #0',
+    '.Ldivision_by_zero_error:', '    mov x0, #73', '    mov x8, #93', '    svc #0',
+    '.Loptional_unwrap_error:', '    mov x0, #71', '    mov x8, #93', '    svc #0',
+    '.Lcontract_dispatch_error:', '    mov x0, #75', '    mov x8, #93', '    svc #0',
+    '.Lfloat_conversion_error:', '    mov x0, #76', '    mov x8, #93', '    svc #0', '',
+    ...backend.gcData(), ...backend.testData()
+];
+const assembly = `${lines.join('\n')}\n`;
+const chunks = value => { const result = []; for (let offset = 0; offset < value.length; offset += 12000) result.push(value.slice(offset, offset + 12000)); return result; };
+const operationFragments = new Map();
+for (const name of operationNames) {
+    const operationProgram = {...program, externals: [{name: `valen_Operations_${name}`,
+        runtimeSymbol: `valen_Operations_${name}`, foreignLibrary: null}]};
+    const operationBackend = new AArch64Backend();
+    operationBackend.generate(operationProgram, {includeRuntime: false});
+    operationFragments.set(name, `${operationBackend.operationsRuntime().join('\n')}\n`.replaceAll(
+        '__valen_Operations_2e_ThreadOperation_2e_runWorker', 'Operations_ThreadOperation_runWorker'));
+}
+const threadedProgram = {...program, externals: [{name: 'valen_Operations_threadStart',
+    runtimeSymbol: 'valen_Operations_threadStart', foreignLibrary: null}]};
+const threadedBackend = new AArch64Backend();
+threadedBackend.generate(threadedProgram, {includeRuntime: false});
+const allocationFragments = new Map([
+    ['Allocation', `${backend.allocationRuntime().join('\n')}\n`],
+    ['ThreadedAllocation', `${threadedBackend.allocationRuntime().join('\n')}\n`]
+]);
+const source = `// Generated by scripts/port-aarch64-runtime.mjs from bootstrap/aarch64.js.\n` +
+`library AArch64Runtime {{\n    Template {{\n        append(output:StringBuilder) -> void {\n${chunks(assembly).map(chunk => `            output.append(${JSON.stringify(chunk)})`).join('\n')}\n        }\n` +
+['Allocation', 'ThreadedAllocation'].map(name => `        append${name}(output:StringBuilder) -> void {\n${
+    chunks(allocationFragments.get(name) ?? '').map(chunk => `            output.append(${JSON.stringify(chunk)})`).join('\n')}\n        }`).join('\n') + '\n' +
+operationNames.map(name => `        append${name[0].toUpperCase()}${name.slice(1)}(output:StringBuilder) -> void {\n${
+    chunks(operationFragments.get(name) ?? '').map(chunk => `            output.append(${JSON.stringify(chunk)})`).join('\n')}\n        }`).join('\n') +
+`\n    }}\n}}\n`;
+fs.writeFileSync(new URL('../src/libAArch64Runtime.ar', import.meta.url), source);

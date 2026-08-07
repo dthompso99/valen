@@ -1,0 +1,34 @@
+import Ir from '../../../src/libIr.ar'
+import AArch64 from '../../../src/libAArch64.ar'
+import AArch64Object from '../../../src/libAArch64Object.ar'
+import Linking from '../../../src/libLinker.ar'
+
+library System {{ native enableProcessArena() -> void }}
+
+test AArch64SelfHostedBackendTests {{
+    lowersPrimitiveControlFlow() -> void {
+        System.enableProcessArena()
+        local program = new Ir.Program()
+        program.types.append(new Ir.Type("Entry", "Entry"))
+        local function = new Ir.Function("Entry.__", "Entry.__", "Entry", "i32")
+        local entry = new Ir.Block("entry")
+        local one = new Ir.Value("constant", "1", "i32")
+        local two = new Ir.Value("constant", "2", "i32")
+        local result = new Ir.Value("temporary", "sum", "i32")
+        local add = new Ir.Instruction("binary"); add.first = one; add.second = two; add.result = result; add.operator = "+"
+        local returned = new Ir.Instruction("return"); returned.first = result
+        entry.instructions.append(add); entry.instructions.append(returned); function.blocks.append(entry); program.functions.append(function); program.entry = function.name
+        local backend = new AArch64.Backend(program)
+        local assembly = backend.generate()
+        expect(backend.error.length == 0)
+        expect(assembly.length > 0)
+        local assembler = new AArch64Object.Assembler()
+        local object = assembler.assembleObject(assembly)
+        expect(object != null)
+        if object != null {
+            local linker = new Linking.Linker()
+            local executable = linker.link(object!)
+            expect(executable != null)
+        }
+    }
+}}

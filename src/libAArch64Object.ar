@@ -217,7 +217,7 @@ library AArch64Object {{
             }
             if (mnemonic == "b" || mnemonic == "bl") && values.length == 1 {
                 local target = self.label(values[0])
-                if target == null { if mnemonic == "bl" { self.object.addRelocation(".text", offset, values[0], 283, 0); return 2483027968 }; return self.fail(line) }
+                if target == null { if mnemonic == "bl" { self.object.addRelocation(".text", offset, values[0], 283, 0); return 2483027968 }; self.object.addRelocation(".text", offset, values[0], 282, 0); return 335544320 }
                 local displacement = self.displacement(values[0], offset, 26); if self.error.length > 0 { return self.fail(line) }
                 local base:i64 = 335544320; if mnemonic == "bl" { base = 2483027968 }; return base | displacement
             }

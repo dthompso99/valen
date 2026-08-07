@@ -9,6 +9,8 @@ import Ir from './libIr.ar'
 import IrValidation from './libIrValidation.ar'
 import X86_64 from './libX86_64.ar'
 import X86Object from './libX86Object.ar'
+import AArch64 from './libAArch64.ar'
+import AArch64Object from './libAArch64Object.ar'
 import CompilerCache from './libCompilerCache.ar'
 import Linking from './libLinker.ar'
 import Elf from './libElf.ar'
@@ -117,10 +119,6 @@ entry {{
             return 64
         }
         targetName = target!.name
-        if targetName != "x86_64-linux" {
-            System.writeError("valen: target '"); System.writeError(targetName); System.writeError("' is recognized, but its backend is not implemented\n")
-            return 69
-        }
         if emitLibrary && libraryVersion == null { System.writeError("valen: --emit-library requires --library-version <major.minor.patch>\n"); return 64 }
 
         local cwd = System.currentDirectory()
@@ -154,8 +152,8 @@ entry {{
         if outputPath != null && cache.enabled() {
             local cached = cache.load(graph)
             if cached != null {
-                if emitObjectOnly { return self.emitObject(cached!.assembly, outputPath!) }
-                local cachedLinkResult = self.link(cached!.assembly, outputPath!, cached!.libraries, linkerMode, null, graph)
+                if emitObjectOnly { return self.emitObject(cached!.assembly, outputPath!, targetName) }
+                local cachedLinkResult = self.link(cached!.assembly, outputPath!, cached!.libraries, linkerMode, null, graph, 1, null, null, targetName)
                 if cachedLinkResult != 0 {
                     System.writeError("valen: linker exited with status ")
                     System.writeError(cachedLinkResult.toString())
@@ -193,17 +191,18 @@ entry {{
             return 0
         }
         if emitLibrary { return self.emitCompiledLibrary(graph, ir, outputPath!, libraryVersion!, optimizationLevel, targetName) }
-        local backend = new X86_64.Backend(ir, optimizationLevel)
-        local runtimeErrors = backend.validateRuntime()
+        local runtimeErrors = new Array<string>(0)
+        local assembly = ""
+        if targetName == "aarch64-linux" { local backend = new AArch64.Backend(ir, optimizationLevel, graph.entry!.path); runtimeErrors = backend.validateRuntime(); assembly = backend.generate(); if backend.error.length > 0 { runtimeErrors.append(backend.error) } }
+        else { local backend = new X86_64.Backend(ir, optimizationLevel); runtimeErrors = backend.validateRuntime(); assembly = backend.generate() }
         if runtimeErrors.length > 0 {
             for error in runtimeErrors { System.writeError("valen: target: ${error}\n") }
             return 69
         }
-        local assembly = backend.generate()
         if outputPath != null {
             if emissionModule == null { cache.store(graph, assembly, ir.foreignLibraries) }
-            if emitObjectOnly { return self.emitObject(assembly, outputPath!) }
-            local linkResult = self.link(assembly, outputPath!, ir.foreignLibraries, linkerMode, ir, graph, optimizationLevel, cache, analysis)
+            if emitObjectOnly { return self.emitObject(assembly, outputPath!, targetName) }
+            local linkResult = self.link(assembly, outputPath!, ir.foreignLibraries, linkerMode, ir, graph, optimizationLevel, cache, analysis, targetName)
             if linkResult != 0 {
                 System.writeError("valen: linker exited with status ")
                 System.writeError(linkResult.toString())
@@ -216,11 +215,13 @@ entry {{
         return 0
     }
 
-    emitObject(assembly:string, objectPath:string) -> i32 {
-        local assembler = new X86Object.Assembler()
-        local object = assembler.assemble(assembly)
+    emitObject(assembly:string, objectPath:string, targetName:string) -> i32 {
+        local object:Array<u8>? = null
+        local error = ""
+        if targetName == "aarch64-linux" { local assembler = new AArch64Object.Assembler(); object = assembler.assemble(assembly); error = assembler.error }
+        else { local assembler = new X86Object.Assembler(); object = assembler.assemble(assembly); error = assembler.error }
         if object == null {
-            System.writeError("valen: native object encoder does not support generated assembly: "); System.writeError(assembler.error); System.writeError("\n")
+            System.writeError("valen: native object encoder does not support generated assembly: "); System.writeError(error); System.writeError("\n")
             return 69
         }
         if !self.writeObject(objectPath, object!) { return 74 }
@@ -236,9 +237,9 @@ entry {{
             declarationIndex = declarationIndex + 1
         }
         if libraryName == null { System.writeError("valen: compiled library source must declare exactly one library\n"); return 65 }
-        local backend = new X86_64.Backend(ir, optimizationLevel, graph.entry!.path, false, true)
-        local assembler = new X86Object.Assembler(); local structured = assembler.assembleObject(backend.generate())
-        if structured == null { System.writeError("valen: native library object encoder failed: "); System.writeError(assembler.error); System.writeError("\n"); return 69 }
+        local libraryAssembly = self.generateAssembly(ir, targetName, optimizationLevel, graph.entry!.path, false, true)
+        local structured = self.assembleObject(libraryAssembly, targetName)
+        if structured == null { System.writeError("valen: native library object encoder failed\n"); return 69 }
         local object = structured!.build()
         if !self.writeObject(objectPath, object) { return 74 }
         local interfaceBuilder = new ModuleInterfaces.Builder(); local artifact = interfaceBuilder.create(graph.entry!)
@@ -319,19 +320,20 @@ entry {{
         return 0
     }
 
-    link(assembly:string, outputPath:string, libraries:Array<string>, linkerMode:string, ir:Ir.Program?=null, graph:ModuleLoading.ModuleGraph?=null, optimizationLevel:i64=1, cache:CompilerCache.Cache?=null, analysis:Semantics.Analysis?=null) -> i64 {
-        local assembler = new X86Object.Assembler()
-        local structured = assembler.assembleObject(assembly)
+    link(assembly:string, outputPath:string, libraries:Array<string>, linkerMode:string, ir:Ir.Program?=null, graph:ModuleLoading.ModuleGraph?=null, optimizationLevel:i64=1, cache:CompilerCache.Cache?=null, analysis:Semantics.Analysis?=null, targetName:string="x86_64-linux") -> i64 {
+        local structured = self.assembleObject(assembly, targetName)
         if structured == null {
-            System.writeError("valen: native object encoder does not support generated assembly: "); System.writeError(assembler.error); System.writeError("\n")
+            System.writeError("valen: native object encoder does not support generated assembly\n")
             return 69
         }
         local object = structured!.build()
         local inputPath = outputPath + ".o"
         if !self.writeObject(inputPath, object) { return 74 }
         local linkInputs = new Array<string>(0)
+        local hasForeignExternal:bool = ir == null || targetName != "aarch64-linux"
+        if ir != null { local externalIndex:i64 = 0; while externalIndex < ir!.externals.length { if ir!.externals[externalIndex].foreignLibrary != null { hasForeignExternal = true }; externalIndex = externalIndex + 1 } }
         local libraryIndex:i64 = 0
-        while libraryIndex < libraries.length { linkInputs.append(libraries[libraryIndex]); libraryIndex = libraryIndex + 1 }
+        while libraryIndex < libraries.length { if hasForeignExternal { linkInputs.append(libraries[libraryIndex]) }; libraryIndex = libraryIndex + 1 }
         if graph != null {
             local compiledIndex:i64 = 0
             while compiledIndex < graph!.modules.length {
@@ -366,13 +368,11 @@ entry {{
                             for error in moduleErrors { System.writeError("valen: invalid module IR: ${error}\n") }
                             return 70
                         }
-                        local moduleBackend = new X86_64.Backend(moduleIr, optimizationLevel, module.path, includeRuntime)
-                        moduleAssembly = moduleBackend.generate()
+                        moduleAssembly = self.generateAssembly(moduleIr, targetName, optimizationLevel, module.path, includeRuntime)
                         if cache != null { cache!.storeModuleAssembly(module, false, moduleAssembly!) }
                     }
-                    local moduleAssembler = new X86Object.Assembler()
-                    local moduleObject = moduleAssembler.assembleObject(moduleAssembly!)
-                    if moduleObject == null { System.writeError("valen: native module object encoder failed: "); System.writeError(moduleAssembler.error); System.writeError("\n"); return 69 }
+                    local moduleObject = self.assembleObject(moduleAssembly!, targetName)
+                    if moduleObject == null { System.writeError("valen: native module object encoder failed\n"); return 69 }
                     objects.append(moduleObject!)
                     module.releaseImplementation()
                     moduleIndex = moduleIndex + 1
@@ -385,6 +385,16 @@ entry {{
             return 0
         }
         return System.link(inputPath, outputPath, linkInputs)
+    }
+
+    generateAssembly(ir:Ir.Program, targetName:string, optimizationLevel:i64, emissionModule:string?, includeRuntime:bool, includeModuleMetadata:bool=false) -> string {
+        if targetName == "aarch64-linux" { local backend = new AArch64.Backend(ir, optimizationLevel, emissionModule, includeRuntime, includeModuleMetadata); return backend.generate() }
+        local backend = new X86_64.Backend(ir, optimizationLevel, emissionModule, includeRuntime, includeModuleMetadata); return backend.generate()
+    }
+
+    assembleObject(assembly:string, targetName:string) -> Elf.Object? {
+        if targetName == "aarch64-linux" { local assembler = new AArch64Object.Assembler(); local object = assembler.assembleObject(assembly); if object == null { System.writeError("valen: AArch64 object encoder: "); System.writeError(assembler.error); System.writeError("\n") }; return object }
+        local assembler = new X86Object.Assembler(); local object = assembler.assembleObject(assembly); if object == null { System.writeError("valen: x86-64 object encoder: "); System.writeError(assembler.error); System.writeError("\n") }; return object
     }
 
     writeObject(path:string, object:Array<u8>) -> bool {
