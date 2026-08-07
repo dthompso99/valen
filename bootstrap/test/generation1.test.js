@@ -372,6 +372,58 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             });
         }
 
+        await t.test('optional LLVM x86-64 backend matches representative native behavior', async t => {
+            if (!fs.existsSync('/usr/bin/clang')) {
+                t.skip('LLVM backend conformance requires /usr/bin/clang');
+                return;
+            }
+            const llvmPrograms = [
+                'examples/simple/simple.ar',
+                'bootstrap/test/fixtures/for-loops.ar',
+                'bootstrap/test/fixtures/floating-point.ar',
+                'bootstrap/test/fixtures/array-slices.ar',
+                'bootstrap/test/fixtures/unicode-strings.ar',
+                'bootstrap/test/fixtures/inheritance.ar',
+                'bootstrap/test/fixtures/contract-references.ar',
+                'bootstrap/test/fixtures/optional-primitives.ar',
+                'bootstrap/test/fixtures/collection-ownership.ar',
+                'bootstrap/test/fixtures/garbage-collection.ar',
+                'bootstrap/test/fixtures/threading.ar',
+                'bootstrap/test/fixtures/native-tests.ar',
+                'bootstrap/test/fixtures/foreign-libc.ar'
+            ];
+            for (const [index, source] of llvmPrograms.entries()) {
+                await t.test(source, () => {
+                    const executable = path.join(directory, `llvm-${index}`);
+                    const compile = spawnSync(compilerPath,
+                        ['--backend', 'llvm', '--target', 'x86_64-linux', path.join(projectRoot, source), '-O1', '-o', executable],
+                        {encoding: 'utf8', env: environment, cwd: projectRoot, maxBuffer: 64 * 1024 * 1024});
+                    assert.equal(compile.status, 0, compile.stderr || compile.stdout);
+                    const llvm = fs.readFileSync(`${executable}.ll`, 'utf8');
+                    assert.match(llvm, /^target datalayout = /);
+                    assert.match(llvm, /^target triple = "x86_64-unknown-linux-gnu"$/m);
+                    assert.match(llvm, /^define /m);
+                    const run = spawnSync(executable, [], {encoding: 'utf8', env: environment, cwd: projectRoot, timeout: 15000});
+                    assert.equal(run.status, 0, `${source}\n${run.stderr || run.stdout || run.signal}`);
+                });
+            }
+
+            for (const level of ['-O0', '-O1']) {
+                const executable = path.join(directory, `llvm-${level.slice(1)}`);
+                const compile = spawnSync(compilerPath,
+                    ['--backend', 'llvm', '--target', 'x86_64-linux', level, path.join(projectRoot, 'bootstrap/test/fixtures/instruction-selection.ar'), '-o', executable],
+                    {encoding: 'utf8', env: environment, cwd: projectRoot});
+                assert.equal(compile.status, 0, compile.stderr || compile.stdout);
+                assert.equal(spawnSync(executable, [], {encoding: 'utf8', env: environment, cwd: projectRoot}).status, 0);
+            }
+
+            const unsupportedTarget = spawnSync(compilerPath,
+                ['--backend', 'llvm', '--target', 'aarch64-linux', path.join(projectRoot, 'examples/simple/simple.ar'), '-o', path.join(directory, 'llvm-aarch64')],
+                {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(unsupportedTarget.status, 64);
+            assert.match(unsupportedTarget.stderr, /LLVM backend currently supports only x86_64-linux/);
+        });
+
         const generation2Path = path.join(directory, 'valen-generation2');
         const build = spawnSync(compilerPath, [path.join(projectRoot, 'src/valen.ar'), '-o', generation2Path], {
             encoding: 'utf8', env: environment, cwd: projectRoot, maxBuffer: 64 * 1024 * 1024

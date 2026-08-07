@@ -11,6 +11,7 @@ import X86_64 from './libX86_64.ar'
 import X86Object from './libX86Object.ar'
 import AArch64 from './libAArch64.ar'
 import AArch64Object from './libAArch64Object.ar'
+import LLVM from './libLLVM.ar'
 import CompilerCache from './libCompilerCache.ar'
 import Linking from './libLinker.ar'
 import Elf from './libElf.ar'
@@ -27,6 +28,7 @@ entry {{
         local optimizationLevel:i64 = 1
         local configuredSourceRoot:string? = null
         local linkerMode:string = "auto"
+        local backendName:string = "native"
         local targetName:string = "x86_64-linux"
         local environmentTarget = System.environmentVariable("VALEN_TARGET")
         if environmentTarget != null { targetName = environmentTarget! }
@@ -38,6 +40,11 @@ entry {{
                 if argumentIndex + 1 >= arguments.length { System.writeError("valen: --linker requires auto, native, or system\n"); return 64 }
                 linkerMode = arguments[argumentIndex + 1]
                 if linkerMode != "auto" && linkerMode != "native" && linkerMode != "system" { System.writeError("valen: unsupported linker '"); System.writeError(linkerMode); System.writeError("'\n"); return 64 }
+                argumentIndex = argumentIndex + 1
+            } else if argument == "--backend" {
+                if argumentIndex + 1 >= arguments.length { System.writeError("valen: --backend requires native or llvm\n"); return 64 }
+                backendName = arguments[argumentIndex + 1]
+                if backendName != "native" && backendName != "llvm" { System.writeError("valen: unsupported backend '"); System.writeError(backendName); System.writeError("'\n"); return 64 }
                 argumentIndex = argumentIndex + 1
             } else if argument == "--source-root" {
                 if argumentIndex + 1 >= arguments.length { System.writeError("valen: --source-root requires a directory\n"); return 64 }
@@ -119,6 +126,8 @@ entry {{
             return 64
         }
         targetName = target!.name
+        if backendName == "llvm" && targetName != "x86_64-linux" { System.writeError("valen: LLVM backend currently supports only x86_64-linux\n"); return 64 }
+        if backendName == "llvm" && (emitObjectOnly || emitLibrary) { System.writeError("valen: LLVM backend does not yet support --emit-object or --emit-library\n"); return 64 }
         if emitLibrary && libraryVersion == null { System.writeError("valen: --emit-library requires --library-version <major.minor.patch>\n"); return 64 }
 
         local cwd = System.currentDirectory()
@@ -148,8 +157,8 @@ entry {{
         }
         if !self.validateCompiledArtifacts(graph, targetName) { return 65 }
         local cache = new CompilerCache.Cache(optimizationLevel, targetName)
-        if cache.enabled() { cache.prepareInterfaces(graph) }
-        if outputPath != null && cache.enabled() {
+        if backendName == "native" && cache.enabled() { cache.prepareInterfaces(graph) }
+        if backendName == "native" && outputPath != null && cache.enabled() {
             local cached = cache.load(graph)
             if cached != null {
                 if emitObjectOnly { return self.emitObject(cached!.assembly, outputPath!, targetName) }
@@ -171,7 +180,7 @@ entry {{
         }
         if checkOnly { return 0 }
         local emissionModule:string? = null
-        if outputPath != null && !emitObjectOnly && graph.modules.length > 1 && graph.entry != null { emissionModule = graph.entry!.path }
+        if backendName == "native" && outputPath != null && !emitObjectOnly && graph.modules.length > 1 && graph.entry != null { emissionModule = graph.entry!.path }
         local generator = new Ir.Generator(analysis, emissionModule)
         local ir = generator.generate()
         if emissionModule != null && (linkerMode == "system" || ir.foreignLibraries.length > 0 || ir.compiledModules.length > 0) {
@@ -191,6 +200,33 @@ entry {{
             return 0
         }
         if emitLibrary { return self.emitCompiledLibrary(graph, ir, outputPath!, libraryVersion!, optimizationLevel, targetName) }
+        if backendName == "llvm" {
+            local llvmEmissionModule = emissionModule
+            if llvmEmissionModule == null && graph.entry != null { llvmEmissionModule = graph.entry!.path }
+            local backend = new LLVM.Backend(ir, optimizationLevel, llvmEmissionModule)
+            local llvm = backend.generate()
+            if backend.error.length > 0 { System.writeError("valen: LLVM backend: "); System.writeError(backend.error); System.writeError("\n"); return 69 }
+            if outputPath == null { System.write(llvm); return 0 }
+            local llvmPath = outputPath! + ".ll"
+            if !self.writeAssembly(llvmPath, llvm) { return 74 }
+            local llvmObjectPath = outputPath! + ".llvm.o"
+            local llvmResult = System.compileLlvm(llvmPath, llvmObjectPath, optimizationLevel, true)
+            if llvmResult != 0 {
+                System.writeError("valen: LLVM toolchain exited with status "); System.writeError(llvmResult.toString()); System.writeError("; expected /usr/bin/clang\n")
+                return 69
+            }
+            local runtimeBackend = new X86_64.Backend(ir, optimizationLevel, "<llvm-runtime>", true)
+            local runtimeAssembly = runtimeBackend.generate()
+            local runtimeObjectPath = outputPath! + ".runtime.o"
+            if self.emitObject(runtimeAssembly, runtimeObjectPath, targetName) != 0 { return 69 }
+            local llvmInputs = new Array<string>(0)
+            llvmInputs.append("@" + llvmObjectPath)
+            local llvmLibraryIndex:i64 = 0
+            while llvmLibraryIndex < ir.foreignLibraries.length { llvmInputs.append(ir.foreignLibraries[llvmLibraryIndex]); llvmLibraryIndex = llvmLibraryIndex + 1 }
+            local linkResult = System.link(runtimeObjectPath, outputPath!, llvmInputs)
+            if linkResult != 0 { System.writeError("valen: LLVM linker exited with status "); System.writeError(linkResult.toString()); System.writeError("\n"); return 69 }
+            return 0
+        }
         local runtimeErrors = new Array<string>(0)
         local assembly = ""
         if targetName == "aarch64-linux" { local backend = new AArch64.Backend(ir, optimizationLevel, graph.entry!.path); runtimeErrors = backend.validateRuntime(); assembly = backend.generate(); if backend.error.length > 0 { runtimeErrors.append(backend.error) } }
@@ -445,6 +481,7 @@ entry {{
         System.write("  optimization: -O0 (no optional optimization), -O1 (default)\n")
         System.write("  source root: --source-root <directory>\n")
         System.write("  target: --target <x86_64-linux|aarch64-linux>\n")
+        System.write("  backend: --backend native (default) or llvm (x86_64-linux)\n")
         System.write("  linker: --linker auto (default), native, or system\n")
         System.write("  valen <source-file>\n")
         System.write("  valen <source-file> -o <executable>\n")

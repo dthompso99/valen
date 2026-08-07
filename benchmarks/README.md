@@ -18,7 +18,7 @@ runtime measurements. If `./valen` is absent, Valen is reported as skipped with 
 Select languages, change the measured repetition count, or preserve a machine-readable result:
 
 ```sh
-node benchmarks/run.mjs --languages valen,c,cpp,rust,go
+node benchmarks/run.mjs --languages valen,valen-llvm,c,cpp,rust,go
 node benchmarks/run.mjs --repetitions 10
 node benchmarks/run.mjs --output benchmarks/results/local.json
 ```
@@ -26,6 +26,14 @@ node benchmarks/run.mjs --output benchmarks/results/local.json
 The runner discovers toolchains and reports unavailable languages as skipped. It uses one unmeasured
 warmup followed by the requested measured repetitions. Every implementation must produce the same
 deterministic output before its timing is accepted.
+
+`valen` measures the built-in native x86-64 backend. `valen-llvm` measures the optional LLVM
+x86-64 backend from the same prebuilt `./valen` compiler and requires `/usr/bin/clang`. Keeping both
+rows in one run records compile time, runtime, peak RSS, artifact size, and dynamic dependencies on
+the same host; neither path bootstraps the compiler during measurement.
+
+The first implementation baseline is recorded in
+[results/x86_64-llvm-baseline.md](results/x86_64-llvm-baseline.md).
 
 ## Current workload
 

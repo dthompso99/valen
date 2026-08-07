@@ -14,7 +14,7 @@ const option = name => {
     const index = process.argv.indexOf(name);
     return index < 0 ? null : process.argv[index + 1];
 };
-const requested = new Set((option('--languages') ?? 'valen,c,cpp,rust,go,java,node').split(',').filter(Boolean));
+const requested = new Set((option('--languages') ?? 'valen,valen-llvm,c,cpp,rust,go,java,node').split(',').filter(Boolean));
 const repetitions = Number(option('--repetitions') ?? 5);
 const outputPath = option('--output');
 const keep = process.argv.includes('--keep');
@@ -85,6 +85,12 @@ const languages = {
         compile: source => ({command: valenCompiler, args: [source, '-O1', '-o', path.join(temporary, 'integer-loop-valen')]}),
         runtime: () => ({name: 'valen', command: path.join(temporary, 'integer-loop-valen'), args: []}), artifact: () => path.join(temporary, 'integer-loop-valen')
     },
+    'valen-llvm': {
+        tools: [valenCompiler, '/usr/bin/clang'], missingHint: 'run ./scripts/bootstrap-valen.sh and install clang first',
+        version: () => `Valen LLVM backend (sha256:${fileFingerprint(valenCompiler)}; ${version('/usr/bin/clang')})`,
+        compile: source => ({command: valenCompiler, args: ['--backend', 'llvm', '--target', 'x86_64-linux', source, '-O1', '-o', path.join(temporary, 'integer-loop-valen-llvm')]}),
+        runtime: () => ({name: 'valen-llvm', command: path.join(temporary, 'integer-loop-valen-llvm'), args: []}), artifact: () => path.join(temporary, 'integer-loop-valen-llvm')
+    },
     c: {
         tools: ['cc'], version: () => version('cc'), compile: source => ({command: 'cc', args: ['-std=c11', '-O2', source, '-o', path.join(temporary, 'integer-loop-c')]}),
         runtime: () => ({name: 'c', command: path.join(temporary, 'integer-loop-c'), args: []}), artifact: () => path.join(temporary, 'integer-loop-c')
@@ -110,7 +116,7 @@ const languages = {
         runtime: source => ({name: 'node', command: 'node', args: [source]}), artifact: source => source
     }
 };
-const extensions = {valen: 'valen.ar', c: 'c.c', cpp: 'cpp.cpp', rust: 'rust.rs', go: 'go.go', java: 'IntegerLoop.java', node: 'node.js'};
+const extensions = {valen: 'valen.ar', 'valen-llvm': 'valen.ar', c: 'c.c', cpp: 'cpp.cpp', rust: 'rust.rs', go: 'go.go', java: 'IntegerLoop.java', node: 'node.js'};
 const report = {
     schemaVersion: 1,
     metadata: {
@@ -139,7 +145,7 @@ try {
             const runtime = language.runtime(source);
             const execution = await repeated(runtime, '124999999686\n');
             const artifact = language.artifact(source);
-            const dynamic = ['valen', 'c', 'cpp', 'rust', 'go'].includes(name)
+            const dynamic = ['valen', 'valen-llvm', 'c', 'cpp', 'rust', 'go'].includes(name)
                 ? spawnSync('readelf', ['-d', artifact], {encoding: 'utf8'}).stdout.match(/NEEDED[^\[]*\[([^\]]+)\]/g)?.map(item => item.slice(item.indexOf('[') + 1, -1)) ?? []
                 : [];
             report.results.push({language: name, version: language.version(),

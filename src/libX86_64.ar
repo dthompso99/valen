@@ -260,9 +260,9 @@ library X86_64 {{
             }
             self.generateMain()
             self.structuralRuntime()
-            if self.usesPrint { self.printRuntime() }
-            if self.usesWrite { self.writeRuntime("valen_System_write", 1) }
-            if self.usesWriteError { self.writeRuntime("valen_System_writeError", 2) }
+            if self.usesPrint || self.hasRuntime("valen_System_print") { self.printRuntime() }
+            if self.usesWrite || self.hasRuntime("valen_System_write") { self.writeRuntime("valen_System_write", 1) }
+            if self.usesWriteError || self.hasRuntime("valen_System_writeError") { self.writeRuntime("valen_System_writeError", 2) }
             self.processRuntime()
             self.linkRuntime()
             self.filesystemRuntime()
@@ -334,7 +334,7 @@ library X86_64 {{
             if name == "valen_System_close" || name == "valen_System_replaceFile" || name == "valen_System_removeFile" || name == "valen_System_makeExecutable" { return true }
             if name == "valen_System_lastError" || name == "valen_System_currentDirectory" || name == "valen_System_environmentVariable" || name == "valen_System_collectGarbage" { return true }
             if name == "valen_System_enableProcessArena" || name == "valen_System_enableShutdownSignals" || name == "valen_System_shutdownRequested" { return true }
-            if name == "valen_System_link" || name == "valen_System_memoryCopy" || name == "valen_System_memoryCompare" { return true }
+            if name == "valen_System_link" || name == "valen_System_compileLlvm" || name == "valen_System_memoryCopy" || name == "valen_System_memoryCompare" { return true }
             if name == "valen_System_fileDescriptor" || name == "valen_System_makeFileNonblocking" { return true }
             if name == "valen_Operations_threadAvailable" || name == "valen_Operations_threadStart" || name == "valen_Operations_threadJoin" { return true }
             if name == "valen_Operations_mutexLock" || name == "valen_Operations_mutexUnlock" || name == "valen_Operations_conditionWait" { return true }
@@ -1480,6 +1480,7 @@ library X86_64 {{
             }
             self.writer.line("    mov rdi, QWORD PTR [rbp-8]")
             self.writer.line("    call " + self.functionSymbol(entry!.name))
+            if entry!.returnType == "void" { self.writer.line("    xor eax, eax") }
             self.writer.line("    sub rsp, 16")
             self.writer.line("    mov QWORD PTR [rsp], rax")
             self.writer.line("    lea rdi, [rbp-32]"); self.writer.line("    call valen_gc_root_pop")
@@ -1634,7 +1635,7 @@ library X86_64 {{
             local typeIndex:i64 = 0
             while typeIndex < self.program.types.length {
                 local typeNode = self.program.types[typeIndex]
-                self.writer.line(self.gcTraceLabel(typeNode.name) + ":"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi")
+                if self.emissionModule != null && self.emissionModule! == "<llvm-runtime>" { self.writer.line(".globl " + self.gcTraceLabel(typeNode.name)) }; self.writer.line(self.gcTraceLabel(typeNode.name) + ":"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi")
                 local fieldIndex:i64 = 0
                 while fieldIndex < typeNode.fields.length {
                     local field = typeNode.fields[fieldIndex]
@@ -1644,7 +1645,7 @@ library X86_64 {{
                     }
                     fieldIndex = fieldIndex + 1
                 }
-                self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line(self.gcWeakLabel(typeNode.name) + ":"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi")
+                self.writer.line("    pop rbx"); self.writer.line("    ret"); if self.emissionModule != null && self.emissionModule! == "<llvm-runtime>" { self.writer.line(".globl " + self.gcWeakLabel(typeNode.name)) }; self.writer.line(self.gcWeakLabel(typeNode.name) + ":"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi")
                 fieldIndex = 0
                 while fieldIndex < typeNode.fields.length {
                     local field = typeNode.fields[fieldIndex]
@@ -1670,7 +1671,7 @@ library X86_64 {{
                 local trace = self.gcArrayTraceLabel(arrayType)
                 local traceLoop = trace + "_loop"
                 local traceDone = trace + "_done"
-                self.writer.line(trace + ":"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    xor ebx, ebx"); self.writer.line("    mov r12, rdi")
+                if self.emissionModule != null && self.emissionModule! == "<llvm-runtime>" { self.writer.line(".globl " + trace) }; self.writer.line(trace + ":"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    xor ebx, ebx"); self.writer.line("    mov r12, rdi")
                 if ownership != "weak" && self.isManagedReferenceType(element) {
                     self.writer.line(traceLoop + ":"); self.writer.line("    cmp rbx, QWORD PTR [r12]"); self.writer.line("    jae " + traceDone); self.writer.line("    imul rax, rbx, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]"); self.writer.line("    mov rdi, QWORD PTR [rax]"); self.writer.line("    call valen_gc_mark"); self.writer.line("    inc rbx"); self.writer.line("    jmp " + traceLoop)
                 }
@@ -1679,7 +1680,7 @@ library X86_64 {{
                 local weakLoop = weakLabel + "_loop"
                 local weakNext = weakLabel + "_next"
                 local weakDone = weakLabel + "_done"
-                self.writer.line(weakLabel + ":"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    xor ebx, ebx"); self.writer.line("    mov r12, rdi")
+                if self.emissionModule != null && self.emissionModule! == "<llvm-runtime>" { self.writer.line(".globl " + weakLabel) }; self.writer.line(weakLabel + ":"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    xor ebx, ebx"); self.writer.line("    mov r12, rdi")
                 if ownership == "weak" && self.isManagedReferenceType(element) {
                     self.writer.line(weakLoop + ":"); self.writer.line("    cmp rbx, QWORD PTR [r12]"); self.writer.line("    jae " + weakDone); self.writer.line("    imul rax, rbx, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]"); self.writer.line("    mov rcx, QWORD PTR [rax]"); self.writer.line("    test rcx, rcx"); self.writer.line("    je " + weakNext); self.writer.line("    sub rcx, 48"); self.writer.line("    cmp QWORD PTR [rcx+32], 0"); self.writer.line("    jne " + weakNext); self.writer.line("    mov QWORD PTR [rax], 0"); self.writer.line(weakNext + ":"); self.writer.line("    inc rbx"); self.writer.line("    jmp " + weakLoop); self.writer.line(weakDone + ":")
                 }
@@ -2269,6 +2270,96 @@ library X86_64 {{
             self.writer.line(".Llink_no_pie:")
             self.writer.line("    .asciz \"-no-pie\"")
             self.writer.line(".Llink_output:")
+            self.writer.line("    .asciz \"-o\"")
+            self.writer.line("")
+
+            self.writer.line(".globl valen_System_compileLlvm")
+            self.writer.line("valen_System_compileLlvm:")
+            self.writer.line("    push rbp")
+            self.writer.line("    mov rbp, rsp")
+            self.writer.line("    push r12")
+            self.writer.line("    push r13")
+            self.writer.line("    push r14")
+            self.writer.line("    push r15")
+            self.writer.line("    mov r12, QWORD PTR [rdi]")
+            self.writer.line("    mov r13, QWORD PTR [rsi]")
+            self.writer.line("    mov r14, rdx")
+            self.writer.line("    mov r15, rcx")
+            self.writer.line("    mov eax, 57")
+            self.writer.line("    syscall")
+            self.writer.line("    test rax, rax")
+            self.writer.line("    js .Lllvm_fork_error")
+            self.writer.line("    jz .Lllvm_child")
+            self.writer.line("    mov rdi, rax")
+            self.writer.line("    lea rsi, [rbp-32]")
+            self.writer.line("    xor edx, edx")
+            self.writer.line("    xor r10d, r10d")
+            self.writer.line("    mov eax, 61")
+            self.writer.line("    syscall")
+            self.writer.line("    test rax, rax")
+            self.writer.line("    js .Lllvm_wait_error")
+            self.writer.line("    mov eax, DWORD PTR [rbp-32]")
+            self.writer.line("    mov edx, eax")
+            self.writer.line("    and edx, 127")
+            self.writer.line("    jnz .Lllvm_signaled")
+            self.writer.line("    shr eax, 8")
+            self.writer.line("    and eax, 255")
+            self.writer.line("    jmp .Lllvm_done")
+            self.writer.line(".Lllvm_signaled:")
+            self.writer.line("    lea eax, [rdx+128]")
+            self.writer.line("    jmp .Lllvm_done")
+            self.writer.line(".Lllvm_fork_error:")
+            self.writer.line(".Lllvm_wait_error:")
+            self.writer.line("    mov eax, 127")
+            self.writer.line("    jmp .Lllvm_done")
+            self.writer.line(".Lllvm_child:")
+            self.writer.line("    sub rsp, 64")
+            self.writer.line("    lea rax, [rip+.Lllvm_clang]")
+            self.writer.line("    mov QWORD PTR [rsp], rax")
+            self.writer.line("    mov QWORD PTR [rsp+8], r12")
+            self.writer.line("    lea rax, [rip+.Lllvm_o0]")
+            self.writer.line("    test r14, r14")
+            self.writer.line("    jz .Lllvm_store_optimization")
+            self.writer.line("    lea rax, [rip+.Lllvm_o1]")
+            self.writer.line(".Lllvm_store_optimization:")
+            self.writer.line("    mov QWORD PTR [rsp+16], rax")
+            self.writer.line("    lea rax, [rip+.Lllvm_no_pie]")
+            self.writer.line("    test r15, r15")
+            self.writer.line("    jz .Lllvm_store_mode")
+            self.writer.line("    lea rax, [rip+.Lllvm_compile_only]")
+            self.writer.line(".Lllvm_store_mode:")
+            self.writer.line("    mov QWORD PTR [rsp+24], rax")
+            self.writer.line("    lea rax, [rip+.Lllvm_output]")
+            self.writer.line("    mov QWORD PTR [rsp+32], rax")
+            self.writer.line("    mov QWORD PTR [rsp+40], r13")
+            self.writer.line("    mov QWORD PTR [rsp+48], 0")
+            self.writer.line("    lea rdi, [rip+.Lllvm_clang]")
+            self.writer.line("    mov rsi, rsp")
+            self.writer.line("    mov rdx, QWORD PTR [rip+valen_process_envp]")
+            self.writer.line("    mov eax, 59")
+            self.writer.line("    syscall")
+            self.writer.line("    mov edi, 127")
+            self.writer.line("    mov eax, 60")
+            self.writer.line("    syscall")
+            self.writer.line("    ud2")
+            self.writer.line(".Lllvm_done:")
+            self.writer.line("    pop r15")
+            self.writer.line("    pop r14")
+            self.writer.line("    pop r13")
+            self.writer.line("    pop r12")
+            self.writer.line("    leave")
+            self.writer.line("    ret")
+            self.writer.line(".Lllvm_clang:")
+            self.writer.line("    .asciz \"/usr/bin/clang\"")
+            self.writer.line(".Lllvm_o0:")
+            self.writer.line("    .asciz \"-O0\"")
+            self.writer.line(".Lllvm_o1:")
+            self.writer.line("    .asciz \"-O1\"")
+            self.writer.line(".Lllvm_no_pie:")
+            self.writer.line("    .asciz \"-no-pie\"")
+            self.writer.line(".Lllvm_compile_only:")
+            self.writer.line("    .asciz \"-c\"")
+            self.writer.line(".Lllvm_output:")
             self.writer.line("    .asciz \"-o\"")
             self.writer.line("")
         }
@@ -2988,19 +3079,19 @@ library X86_64 {{
             self.writer.line("")
         }
 
-        typeLabel(typeName:string) -> string { return ".Lvalen_type_" + self.mangle(typeName) }
+        typeLabel(typeName:string) -> string { return "valen_type_" + self.mangle(typeName) }
         objectEqualityLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_equal" }
         objectHashLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_hash" }
         objectCopyLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_copy" }
-        arrayEqualityLabel(typeName:string) -> string { return ".Lvalen_array_equal_" + self.mangle(typeName) }
-        arrayHashLabel(typeName:string) -> string { return ".Lvalen_array_hash_" + self.mangle(typeName) }
-        arrayCopyLabel(typeName:string) -> string { return ".Lvalen_array_copy_" + self.mangle(typeName) }
-        arraySliceLabel(typeName:string) -> string { return ".Lvalen_array_slice_" + self.mangle(typeName) }
-        arrayDestroyLabel(typeName:string) -> string { return ".Lvalen_array_destroy_" + self.mangle(typeName) }
+        arrayEqualityLabel(typeName:string) -> string { return "valen_array_equal_" + self.mangle(typeName) }
+        arrayHashLabel(typeName:string) -> string { return "valen_array_hash_" + self.mangle(typeName) }
+        arrayCopyLabel(typeName:string) -> string { return "valen_array_copy_" + self.mangle(typeName) }
+        arraySliceLabel(typeName:string) -> string { return "valen_array_slice_" + self.mangle(typeName) }
+        arrayDestroyLabel(typeName:string) -> string { return "valen_array_destroy_" + self.mangle(typeName) }
         gcTraceLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_gc_trace" }
         gcWeakLabel(typeName:string) -> string { return self.typeLabel(typeName) + "_gc_weak" }
-        gcArrayTraceLabel(typeName:string) -> string { return ".Lvalen_gc_array_trace_" + self.mangle(typeName) }
-        gcArrayWeakLabel(typeName:string) -> string { return ".Lvalen_gc_array_weak_" + self.mangle(typeName) }
+        gcArrayTraceLabel(typeName:string) -> string { return "valen_gc_array_trace_" + self.mangle(typeName) }
+        gcArrayWeakLabel(typeName:string) -> string { return "valen_gc_array_weak_" + self.mangle(typeName) }
 
         isManagedReferenceType(typeName:string) -> bool {
             if self.isPrimitiveOptional(typeName) { return true }
@@ -3126,17 +3217,29 @@ library X86_64 {{
             self.writer.line(".Lobject_copy_scan_start:"); self.writer.line("    mov rcx, QWORD PTR [rsi]"); self.writer.line(".Lobject_copy_scan:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz .Lobject_copy_enter")
             self.writer.line("    cmp QWORD PTR [rcx], rdi"); self.writer.line("    je .Lobject_copy_found"); self.writer.line("    mov rcx, QWORD PTR [rcx+16]"); self.writer.line("    jmp .Lobject_copy_scan")
             self.writer.line(".Lobject_copy_found:"); self.writer.line("    mov rax, QWORD PTR [rcx+8]"); self.writer.line("    ret"); self.writer.line(".Lobject_copy_enter:"); self.writer.line("    mov rax, QWORD PTR [rdi]"); self.writer.line("    jmp QWORD PTR [rax+32]"); self.writer.line(".Lobject_copy_null:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
-            self.writer.line("valen_string_equal_context:"); self.writer.line("    cmp rdi, rsi"); self.writer.line("    je .Lstring_context_true")
+            self.writer.line(".globl valen_type_test"); self.writer.line("valen_type_test:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Ltype_test_false"); self.writer.line("    mov rdx, QWORD PTR [rdi]")
+            self.writer.line(".Ltype_test_type:"); self.writer.line("    test rdx, rdx"); self.writer.line("    jz .Ltype_test_false"); self.writer.line("    cmp rdx, rsi"); self.writer.line("    je .Ltype_test_true"); self.writer.line("    mov rcx, QWORD PTR [rdx+8]"); self.writer.line("    mov r8, QWORD PTR [rcx]"); self.writer.line("    add rcx, 8")
+            self.writer.line(".Ltype_test_contract:"); self.writer.line("    test r8, r8"); self.writer.line("    jz .Ltype_test_base"); self.writer.line("    cmp QWORD PTR [rcx], rsi"); self.writer.line("    je .Ltype_test_true"); self.writer.line("    add rcx, 16"); self.writer.line("    dec r8"); self.writer.line("    jmp .Ltype_test_contract")
+            self.writer.line(".Ltype_test_base:"); self.writer.line("    mov rdx, QWORD PTR [rdx]"); self.writer.line("    jmp .Ltype_test_type"); self.writer.line(".Ltype_test_true:"); self.writer.line("    mov eax, 1"); self.writer.line("    ret"); self.writer.line(".Ltype_test_false:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
+            self.writer.line(".globl valen_contract_method"); self.writer.line("valen_contract_method:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lcontract_dispatch_error"); self.writer.line("    mov rax, QWORD PTR [rdi]"); self.writer.line("    mov rax, QWORD PTR [rax+8]"); self.writer.line("    mov rcx, QWORD PTR [rax]"); self.writer.line("    add rax, 8")
+            self.writer.line(".Lcontract_method_scan:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz .Lcontract_dispatch_error"); self.writer.line("    cmp QWORD PTR [rax], rsi"); self.writer.line("    je .Lcontract_method_found"); self.writer.line("    add rax, 16"); self.writer.line("    dec rcx"); self.writer.line("    jmp .Lcontract_method_scan"); self.writer.line(".Lcontract_method_found:"); self.writer.line("    mov rax, QWORD PTR [rax+8]"); self.writer.line("    mov rax, QWORD PTR [rax+rdx*8]"); self.writer.line("    ret")
+            self.writer.line(".globl valen_weak_load"); self.writer.line("valen_weak_load:"); self.writer.line("    xor eax, eax"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lweak_load_done"); self.writer.line("    cmp QWORD PTR [rdi+8], 0"); self.writer.line("    je .Lweak_load_done"); self.writer.line("    mov rax, rdi"); self.writer.line(".Lweak_load_done:"); self.writer.line("    ret")
+            self.writer.line(".globl valen_destroy_object"); self.writer.line("valen_destroy_object:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Ldestroy_object_done"); self.writer.line("    mov QWORD PTR [rdi+8], 0"); self.writer.line(".Ldestroy_object_done:"); self.writer.line("    ret")
+            self.writer.line(".globl valen_test_expect"); self.writer.line("valen_test_expect:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jnz .Ltest_expect_done"); self.writer.line("    inc QWORD PTR [rip+valen_test_failures]"); self.writer.line("    mov eax, 1"); self.writer.line("    mov edi, 2"); self.writer.line("    lea rsi, [rip+valen_test_failure_message]"); self.writer.line("    mov edx, 12"); self.writer.line("    syscall"); self.writer.line(".Ltest_expect_done:"); self.writer.line("    ret")
+            self.writer.line(".globl valen_test_failure_count"); self.writer.line("valen_test_failure_count:"); self.writer.line("    mov rax, QWORD PTR [rip+valen_test_failures]"); self.writer.line("    ret")
+            self.writer.line(".globl memset"); self.writer.line("memset:"); self.writer.line("    mov r8, rdi"); self.writer.line("    mov eax, esi"); self.writer.line("    test rdx, rdx"); self.writer.line("    jz .Lmemset_done"); self.writer.line(".Lmemset_next:"); self.writer.line("    mov BYTE PTR [rdi], al"); self.writer.line("    inc rdi"); self.writer.line("    dec rdx"); self.writer.line("    jnz .Lmemset_next"); self.writer.line(".Lmemset_done:"); self.writer.line("    mov rax, r8"); self.writer.line("    ret")
+            self.writer.line(".globl memcpy"); self.writer.line("memcpy:"); self.writer.line("    mov rax, rdi"); self.writer.line("    mov rcx, rdx"); self.writer.line("    rep movsb"); self.writer.line("    ret")
+            self.writer.line(".globl valen_string_equal_context"); self.writer.line("valen_string_equal_context:"); self.writer.line("    cmp rdi, rsi"); self.writer.line("    je .Lstring_context_true")
             self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lstring_context_false"); self.writer.line("    test rsi, rsi"); self.writer.line("    jz .Lstring_context_false")
             self.writer.line("    jmp valen_string_equal"); self.writer.line(".Lstring_context_true:"); self.writer.line("    mov eax, 1"); self.writer.line("    ret")
             self.writer.line(".Lstring_context_false:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
-            self.writer.line("valen_string_hash_context:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lstring_hash_null")
+            self.writer.line(".globl valen_string_hash_context"); self.writer.line("valen_string_hash_context:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lstring_hash_null")
             self.writer.line("    mov rsi, QWORD PTR [rdi]"); self.writer.line("    mov rcx, QWORD PTR [rdi+8]"); self.writer.line("    mov rax, 1469598103934665603")
             self.writer.line(".Lstring_hash_next:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz .Lstring_hash_done")
             self.writer.line("    movzx rdx, BYTE PTR [rsi]"); self.writer.line("    xor rax, rdx"); self.writer.line("    mov r8, 1099511628211"); self.writer.line("    imul rax, r8")
             self.writer.line("    inc rsi"); self.writer.line("    dec rcx"); self.writer.line("    jmp .Lstring_hash_next")
             self.writer.line(".Lstring_hash_done:"); self.writer.line("    ret"); self.writer.line(".Lstring_hash_null:"); self.writer.line("    xor eax, eax"); self.writer.line("    ret")
-            self.writer.line("valen_string_copy_context:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lstring_copy_null"); self.writer.line("    test rsi, rsi"); self.writer.line("    jnz .Lstring_copy_scan_start")
+            self.writer.line(".globl valen_string_copy_context"); self.writer.line("valen_string_copy_context:"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz .Lstring_copy_null"); self.writer.line("    test rsi, rsi"); self.writer.line("    jnz .Lstring_copy_scan_start")
             self.writer.line("    push rdi"); self.writer.line("    mov edi, 8"); self.writer.line("    call valen_alloc"); self.writer.line("    mov QWORD PTR [rax], 0"); self.writer.line("    mov rsi, rax"); self.writer.line("    pop rdi")
             self.writer.line(".Lstring_copy_scan_start:"); self.writer.line("    mov rcx, QWORD PTR [rsi]"); self.writer.line(".Lstring_copy_scan:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz .Lstring_copy_enter"); self.writer.line("    cmp QWORD PTR [rcx], rdi"); self.writer.line("    je .Lstring_copy_found"); self.writer.line("    mov rcx, QWORD PTR [rcx+16]"); self.writer.line("    jmp .Lstring_copy_scan"); self.writer.line(".Lstring_copy_found:"); self.writer.line("    mov rax, QWORD PTR [rcx+8]"); self.writer.line("    ret")
             self.writer.line(".Lstring_copy_enter:"); self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    mov r12, rdi"); self.writer.line("    mov r14, rsi"); self.writer.line("    mov r13, QWORD PTR [r12+8]"); self.writer.line("    mov rdi, r13"); self.writer.line("    call valen_string_new"); self.writer.line("    mov rbx, rax"); self.writer.line("    mov rdi, QWORD PTR [rbx]"); self.writer.line("    mov rsi, QWORD PTR [r12]"); self.writer.line("    mov rcx, r13"); self.writer.line("    rep movsb")
@@ -3272,7 +3375,7 @@ library X86_64 {{
             local fail = label + "_false"
             local loop = label + "_loop"
             local done = label + "_done"
-            self.writer.line(label + ":"); self.writer.line("    cmp rdi, rsi"); self.writer.line("    je " + done + "_true")
+            if self.emissionModule != null && self.emissionModule! == "<llvm-runtime>" { self.writer.line(".globl " + label) }; self.writer.line(label + ":"); self.writer.line("    cmp rdi, rsi"); self.writer.line("    je " + done + "_true")
             self.writer.line("    test rdi, rdi"); self.writer.line("    jz " + fail); self.writer.line("    test rsi, rsi"); self.writer.line("    jz " + fail)
             self.writer.line("    mov rax, QWORD PTR [rdi]"); self.writer.line("    cmp rax, QWORD PTR [rsi]"); self.writer.line("    jne " + fail)
             self.writer.line("    mov rcx, rdx"); self.writer.line(label + "_scan:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz " + label + "_enter")
@@ -3294,7 +3397,7 @@ library X86_64 {{
             local label = self.arrayHashLabel(typeName)
             local loop = label + "_loop"
             local done = label + "_done"
-            self.writer.line(label + ":"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz " + done + "_null"); self.writer.line("    mov rcx, rsi")
+            if self.emissionModule != null && self.emissionModule! == "<llvm-runtime>" { self.writer.line(".globl " + label) }; self.writer.line(label + ":"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz " + done + "_null"); self.writer.line("    mov rcx, rsi")
             self.writer.line(label + "_scan:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz " + label + "_enter"); self.writer.line("    cmp QWORD PTR [rcx], rdi"); self.writer.line("    je " + done + "_cycle"); self.writer.line("    mov rcx, QWORD PTR [rcx+8]"); self.writer.line("    jmp " + label + "_scan")
             self.writer.line(label + "_enter:"); self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15"); self.writer.line("    sub rsp, 16")
             self.writer.line("    mov r12, rdi"); self.writer.line("    mov QWORD PTR [rsp], rdi"); self.writer.line("    mov QWORD PTR [rsp+8], rsi"); self.writer.line("    mov r14, rsp"); self.writer.line("    xor r13d, r13d"); self.writer.line("    mov r15, 1469598103934665603")
@@ -3309,7 +3412,7 @@ library X86_64 {{
             local label = self.arrayCopyLabel(typeName)
             local loop = label + "_loop"
             local done = label + "_done"
-            self.writer.line(label + ":"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz " + done + "_null"); self.writer.line("    test rsi, rsi"); self.writer.line("    jnz " + label + "_scan_start")
+            if self.emissionModule != null && self.emissionModule! == "<llvm-runtime>" { self.writer.line(".globl " + label) }; self.writer.line(label + ":"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz " + done + "_null"); self.writer.line("    test rsi, rsi"); self.writer.line("    jnz " + label + "_scan_start")
             self.writer.line("    push rdi"); self.writer.line("    mov edi, 8"); self.writer.line("    call valen_alloc"); self.writer.line("    mov QWORD PTR [rax], 0"); self.writer.line("    mov rsi, rax"); self.writer.line("    pop rdi")
             self.writer.line(label + "_scan_start:"); self.writer.line("    mov rcx, QWORD PTR [rsi]"); self.writer.line(label + "_scan:"); self.writer.line("    test rcx, rcx"); self.writer.line("    jz " + label + "_enter"); self.writer.line("    cmp QWORD PTR [rcx], rdi"); self.writer.line("    je " + label + "_found"); self.writer.line("    mov rcx, QWORD PTR [rcx+16]"); self.writer.line("    jmp " + label + "_scan"); self.writer.line(label + "_found:"); self.writer.line("    mov rax, QWORD PTR [rcx+8]"); self.writer.line("    ret")
             self.writer.line(label + "_enter:"); self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15"); self.writer.line("    sub rsp, 16"); self.writer.line("    mov r12, rdi"); self.writer.line("    mov r14, rsi")
@@ -3325,7 +3428,7 @@ library X86_64 {{
             if spec.length > 4 { if spec.slice(0, 4) == "ref " { ownership = "ref"; element = spec.slice(4, spec.length - 4) } }
             if spec.length > 5 { if spec.slice(0, 5) == "weak " { ownership = "weak"; element = spec.slice(5, spec.length - 5) } }
             local label = self.arraySliceLabel(typeName); local loop = label + "_loop"; local done = label + "_done"; local size = self.sizeOf(element)
-            self.writer.line(label + ":"); self.writer.line("    test rsi, rsi"); self.writer.line("    js .Larray_bounds_error"); self.writer.line("    test rdx, rdx"); self.writer.line("    js .Larray_bounds_error"); self.writer.line("    mov rax, rsi"); self.writer.line("    add rax, rdx"); self.writer.line("    jc .Larray_bounds_error"); self.writer.line("    cmp rax, QWORD PTR [rdi]"); self.writer.line("    ja .Larray_bounds_error")
+            if self.emissionModule != null && self.emissionModule! == "<llvm-runtime>" { self.writer.line(".globl " + label) }; self.writer.line(label + ":"); self.writer.line("    test rsi, rsi"); self.writer.line("    js .Larray_bounds_error"); self.writer.line("    test rdx, rdx"); self.writer.line("    js .Larray_bounds_error"); self.writer.line("    mov rax, rsi"); self.writer.line("    add rax, rdx"); self.writer.line("    jc .Larray_bounds_error"); self.writer.line("    cmp rax, QWORD PTR [rdi]"); self.writer.line("    ja .Larray_bounds_error")
             self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    push r15"); self.writer.line("    sub rsp, 8"); self.writer.line("    mov rbx, rdi"); self.writer.line("    mov r12, rsi"); self.writer.line("    mov r13, rdx")
             self.writer.line("    mov rdi, " + size.toString()); self.writer.line("    mov rsi, r13"); self.writer.line("    lea rdx, [rip+" + self.gcArrayTraceLabel(typeName) + "]"); self.writer.line("    lea rcx, [rip+" + self.gcArrayWeakLabel(typeName) + "]"); self.writer.line("    call valen_gc_array_new"); self.writer.line("    mov r14, rax"); self.writer.line("    xor r15d, r15d"); self.writer.line(loop + ":"); self.writer.line("    cmp r15, r13"); self.writer.line("    jae " + done); self.writer.line("    mov rax, r12"); self.writer.line("    add rax, r15"); self.writer.line("    imul rax, " + size.toString()); self.writer.line("    add rax, QWORD PTR [rbx+16]")
             if ownership == "owned" && self.isManagedReferenceType(element) { self.writer.line("    mov rdi, QWORD PTR [rax]"); self.writer.line("    xor esi, esi"); self.writer.line("    call " + self.copyFunction(element)) } else { self.loadMemory("[rax]", element, "rax") }
@@ -3339,7 +3442,7 @@ library X86_64 {{
             local next = label + "_next"
             local liveDone = label + "_live_done"
             local done = label + "_done"
-            self.writer.line(label + ":"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz " + done); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    mov r12, rdi"); self.writer.line("    xor r13d, r13d")
+            if self.emissionModule != null && self.emissionModule! == "<llvm-runtime>" { self.writer.line(".globl " + label) }; self.writer.line(label + ":"); self.writer.line("    test rdi, rdi"); self.writer.line("    jz " + done); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    mov r12, rdi"); self.writer.line("    xor r13d, r13d")
             self.writer.line(loop + ":"); self.writer.line("    cmp r13, QWORD PTR [r12]"); self.writer.line("    jae " + liveDone)
             if self.isArray(element) {
                 self.writer.line("    imul rax, r13, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]"); self.writer.line("    mov rdi, QWORD PTR [rax]"); self.writer.line("    call " + self.arrayDestroyLabel(element))
@@ -3366,6 +3469,7 @@ library X86_64 {{
             local index:i64 = 0
             while index < self.program.types.length {
                 local typeNode = self.program.types[index]
+                if self.emissionModule != null && self.emissionModule! == "<llvm-runtime>" { self.writer.line(".globl " + self.typeLabel(typeNode.name)) }
                 self.writer.line(self.typeLabel(typeNode.name) + ":")
                 if typeNode.baseName == null { self.writer.line("    .quad 0") } else { self.writer.line("    .quad " + self.typeLabel(typeNode.baseName!)) }
                 self.writer.line("    .quad " + self.contractListLabel(typeNode.name))

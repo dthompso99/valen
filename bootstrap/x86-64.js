@@ -17,6 +17,7 @@ export class X86_64Backend {
         this.runtimeLabel = 0;
         this.moduleId = moduleId;
         this.includeRuntime = includeRuntime;
+        this.exportRuntimeTypes = moduleId === '<llvm-runtime>';
         const compiledModules = new Set(program.compiledModules ?? []);
         const emittedFunctions = (moduleId === null ? program.functions : program.functions.filter(fn => fn.moduleId === moduleId))
             .filter(fn => !compiledModules.has(fn.moduleId));
@@ -72,6 +73,7 @@ export class X86_64Backend {
             'valen_System_enableShutdownSignals',
             'valen_System_shutdownRequested',
             'valen_System_link',
+            'valen_System_compileLlvm',
             'valen_System_memoryCopy',
             'valen_System_memoryCompare',
             'valen_System_fileDescriptor', 'valen_System_makeFileNonblocking',
@@ -95,7 +97,7 @@ export class X86_64Backend {
         }
 
         const runtimeSymbols = new Set(program.externals.map(external => external.runtimeSymbol));
-        this.needsProcessArguments = runtimeSymbols.has('valen_System_arguments') || runtimeSymbols.has('valen_System_link') || runtimeSymbols.has('valen_System_environmentVariable');
+        this.needsProcessArguments = runtimeSymbols.has('valen_System_arguments') || runtimeSymbols.has('valen_System_link') || runtimeSymbols.has('valen_System_compileLlvm') || runtimeSymbols.has('valen_System_environmentVariable');
         this.needsFilesystemState = [
             'valen_System_openRead', 'valen_System_openWrite', 'valen_System_read',
             'valen_System_writeFile', 'valen_System_writeBytes', 'valen_System_sync', 'valen_System_close',
@@ -146,6 +148,7 @@ export class X86_64Backend {
         if (runtimeSymbols.has('valen_System_enableProcessArena')) lines.push('.globl valen_System_enableProcessArena', 'valen_System_enableProcessArena:', '    mov DWORD PTR [rip+valen_arena_enabled], 1', '    ret', '');
         if (runtimeSymbols.has('valen_System_enableShutdownSignals') || runtimeSymbols.has('valen_System_shutdownRequested')) lines.push(...this.shutdownSignalRuntime());
         if (runtimeSymbols.has('valen_System_link')) lines.push(...this.linkRuntime());
+        if (runtimeSymbols.has('valen_System_compileLlvm')) lines.push(...this.compileLlvmRuntime());
         if (runtimeSymbols.has('valen_System_memoryCopy')) lines.push(...this.memoryCopyRuntime());
         if (runtimeSymbols.has('valen_System_memoryCompare')) lines.push(...this.memoryCompareRuntime());
         if (runtimeSymbols.has('valen_System_fileDescriptor')) lines.push(...this.descriptorRuntime('valen_System_fileDescriptor'));
@@ -165,10 +168,8 @@ export class X86_64Backend {
         lines.push(...this.floatConversionData());
         lines.push(...this.typeData());
         lines.push(...this.gcData());
-        if (program.functions.some(fn => fn.name === '$valen.test.run')) {
-            lines.push('.section .rodata', 'valen_test_failure_message:', '    .ascii "test failed\\n"',
-                '.bss', '.align 8', 'valen_test_failures:', '    .zero 8', '.text');
-        }
+        lines.push('.section .rodata', 'valen_test_failure_message:', '    .ascii "test failed\\n"',
+            '.bss', '.align 8', 'valen_test_failures:', '    .zero 8', '.text');
         if (this.needsProcessArguments) lines.push(...this.processData());
         if (this.needsFilesystemState) lines.push(...this.filesystemData());
         if (runtimeSymbols.has('valen_System_enableShutdownSignals') || runtimeSymbols.has('valen_System_shutdownRequested')) lines.push('.bss', '.align 8', 'valen_shutdown_requested:', '    .zero 8', '.text');
@@ -1045,17 +1046,17 @@ export class X86_64Backend {
     }
 
     typeLabel(typeName) {
-        return `.Lvalen_type_${this.mangle(typeName)}`;
+        return `valen_type_${this.mangle(typeName)}`;
     }
 
     objectEqualityLabel(typeName) { return `${this.typeLabel(typeName)}_equal`; }
     objectHashLabel(typeName) { return `${this.typeLabel(typeName)}_hash`; }
     objectCopyLabel(typeName) { return `${this.typeLabel(typeName)}_copy`; }
-    arrayEqualityLabel(typeName) { return `.Lvalen_array_equal_${this.mangle(typeName)}`; }
-    arrayHashLabel(typeName) { return `.Lvalen_array_hash_${this.mangle(typeName)}`; }
-    arrayCopyLabel(typeName) { return `.Lvalen_array_copy_${this.mangle(typeName)}`; }
-    arraySliceLabel(typeName) { return `.Lvalen_array_slice_${this.mangle(typeName)}`; }
-    arrayDestroyLabel(typeName) { return `.Lvalen_array_destroy_${this.mangle(typeName)}`; }
+    arrayEqualityLabel(typeName) { return `valen_array_equal_${this.mangle(typeName)}`; }
+    arrayHashLabel(typeName) { return `valen_array_hash_${this.mangle(typeName)}`; }
+    arrayCopyLabel(typeName) { return `valen_array_copy_${this.mangle(typeName)}`; }
+    arraySliceLabel(typeName) { return `valen_array_slice_${this.mangle(typeName)}`; }
+    arrayDestroyLabel(typeName) { return `valen_array_destroy_${this.mangle(typeName)}`; }
 
     equalityFunction(typeName) {
         const type = typeName?.endsWith('?') ? typeName.slice(0, -1) : typeName;
@@ -1157,16 +1158,39 @@ export class X86_64Backend {
             '    je .Lobject_copy_found', '    mov rcx, QWORD PTR [rcx+16]', '    jmp .Lobject_copy_scan',
             '.Lobject_copy_found:', '    mov rax, QWORD PTR [rcx+8]', '    ret', '.Lobject_copy_enter:',
             '    mov rax, QWORD PTR [rdi]', '    jmp QWORD PTR [rax+32]', '.Lobject_copy_null:', '    xor eax, eax', '    ret', '',
-            'valen_string_equal_context:', '    cmp rdi, rsi', '    je .Lstring_context_true', '    test rdi, rdi',
+            '.globl valen_type_test', 'valen_type_test:', '    test rdi, rdi', '    jz .Ltype_test_false', '    mov rdx, QWORD PTR [rdi]',
+            '.Ltype_test_type:', '    test rdx, rdx', '    jz .Ltype_test_false', '    cmp rdx, rsi', '    je .Ltype_test_true',
+            '    mov rcx, QWORD PTR [rdx+8]', '    mov r8, QWORD PTR [rcx]', '    add rcx, 8', '.Ltype_test_contract:',
+            '    test r8, r8', '    jz .Ltype_test_base', '    cmp QWORD PTR [rcx], rsi', '    je .Ltype_test_true',
+            '    add rcx, 16', '    dec r8', '    jmp .Ltype_test_contract', '.Ltype_test_base:', '    mov rdx, QWORD PTR [rdx]',
+            '    jmp .Ltype_test_type', '.Ltype_test_true:', '    mov eax, 1', '    ret', '.Ltype_test_false:', '    xor eax, eax', '    ret', '',
+            '.globl valen_contract_method', 'valen_contract_method:', '    test rdi, rdi', '    jz .Lcontract_dispatch_error',
+            '    mov rax, QWORD PTR [rdi]', '    mov rax, QWORD PTR [rax+8]', '    mov rcx, QWORD PTR [rax]', '    add rax, 8',
+            '.Lcontract_method_scan:', '    test rcx, rcx', '    jz .Lcontract_dispatch_error', '    cmp QWORD PTR [rax], rsi',
+            '    je .Lcontract_method_found', '    add rax, 16', '    dec rcx', '    jmp .Lcontract_method_scan',
+            '.Lcontract_method_found:', '    mov rax, QWORD PTR [rax+8]', '    mov rax, QWORD PTR [rax+rdx*8]', '    ret', '',
+            '.globl valen_weak_load', 'valen_weak_load:', '    xor eax, eax', '    test rdi, rdi', '    jz .Lweak_load_done',
+            '    cmp QWORD PTR [rdi+8], 0', '    je .Lweak_load_done', '    mov rax, rdi', '.Lweak_load_done:', '    ret', '',
+            '.globl valen_destroy_object', 'valen_destroy_object:', '    test rdi, rdi', '    jz .Ldestroy_object_done',
+            '    mov QWORD PTR [rdi+8], 0', '.Ldestroy_object_done:', '    ret', '',
+            '.globl valen_test_expect', 'valen_test_expect:', '    test rdi, rdi', '    jnz .Ltest_expect_done',
+            '    inc QWORD PTR [rip+valen_test_failures]', '    mov eax, 1', '    mov edi, 2',
+            '    lea rsi, [rip+valen_test_failure_message]', '    mov edx, 12', '    syscall', '.Ltest_expect_done:', '    ret', '',
+            '.globl valen_test_failure_count', 'valen_test_failure_count:', '    mov rax, QWORD PTR [rip+valen_test_failures]', '    ret', '',
+            '.globl memset', 'memset:', '    mov r8, rdi', '    mov eax, esi', '    test rdx, rdx', '    jz .Lmemset_done',
+            '.Lmemset_next:', '    mov BYTE PTR [rdi], al', '    inc rdi', '    dec rdx', '    jnz .Lmemset_next',
+            '.Lmemset_done:', '    mov rax, r8', '    ret', '',
+            '.globl memcpy', 'memcpy:', '    mov rax, rdi', '    mov rcx, rdx', '    rep movsb', '    ret', '',
+            '.globl valen_string_equal_context', 'valen_string_equal_context:', '    cmp rdi, rsi', '    je .Lstring_context_true', '    test rdi, rdi',
             '    jz .Lstring_context_false', '    test rsi, rsi', '    jz .Lstring_context_false',
             '    jmp valen_string_equal', '.Lstring_context_true:', '    mov eax, 1', '    ret',
             '.Lstring_context_false:', '    xor eax, eax', '    ret', '',
-            'valen_string_hash_context:', '    test rdi, rdi', '    jz .Lstring_hash_null',
+            '.globl valen_string_hash_context', 'valen_string_hash_context:', '    test rdi, rdi', '    jz .Lstring_hash_null',
             '    mov rsi, QWORD PTR [rdi]', '    mov rcx, QWORD PTR [rdi+8]', '    mov rax, 1469598103934665603',
             '.Lstring_hash_next:', '    test rcx, rcx', '    jz .Lstring_hash_done', '    movzx rdx, BYTE PTR [rsi]',
             '    xor rax, rdx', '    mov r8, 1099511628211', '    imul rax, r8', '    inc rsi', '    dec rcx',
             '    jmp .Lstring_hash_next', '.Lstring_hash_done:', '    ret', '.Lstring_hash_null:', '    xor eax, eax', '    ret', '',
-            'valen_string_copy_context:', '    test rdi, rdi', '    jz .Lstring_copy_null', '    test rsi, rsi',
+            '.globl valen_string_copy_context', 'valen_string_copy_context:', '    test rdi, rdi', '    jz .Lstring_copy_null', '    test rsi, rsi',
             '    jnz .Lstring_copy_scan_start', '    push rdi', '    mov edi, 8', '    call valen_alloc', '    mov QWORD PTR [rax], 0',
             '    mov rsi, rax', '    pop rdi', '.Lstring_copy_scan_start:', '    mov rcx, QWORD PTR [rsi]', '.Lstring_copy_scan:',
             '    test rcx, rcx', '    jz .Lstring_copy_enter', '    cmp QWORD PTR [rcx], rdi', '    je .Lstring_copy_found',
@@ -1251,7 +1275,7 @@ export class X86_64Backend {
     arrayEqualityFunction(type) {
         const element = type.slice(6, -1), label = this.arrayEqualityLabel(type), fail = `${label}_false`, loop = `${label}_loop`, done = `${label}_done`;
         const size = this.sizeOf(element);
-        const lines = [label + ':', '    cmp rdi, rsi', `    je ${done}_true`, '    test rdi, rdi', `    jz ${fail}`,
+        const lines = [...(this.exportRuntimeTypes ? [`.globl ${label}`] : []), label + ':', '    cmp rdi, rsi', `    je ${done}_true`, '    test rdi, rdi', `    jz ${fail}`,
             '    test rsi, rsi', `    jz ${fail}`, '    mov rax, QWORD PTR [rdi]', '    cmp rax, QWORD PTR [rsi]', `    jne ${fail}`,
             '    mov rcx, rdx', `${label}_scan:`, '    test rcx, rcx', `    jz ${label}_enter`,
             '    cmp QWORD PTR [rcx], rdi', `    jne ${label}_next`, '    cmp QWORD PTR [rcx+8], rsi', `    je ${done}_true`,
@@ -1271,7 +1295,7 @@ export class X86_64Backend {
     arrayHashFunction(type) {
         const element = type.slice(6, -1), label = this.arrayHashLabel(type), loop = `${label}_loop`, done = `${label}_done`;
         const size = this.sizeOf(element);
-        const lines = [label + ':', '    test rdi, rdi', `    jz ${done}_null`, '    mov rcx, rsi', `${label}_scan:`,
+        const lines = [...(this.exportRuntimeTypes ? [`.globl ${label}`] : []), label + ':', '    test rdi, rdi', `    jz ${done}_null`, '    mov rcx, rsi', `${label}_scan:`,
             '    test rcx, rcx', `    jz ${label}_enter`, '    cmp QWORD PTR [rcx], rdi', `    je ${done}_cycle`,
             '    mov rcx, QWORD PTR [rcx+8]', `    jmp ${label}_scan`, `${label}_enter:`, '    push rbp', '    mov rbp, rsp',
             '    push r12', '    push r13', '    push r14', '    push r15', '    sub rsp, 16', '    mov r12, rdi', '    mov r14, rsi',
@@ -1288,7 +1312,7 @@ export class X86_64Backend {
     arrayCopyFunction(type) {
         const element = type.slice(6, -1), label = this.arrayCopyLabel(type), loop = `${label}_loop`, done = `${label}_done`;
         const size = this.sizeOf(element);
-        const lines = [label + ':', '    test rdi, rdi', `    jz ${done}_null`, '    test rsi, rsi', `    jnz ${label}_scan_start`,
+        const lines = [...(this.exportRuntimeTypes ? [`.globl ${label}`] : []), label + ':', '    test rdi, rdi', `    jz ${done}_null`, '    test rsi, rsi', `    jnz ${label}_scan_start`,
             '    push rdi', '    mov edi, 8', '    call valen_alloc', '    mov QWORD PTR [rax], 0', '    mov rsi, rax', '    pop rdi',
             `${label}_scan_start:`, '    mov rcx, QWORD PTR [rsi]', `${label}_scan:`, '    test rcx, rcx', `    jz ${label}_enter`,
             '    cmp QWORD PTR [rcx], rdi', `    je ${label}_found`, '    mov rcx, QWORD PTR [rcx+16]', `    jmp ${label}_scan`,
@@ -1312,7 +1336,7 @@ export class X86_64Backend {
         const element = ownership === 'ref' ? spec.slice(4) : ownership === 'weak' ? spec.slice(5) : spec;
         const label = this.arraySliceLabel(type), loop = `${label}_loop`, done = `${label}_done`;
         const size = this.sizeOf(element), managed = ownership === 'owned' && this.isManagedReferenceType(element);
-        const lines = [label + ':', '    test rsi, rsi', '    js .Larray_bounds_error', '    test rdx, rdx', '    js .Larray_bounds_error',
+        const lines = [...(this.exportRuntimeTypes ? [`.globl ${label}`] : []), label + ':', '    test rsi, rsi', '    js .Larray_bounds_error', '    test rdx, rdx', '    js .Larray_bounds_error',
             '    mov rax, rsi', '    add rax, rdx', '    jc .Larray_bounds_error', '    cmp rax, QWORD PTR [rdi]', '    ja .Larray_bounds_error',
             '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    push r13', '    push r14', '    push r15', '    sub rsp, 8',
             '    mov rbx, rdi', '    mov r12, rsi', '    mov r13, rdx', `    mov rdi, ${size}`, '    mov rsi, r13',
@@ -1330,7 +1354,7 @@ export class X86_64Backend {
     arrayDestroyFunction(type) {
         const element = type.slice(6, -1), label = this.arrayDestroyLabel(type), loop = `${label}_loop`, done = `${label}_done`;
         const size = this.sizeOf(element);
-        const lines = [label + ':', '    test rdi, rdi', `    jz ${done}`, '    push r12', '    push r13', '    mov r12, rdi',
+        const lines = [...(this.exportRuntimeTypes ? [`.globl ${label}`] : []), label + ':', '    test rdi, rdi', `    jz ${done}`, '    push r12', '    push r13', '    mov r12, rdi',
             '    xor r13d, r13d', `${loop}:`, '    cmp r13, QWORD PTR [r12]', `    jae ${done}_live`];
         if (element.startsWith('Array<')) {
             lines.push(`    imul rax, r13, ${size}`, '    add rax, QWORD PTR [r12+16]', '    mov rdi, QWORD PTR [rax]',
@@ -1352,7 +1376,7 @@ export class X86_64Backend {
     typeData(types = this.program.types) {
         const lines = ['.section .data', '.align 8'];
         for (const type of types) {
-            lines.push(`${this.typeLabel(type.name)}:`, type.base ? `    .quad ${this.typeLabel(type.base)}` : '    .quad 0',
+            lines.push(...(this.exportRuntimeTypes ? [`.globl ${this.typeLabel(type.name)}`] : []), `${this.typeLabel(type.name)}:`, type.base ? `    .quad ${this.typeLabel(type.base)}` : '    .quad 0',
                 `    .quad ${this.contractListLabel(type.name)}`,
                 `    .quad ${this.objectEqualityLabel(type.name)}`,
                 `    .quad ${this.objectHashLabel(type.name)}`,
@@ -2098,6 +2122,100 @@ export class X86_64Backend {
         ];
     }
 
+    compileLlvmRuntime() {
+        return [
+            '.globl valen_System_compileLlvm',
+            'valen_System_compileLlvm:',
+            '    push rbp',
+            '    mov rbp, rsp',
+            '    push r12',
+            '    push r13',
+            '    push r14',
+            '    push r15',
+            '    mov r12, QWORD PTR [rdi]',
+            '    mov r13, QWORD PTR [rsi]',
+            '    mov r14, rdx',
+            '    mov r15, rcx',
+            '    mov eax, 57',
+            '    syscall',
+            '    test rax, rax',
+            '    js .Lllvm_fork_error',
+            '    jz .Lllvm_child',
+            '    mov rdi, rax',
+            '    lea rsi, [rbp-32]',
+            '    xor edx, edx',
+            '    xor r10d, r10d',
+            '    mov eax, 61',
+            '    syscall',
+            '    test rax, rax',
+            '    js .Lllvm_wait_error',
+            '    mov eax, DWORD PTR [rbp-32]',
+            '    mov edx, eax',
+            '    and edx, 127',
+            '    jnz .Lllvm_signaled',
+            '    shr eax, 8',
+            '    and eax, 255',
+            '    jmp .Lllvm_done',
+            '.Lllvm_signaled:',
+            '    lea eax, [rdx+128]',
+            '    jmp .Lllvm_done',
+            '.Lllvm_fork_error:',
+            '.Lllvm_wait_error:',
+            '    mov eax, 127',
+            '    jmp .Lllvm_done',
+            '.Lllvm_child:',
+            '    sub rsp, 64',
+            '    lea rax, [rip+.Lllvm_clang]',
+            '    mov QWORD PTR [rsp], rax',
+            '    mov QWORD PTR [rsp+8], r12',
+            '    lea rax, [rip+.Lllvm_o0]',
+            '    test r14, r14',
+            '    jz .Lllvm_store_optimization',
+            '    lea rax, [rip+.Lllvm_o1]',
+            '.Lllvm_store_optimization:',
+            '    mov QWORD PTR [rsp+16], rax',
+            '    lea rax, [rip+.Lllvm_no_pie]',
+            '    test r15, r15',
+            '    jz .Lllvm_store_mode',
+            '    lea rax, [rip+.Lllvm_compile_only]',
+            '.Lllvm_store_mode:',
+            '    mov QWORD PTR [rsp+24], rax',
+            '    lea rax, [rip+.Lllvm_output]',
+            '    mov QWORD PTR [rsp+32], rax',
+            '    mov QWORD PTR [rsp+40], r13',
+            '    mov QWORD PTR [rsp+48], 0',
+            '    lea rdi, [rip+.Lllvm_clang]',
+            '    mov rsi, rsp',
+            '    mov rdx, QWORD PTR [rip+valen_process_envp]',
+            '    mov eax, 59',
+            '    syscall',
+            '    mov edi, 127',
+            '    mov eax, 60',
+            '    syscall',
+            '    ud2',
+            '.Lllvm_done:',
+            '    pop r15',
+            '    pop r14',
+            '    pop r13',
+            '    pop r12',
+            '    leave',
+            '    ret',
+            '.Lllvm_clang:',
+            '    .asciz "/usr/bin/clang"',
+            '.Lllvm_o0:',
+            '    .asciz "-O0"',
+            '.Lllvm_o1:',
+            '    .asciz "-O1"',
+            '.Lllvm_no_pie:',
+            '    .asciz "-no-pie"',
+            '.Lllvm_compile_only:',
+            '    .asciz "-c"',
+            '.Lllvm_output:',
+            '    .asciz "-o"',
+            ''
+        ];
+    }
+
     processData() {
         return [
             '.section .bss',
@@ -2303,13 +2421,13 @@ export class X86_64Backend {
     gcTraceFunctions(types = this.program.types) {
         const lines = [];
         for (const type of types) {
-            lines.push(`${this.gcTraceLabel(type.name)}:`, '    push rbx', '    mov rbx, rdi');
+            lines.push(...(this.exportRuntimeTypes ? [`.globl ${this.gcTraceLabel(type.name)}`] : []), `${this.gcTraceLabel(type.name)}:`, '    push rbx', '    mov rbx, rdi');
             for (const field of type.fields) {
                 if (field.ownership === 'member-weak' || !this.isManagedReferenceType(field.type)) continue;
                 const layout = this.fieldOffsets.get(field.symbol);
                 lines.push(`    mov rdi, QWORD PTR [rbx+${layout.offset}]`, '    call valen_gc_mark');
             }
-            lines.push('    pop rbx', '    ret', `${this.gcWeakLabel(type.name)}:`, '    push rbx', '    mov rbx, rdi');
+            lines.push('    pop rbx', '    ret', ...(this.exportRuntimeTypes ? [`.globl ${this.gcWeakLabel(type.name)}`] : []), `${this.gcWeakLabel(type.name)}:`, '    push rbx', '    mov rbx, rdi');
             for (const field of type.fields) {
                 if (field.ownership !== 'member-weak') continue;
                 const layout = this.fieldOffsets.get(field.symbol);
@@ -2331,12 +2449,12 @@ export class X86_64Backend {
             const size = this.sizeOf(element);
             const managed = this.isManagedReferenceType(element);
             const traceLoop = `${this.gcArrayTraceLabel(type)}_loop`, traceDone = `${this.gcArrayTraceLabel(type)}_done`;
-            lines.push(`${this.gcArrayTraceLabel(type)}:`, '    push rbx', '    push r12', '    xor ebx, ebx', '    mov r12, rdi');
+            lines.push(...(this.exportRuntimeTypes ? [`.globl ${this.gcArrayTraceLabel(type)}`] : []), `${this.gcArrayTraceLabel(type)}:`, '    push rbx', '    push r12', '    xor ebx, ebx', '    mov r12, rdi');
             if (managed && ownership !== 'weak') {
                 lines.push(`${traceLoop}:`, '    cmp rbx, QWORD PTR [r12]', `    jae ${traceDone}`, `    imul rax, rbx, ${size}`,
                     '    add rax, QWORD PTR [r12+16]', '    mov rdi, QWORD PTR [rax]', '    call valen_gc_mark', '    inc rbx', `    jmp ${traceLoop}`);
             }
-            lines.push(`${traceDone}:`, '    pop r12', '    pop rbx', '    ret', `${this.gcArrayWeakLabel(type)}:`, '    push rbx', '    push r12', '    xor ebx, ebx', '    mov r12, rdi');
+            lines.push(`${traceDone}:`, '    pop r12', '    pop rbx', '    ret', ...(this.exportRuntimeTypes ? [`.globl ${this.gcArrayWeakLabel(type)}`] : []), `${this.gcArrayWeakLabel(type)}:`, '    push rbx', '    push r12', '    xor ebx, ebx', '    mov r12, rdi');
             if (managed && ownership === 'weak') {
                 const weakLoop = `${this.gcArrayWeakLabel(type)}_loop`, weakNext = `${this.gcArrayWeakLabel(type)}_next`, weakDone = `${this.gcArrayWeakLabel(type)}_done`;
                 lines.push(`${weakLoop}:`, '    cmp rbx, QWORD PTR [r12]', `    jae ${weakDone}`, `    imul rax, rbx, ${size}`,
@@ -2358,8 +2476,8 @@ export class X86_64Backend {
 
     gcTraceLabel(typeName) { return `${this.typeLabel(typeName)}_gc_trace`; }
     gcWeakLabel(typeName) { return `${this.typeLabel(typeName)}_gc_weak`; }
-    gcArrayTraceLabel(typeName) { return `.Lvalen_gc_array_trace_${this.mangle(typeName)}`; }
-    gcArrayWeakLabel(typeName) { return `.Lvalen_gc_array_weak_${this.mangle(typeName)}`; }
+    gcArrayTraceLabel(typeName) { return `valen_gc_array_trace_${this.mangle(typeName)}`; }
+    gcArrayWeakLabel(typeName) { return `valen_gc_array_weak_${this.mangle(typeName)}`; }
 
     arrayRuntime() {
         return [

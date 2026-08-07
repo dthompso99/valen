@@ -1,0 +1,1200 @@
+import Ir from './libIr.ar'
+
+library LLVM {{
+    Writer {{
+        member builder:StringBuilder
+
+        __() -> void { self.builder = new StringBuilder() }
+        line(value:string) -> void { self.builder.append(value); self.builder.appendByte(10) }
+        build() -> string { return self.builder.build() }
+    }}
+
+    Backend {{
+        member program:Ir.Program
+        member optimizationLevel:i64
+        member emissionModule:string?
+        member writer:Writer
+        member emittedValues:Array<string>
+        member nextInternal:i64
+        member stringLiterals:Array<string>
+        member reachableFunctions:Array<string>
+        member currentBlock:string
+        member immediateNames:Array<string>
+        member immediateValues:Array<string>
+        member currentFunction:Ir.Function?
+        member error:string
+
+        __(program:Ir.Program, optimizationLevel:i64=1, emissionModule:string?=null) -> void {
+            self.program = program
+            self.optimizationLevel = optimizationLevel
+            self.emissionModule = emissionModule
+            self.writer = new Writer()
+            self.emittedValues = new Array<string>(0)
+            self.nextInternal = 0
+            self.stringLiterals = new Array<string>(0)
+            self.reachableFunctions = new Array<string>(0)
+            self.currentBlock = "entry"
+            self.immediateNames = new Array<string>(0)
+            self.immediateValues = new Array<string>(0)
+            self.currentFunction = null
+            self.error = ""
+        }
+
+        generate() -> string {
+            self.prepareReachableFunctions()
+            self.scanStringLiterals()
+            self.writer.line("target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128\"")
+            self.writer.line("target triple = \"x86_64-unknown-linux-gnu\"")
+            self.writer.line("")
+            self.writer.line("declare ptr @\"valen_gc_alloc\"(i64, ptr, ptr, ptr)")
+            self.writer.line("declare void @\"valen_gc_mark\"(ptr)")
+            self.writer.line("declare void @\"valen_gc_root_push\"(ptr)")
+            self.writer.line("declare void @\"valen_gc_root_pop\"(ptr)")
+            self.writer.line("declare void @\"valen_gc_safepoint\"()")
+            self.writer.line("declare void @\"valen_System_exit\"(i32)")
+            self.writer.line("declare ptr @\"valen_string_address\"(ptr, i64)")
+            self.writer.line("declare ptr @\"valen_string_concat\"(ptr, ptr)")
+            self.writer.line("declare i1 @\"valen_string_equal\"(ptr, ptr)")
+            self.writer.line("declare ptr @\"valen_gc_array_new\"(i64, i64, ptr, ptr)")
+            self.writer.line("declare ptr @\"valen_array_address\"(ptr, i64, i64)")
+            self.writer.line("declare void @\"valen_array_append\"(ptr, i64, i64)")
+            self.writer.line("declare void @\"valen_array_insert\"(ptr, i64, i64, i64)")
+            self.writer.line("declare i64 @\"valen_array_remove\"(ptr, i64, i64)")
+            self.writer.line("declare void @\"valen_array_reserve\"(ptr, i64, i64)")
+            self.writer.line("declare void @\"valen_array_shrink_to_fit\"(ptr, i64)")
+            self.writer.line("declare ptr @\"valen_array_new\"(i64, i64)")
+            self.writer.line("declare ptr @\"valen_string_slice\"(ptr, i64, i64)")
+            self.writer.line("declare ptr @\"valen_string_to_bytes\"(ptr)")
+            self.writer.line("declare ptr @\"valen_bytes_to_string\"(ptr)")
+            self.writer.line("declare ptr @\"valen_integer_to_string\"(i64, i64)")
+            self.writer.line("declare void @\"valen_builder_append_string\"(ptr, ptr)")
+            self.writer.line("declare void @\"valen_builder_append_bytes\"(ptr, ptr)")
+            self.writer.line("declare ptr @\"valen_builder_build\"(ptr)")
+            self.writer.line("declare i64 @\"valen_string_grapheme_length\"(ptr)")
+            self.writer.line("declare ptr @\"valen_string_grapheme_at\"(ptr, i64)")
+            self.writer.line("declare i64 @\"valen_string_codepoint_length\"(ptr)")
+            self.writer.line("declare i64 @\"valen_string_codepoint_at\"(ptr, i64)")
+            self.writer.line("declare i1 @\"valen_object_equal\"(ptr, ptr, ptr)")
+            self.writer.line("declare i64 @\"valen_object_hash\"(ptr, ptr)")
+            self.writer.line("declare ptr @\"valen_object_copy\"(ptr, ptr)")
+            self.writer.line("declare i1 @\"valen_type_test\"(ptr, ptr)")
+            self.writer.line("declare ptr @\"valen_contract_method\"(ptr, ptr, i64)")
+            self.writer.line("declare ptr @\"valen_weak_load\"(ptr)")
+            self.writer.line("declare void @\"valen_destroy_object\"(ptr)")
+            self.writer.line("declare void @\"valen_test_expect\"(i1)")
+            self.writer.line("declare i64 @\"valen_test_failure_count\"()")
+            self.writer.line("declare i1 @\"valen_string_equal_context\"(ptr, ptr, ptr)")
+            self.writer.line("declare i64 @\"valen_string_hash_context\"(ptr, ptr)")
+            self.writer.line("declare ptr @\"valen_string_copy_context\"(ptr, ptr)")
+            self.writer.line("")
+            self.writeStringLiterals()
+            local typeIndex:i64 = 0
+            while typeIndex < self.program.types.length {
+                local typeNode = self.program.types[typeIndex]
+                self.writer.line(self.typeGlobal(typeNode.name) + " = external global i8")
+                self.writer.line("declare void " + self.gcTraceGlobal(typeNode.name) + "(ptr)")
+                self.writer.line("declare void " + self.gcWeakGlobal(typeNode.name) + "(ptr)")
+                typeIndex = typeIndex + 1
+            }
+            local declaredArrays = new Array<string>(0)
+            local referencedIndex:i64 = 0
+            while referencedIndex < self.program.referencedTypes.length {
+                local referenced = self.program.referencedTypes[referencedIndex]
+                referenced = self.baseType(referenced)
+                if self.isArray(referenced) && !self.contains(declaredArrays, referenced) {
+                    declaredArrays.append(referenced)
+                    self.writer.line("declare void " + self.gcArrayTraceGlobal(referenced) + "(ptr)")
+                    self.writer.line("declare void " + self.gcArrayWeakGlobal(referenced) + "(ptr)")
+                    self.writer.line("declare i1 " + self.arrayEqualityGlobal(referenced) + "(ptr, ptr, ptr)")
+                    self.writer.line("declare i64 " + self.arrayHashGlobal(referenced) + "(ptr, ptr)")
+                    self.writer.line("declare ptr " + self.arrayCopyGlobal(referenced) + "(ptr, ptr)")
+                    self.writer.line("declare ptr " + self.arraySliceGlobal(referenced) + "(ptr, i64, i64)")
+                    self.writer.line("declare void " + self.arrayDestroyGlobal(referenced) + "(ptr)")
+                }
+                referencedIndex = referencedIndex + 1
+            }
+            local externalIndex:i64 = 0
+            while externalIndex < self.program.externals.length {
+                local external = self.program.externals[externalIndex]
+                if external.runtimeName != "valen_System_exit" { self.declareExternal(external) }
+                externalIndex = externalIndex + 1
+            }
+
+            local index:i64 = 0
+            while index < self.program.functions.length {
+                local function = self.program.functions[index]
+                if self.emits(function) { self.generateFunction(function) }
+                index = index + 1
+            }
+            return self.writer.build()
+        }
+
+        declareExternal(external:Ir.ExternalFunction) -> void {
+            local declaration = "declare " + self.llvmType(external.returnType) + " @\"" + external.runtimeName + "\"("
+            local index:i64 = 0
+            while index < external.parameters.length {
+                if index > 0 { declaration = declaration + ", " }
+                declaration = declaration + self.llvmType(external.parameters[index].typeName)
+                index = index + 1
+            }
+            self.writer.line(declaration + ")")
+        }
+
+        emits(function:Ir.Function) -> bool {
+            local index:i64 = 0
+            while index < self.program.compiledModules.length {
+                if function.modulePath == self.program.compiledModules[index] { return false }
+                index = index + 1
+            }
+            local reachableIndex:i64 = 0
+            while reachableIndex < self.reachableFunctions.length { if self.reachableFunctions[reachableIndex] == function.name { return true }; reachableIndex = reachableIndex + 1 }
+            return false
+        }
+
+        prepareReachableFunctions() -> void {
+            self.reachableFunctions = new Array<string>(0)
+            if self.program.entry != null { self.addReachable(self.program.entry!) }
+            local typeIndex:i64 = 0
+            while typeIndex < self.program.types.length {
+                local typeNode = self.program.types[typeIndex]
+                if typeNode.initializer != null { self.addReachable(typeNode.initializer!) }
+                local methodIndex:i64 = 0
+                while methodIndex < typeNode.virtualMethods.length { self.addReachable(typeNode.virtualMethods[methodIndex].target); methodIndex = methodIndex + 1 }
+                local contractIndex:i64 = 0
+                while contractIndex < typeNode.contracts.length {
+                    methodIndex = 0
+                    while methodIndex < typeNode.contracts[contractIndex].methods.length { self.addReachable(typeNode.contracts[contractIndex].methods[methodIndex].target); methodIndex = methodIndex + 1 }
+                    contractIndex = contractIndex + 1
+                }
+                typeIndex = typeIndex + 1
+            }
+            local scanIndex:i64 = 0
+            while scanIndex < self.reachableFunctions.length {
+                local function = self.findFunction(self.reachableFunctions[scanIndex])
+                if function != null {
+                    local blockIndex:i64 = 0
+                    while blockIndex < function!.blocks.length {
+                        local instructions = function!.blocks[blockIndex].instructions
+                        local instructionIndex:i64 = 0
+                        while instructionIndex < instructions.length {
+                            local instruction = instructions[instructionIndex]
+                            if instruction.op == "call" && instruction.target != null { if self.findFunction(instruction.target!) != null { self.addReachable(instruction.target!) } }
+                            instructionIndex = instructionIndex + 1
+                        }
+                        blockIndex = blockIndex + 1
+                    }
+                }
+                scanIndex = scanIndex + 1
+            }
+        }
+
+        addReachable(name:string) -> void {
+            local index:i64 = 0
+            while index < self.reachableFunctions.length { if self.reachableFunctions[index] == name { return }; index = index + 1 }
+            self.reachableFunctions.append(name)
+        }
+
+        contains(values:Array<string>, value:string) -> bool { local index:i64 = 0; while index < values.length { if values[index] == value { return true }; index = index + 1 }; return false }
+
+        generateFunction(function:Ir.Function) -> void {
+            self.currentFunction = function
+            self.emittedValues = new Array<string>(0)
+            self.nextInternal = 0
+            local header = "define " + self.llvmType(function.returnType) + " " + self.globalName(function.name) + "("
+            local parameterIndex:i64 = 0
+            while parameterIndex < function.parameters.length {
+                if parameterIndex > 0 { header = header + ", " }
+                local parameter = function.parameters[parameterIndex]
+                header = header + self.llvmType(parameter.typeName) + " " + self.parameterName(parameter.name)
+                parameterIndex = parameterIndex + 1
+            }
+            self.writer.line(header + ") {")
+
+            local blockIndex:i64 = 0
+            while blockIndex < function.blocks.length {
+                local block = function.blocks[blockIndex]
+                self.currentBlock = block.label
+                self.emittedValues = new Array<string>(0)
+                self.scanBlockConstants(block)
+                self.writer.line(self.labelName(block.label) + ":")
+                if blockIndex == 0 { self.generateLocalSlots(function); self.generateRootFrame(function) }
+                local instructionIndex:i64 = 0
+                while instructionIndex < block.instructions.length {
+                    self.generateInstruction(function, block.instructions[instructionIndex])
+                    local generated = block.instructions[instructionIndex]
+                    if generated.result != null && self.needsSpill(function, generated.result!.name) {
+                        local spilled = self.localTemporary(generated.result!)
+                        if generated.op == "constant" || generated.op == "float_constant" { spilled = self.value(generated.result!) }
+                        self.writer.line("    store " + self.llvmType(generated.result!.typeName) + " " + spilled + ", ptr " + self.spillName(generated.result!.name))
+                    }
+                    if generated.result != null && self.isManagedReferenceType(generated.result!.typeName) { self.storeRoot(function, generated.result!.name, self.value(generated.result!)) }
+                    instructionIndex = instructionIndex + 1
+                }
+                blockIndex = blockIndex + 1
+            }
+            self.writer.line("}")
+            self.writer.line("")
+            self.generateRootTrace(function)
+        }
+
+        generateRootFrame(function:Ir.Function) -> void {
+            local count = self.rootCount(function)
+            if count == 0 { return }
+            self.writer.line("    %\"llvm.gc.roots\" = alloca [" + count.toString() + " x ptr]")
+            self.writer.line("    %\"llvm.gc.record\" = alloca { ptr, ptr, ptr }")
+            local index:i64 = 0
+            while index < count {
+                local address = "%\"llvm.gc.root.init." + index.toString() + "\""
+                self.writer.line("    " + address + " = getelementptr [" + count.toString() + " x ptr], ptr %\"llvm.gc.roots\", i64 0, i64 " + index.toString())
+                self.writer.line("    store ptr null, ptr " + address)
+                index = index + 1
+            }
+            self.writer.line("    %\"llvm.gc.record.trace.address\" = getelementptr { ptr, ptr, ptr }, ptr %\"llvm.gc.record\", i64 0, i32 1")
+            self.writer.line("    store ptr " + self.rootTraceGlobal(function) + ", ptr %\"llvm.gc.record.trace.address\"")
+            self.writer.line("    %\"llvm.gc.record.frame.address\" = getelementptr { ptr, ptr, ptr }, ptr %\"llvm.gc.record\", i64 0, i32 2")
+            self.writer.line("    store ptr %\"llvm.gc.roots\", ptr %\"llvm.gc.record.frame.address\"")
+            self.writer.line("    call void @\"valen_gc_root_push\"(ptr %\"llvm.gc.record\")")
+            index = 0
+            while index < function.parameters.length {
+                if self.isManagedReferenceType(function.parameters[index].typeName) { self.storeRoot(function, function.parameters[index].name, self.parameterName(function.parameters[index].name)) }
+                index = index + 1
+            }
+        }
+
+        generateRootTrace(function:Ir.Function) -> void {
+            local count = self.rootCount(function)
+            if count == 0 { return }
+            self.writer.line("define internal void " + self.rootTraceGlobal(function) + "(ptr %frame) {")
+            self.writer.line("entry:")
+            local index:i64 = 0
+            while index < count {
+                local address = "%\"root.address." + index.toString() + "\""
+                local value = "%\"root.value." + index.toString() + "\""
+                self.writer.line("    " + address + " = getelementptr [" + count.toString() + " x ptr], ptr %frame, i64 0, i64 " + index.toString())
+                self.writer.line("    " + value + " = load ptr, ptr " + address)
+                self.writer.line("    call void @\"valen_gc_mark\"(ptr " + value + ")")
+                index = index + 1
+            }
+            self.writer.line("    ret void")
+            self.writer.line("}")
+            self.writer.line("")
+        }
+
+        storeRoot(function:Ir.Function, name:string, value:string) -> void {
+            local index = self.rootIndex(function, name)
+            if index < 0 { return }
+            local count = self.rootCount(function)
+            local address = "%\"llvm.gc.root.store." + index.toString() + "." + self.nextInternal.toString() + "\""; self.nextInternal = self.nextInternal + 1
+            self.writer.line("    " + address + " = getelementptr [" + count.toString() + " x ptr], ptr %\"llvm.gc.roots\", i64 0, i64 " + index.toString())
+            self.writer.line("    store ptr " + value + ", ptr " + address)
+        }
+
+        rootCount(function:Ir.Function) -> i64 {
+            local count:i64 = 0
+            local index:i64 = 0
+            while index < function.parameters.length { if self.isManagedReferenceType(function.parameters[index].typeName) { count = count + 1 }; index = index + 1 }
+            local blockIndex:i64 = 0
+            while blockIndex < function.blocks.length {
+                local instructions = function.blocks[blockIndex].instructions
+                index = 0
+                while index < instructions.length {
+                    local instruction = instructions[index]
+                    if instruction.result != null && self.isManagedReferenceType(instruction.result!.typeName) { count = count + 1 }
+                    if instruction.op == "declare_local" && self.isManagedReferenceType(instruction.typeName!) { count = count + 1 }
+                    index = index + 1
+                }
+                blockIndex = blockIndex + 1
+            }
+            return count
+        }
+
+        rootIndex(function:Ir.Function, name:string) -> i64 {
+            local root:i64 = 0
+            local index:i64 = 0
+            while index < function.parameters.length {
+                if self.isManagedReferenceType(function.parameters[index].typeName) { if function.parameters[index].name == name { return root }; root = root + 1 }
+                index = index + 1
+            }
+            local blockIndex:i64 = 0
+            while blockIndex < function.blocks.length {
+                local instructions = function.blocks[blockIndex].instructions
+                index = 0
+                while index < instructions.length {
+                    local instruction = instructions[index]
+                    if instruction.result != null && self.isManagedReferenceType(instruction.result!.typeName) { if instruction.result!.name == name { return root }; root = root + 1 }
+                    if instruction.op == "declare_local" && self.isManagedReferenceType(instruction.typeName!) { if instruction.name! == name { return root }; root = root + 1 }
+                    index = index + 1
+                }
+                blockIndex = blockIndex + 1
+            }
+            return -1
+        }
+
+        generateLocalSlots(function:Ir.Function) -> void {
+            local blockIndex:i64 = 0
+            while blockIndex < function.blocks.length {
+                local instructions = function.blocks[blockIndex].instructions
+                local instructionIndex:i64 = 0
+                while instructionIndex < instructions.length {
+                    local instruction = instructions[instructionIndex]
+                    if instruction.op == "declare_local" {
+                        self.writer.line("    " + self.localName(instruction.name!) + " = alloca " + self.llvmType(instruction.typeName!))
+                    }
+                    if instruction.result != null && self.needsSpill(function, instruction.result!.name) {
+                        local already:bool = false
+                        local earlierBlock:i64 = 0
+                        while earlierBlock <= blockIndex {
+                            local earlier = function.blocks[earlierBlock].instructions
+                            local earlierIndex:i64 = 0
+                            while earlierIndex < earlier.length {
+                                if earlierBlock == blockIndex && earlierIndex >= instructionIndex { break }
+                                if earlier[earlierIndex].result != null && earlier[earlierIndex].result!.name == instruction.result!.name { already = true }
+                                earlierIndex = earlierIndex + 1
+                            }
+                            earlierBlock = earlierBlock + 1
+                        }
+                        if !already { self.writer.line("    " + self.spillName(instruction.result!.name) + " = alloca " + self.llvmType(instruction.result!.typeName)) }
+                    }
+                    instructionIndex = instructionIndex + 1
+                }
+                blockIndex = blockIndex + 1
+            }
+        }
+
+        scanBlockConstants(block:Ir.Block) -> void {
+            self.immediateNames = new Array<string>(0)
+            self.immediateValues = new Array<string>(0)
+            local index:i64 = 0
+            while index < block.instructions.length {
+                local instruction = block.instructions[index]
+                if (instruction.op == "constant" || instruction.op == "float_constant") && instruction.result != null {
+                    local value = instruction.text!
+                    if instruction.typeName! == "bool" { if value == "0" { value = "false" } else { value = "true" } }
+                    if instruction.typeName! == "null" { value = "null" }
+                    if self.llvmType(instruction.typeName!) == "ptr" && value == "0" { value = "null" }
+                    self.setImmediate(instruction.result!.name, value)
+                }
+                index = index + 1
+            }
+        }
+
+        setImmediate(name:string, value:string) -> void {
+            local index:i64 = 0
+            while index < self.immediateNames.length { if self.immediateNames[index] == name { self.immediateValues[index] = value; return }; index = index + 1 }
+            self.immediateNames.append(name); self.immediateValues.append(value)
+        }
+
+        generateInstruction(function:Ir.Function, instruction:Ir.Instruction) -> void {
+            if instruction.result != null {
+                local emittedIndex:i64 = 0
+                while emittedIndex < self.emittedValues.length {
+                    if self.emittedValues[emittedIndex] == instruction.result!.name { return }
+                    emittedIndex = emittedIndex + 1
+                }
+                self.emittedValues.append(instruction.result!.name)
+            }
+            local op = instruction.op
+            if op == "constant" { self.constant(instruction); return }
+            if op == "float_constant" { self.floatConstant(instruction); return }
+            if op == "string_constant" { self.stringConstant(instruction); return }
+            if op == "declare_local" {
+                local initial = self.zeroValue(instruction.typeName!)
+                if instruction.first != null { initial = self.coerce(instruction.first!, instruction.typeName!, "init." + instruction.name!) }
+                self.writer.line("    store " + self.llvmType(instruction.typeName!) + " " + initial + ", ptr " + self.localName(instruction.name!))
+                if self.isManagedReferenceType(instruction.typeName!) { self.storeRoot(function, instruction.name!, initial) }
+                return
+            }
+            if op == "load_local" {
+                self.writer.line("    " + self.value(instruction.result!) + " = load " + self.llvmType(instruction.typeName!) + ", ptr " + self.localName(instruction.name!))
+                return
+            }
+            if op == "load_field" { self.loadField(instruction); return }
+            if op == "store_field" { self.storeField(instruction); return }
+            if op == "allocate" { self.allocate(instruction); return }
+            if op == "optional_box" { self.optionalBox(instruction); return }
+            if op == "unwrap" { self.unwrap(instruction); return }
+            if op == "array_new" { self.arrayNew(instruction); return }
+            if op == "array_length" || op == "array_capacity" {
+                local offset:i64 = 0
+                if op == "array_capacity" { offset = 8 }
+                local address = self.derived(instruction.result!, op + ".address")
+                self.writer.line("    " + address + " = getelementptr i8, ptr " + self.value(instruction.first!) + ", i64 " + offset.toString())
+                self.writer.line("    " + self.value(instruction.result!) + " = load i64, ptr " + address)
+                return
+            }
+            if op == "array_load" { self.arrayLoad(instruction); return }
+            if op == "array_store" { self.arrayStore(instruction); return }
+            if op == "array_append" { self.writer.line("    call void @\"valen_array_append\"(ptr " + self.value(instruction.first!) + ", i64 " + self.integerBits(instruction.second!) + ", i64 " + self.typeBytes(instruction.elementType!).toString() + ")"); return }
+            if op == "array_insert" { self.writer.line("    call void @\"valen_array_insert\"(ptr " + self.value(instruction.first!) + ", i64 " + self.value(instruction.arguments[0]) + ", i64 " + self.integerBits(instruction.second!) + ", i64 " + self.typeBytes(instruction.elementType!).toString() + ")"); return }
+            if op == "array_remove" {
+                local removed = self.derived(instruction.result!, "array.removed.bits")
+                self.writer.line("    " + removed + " = call i64 @\"valen_array_remove\"(ptr " + self.value(instruction.first!) + ", i64 " + self.value(instruction.second!) + ", i64 " + self.typeBytes(instruction.elementType!).toString() + ")")
+                self.fromIntegerBits(removed, instruction.typeName!, instruction.result!)
+                return
+            }
+            if op == "array_reserve" { self.writer.line("    call void @\"valen_array_reserve\"(ptr " + self.value(instruction.first!) + ", i64 " + self.value(instruction.second!) + ", i64 " + self.typeBytes(instruction.elementType!).toString() + ")"); return }
+            if op == "array_shrink" { self.writer.line("    call void @\"valen_array_shrink_to_fit\"(ptr " + self.value(instruction.first!) + ", i64 " + self.typeBytes(instruction.elementType!).toString() + ")"); return }
+            if op == "array_slice" {
+                self.writer.line("    " + self.value(instruction.result!) + " = call ptr " + self.arraySliceGlobal(instruction.typeName!) + "(ptr " + self.value(instruction.first!) + ", i64 " + self.value(instruction.second!) + ", i64 " + self.value(instruction.arguments[0]) + ")")
+                return
+            }
+            if op == "destroy_array" { self.writer.line("    call void " + self.arrayDestroyGlobal(instruction.ownerType!) + "(ptr " + self.value(instruction.first!) + ")"); return }
+            if op == "string_length" {
+                local address = self.derived(instruction.result!, "string.length.address")
+                self.writer.line("    " + address + " = getelementptr i8, ptr " + self.value(instruction.first!) + ", i64 8")
+                self.writer.line("    " + self.value(instruction.result!) + " = load i64, ptr " + address)
+                return
+            }
+            if op == "string_load" {
+                local address = self.derived(instruction.result!, "string.byte.address")
+                self.writer.line("    " + address + " = call ptr @\"valen_string_address\"(ptr " + self.value(instruction.first!) + ", i64 " + self.value(instruction.second!) + ")")
+                self.writer.line("    " + self.value(instruction.result!) + " = load i8, ptr " + address)
+                return
+            }
+            if op == "string_concat" {
+                self.writer.line("    " + self.value(instruction.result!) + " = call ptr @\"valen_string_concat\"(ptr " + self.value(instruction.first!) + ", ptr " + self.value(instruction.second!) + ")")
+                return
+            }
+            if op == "string_slice" { self.writer.line("    " + self.value(instruction.result!) + " = call ptr @\"valen_string_slice\"(ptr " + self.value(instruction.first!) + ", i64 " + self.value(instruction.arguments[0]) + ", i64 " + self.value(instruction.arguments[1]) + ")"); return }
+            if op == "string_to_bytes" { self.writer.line("    " + self.value(instruction.result!) + " = call ptr @\"valen_string_to_bytes\"(ptr " + self.value(instruction.first!) + ")"); return }
+            if op == "bytes_to_string" { self.writer.line("    " + self.value(instruction.result!) + " = call ptr @\"valen_bytes_to_string\"(ptr " + self.value(instruction.first!) + ")"); return }
+            if op == "integer_to_string" {
+                local signed:i64 = 1
+                if self.isUnsigned(instruction.first!.typeName) { signed = 0 }
+                self.writer.line("    " + self.value(instruction.result!) + " = call ptr @\"valen_integer_to_string\"(i64 " + self.integerBits(instruction.first!) + ", i64 " + signed.toString() + ")")
+                return
+            }
+            if op == "builder_new" { self.writer.line("    " + self.value(instruction.result!) + " = call ptr @\"valen_array_new\"(i64 1, i64 0)"); return }
+            if op == "builder_length" {
+                self.writer.line("    " + self.value(instruction.result!) + " = load i64, ptr " + self.value(instruction.first!))
+                return
+            }
+            if op == "builder_append_string" { self.writer.line("    call void @\"valen_builder_append_string\"(ptr " + self.value(instruction.first!) + ", ptr " + self.value(instruction.second!) + ")"); return }
+            if op == "builder_append_bytes" { self.writer.line("    call void @\"valen_builder_append_bytes\"(ptr " + self.value(instruction.first!) + ", ptr " + self.value(instruction.second!) + ")"); return }
+            if op == "builder_append_byte" { self.writer.line("    call void @\"valen_array_append\"(ptr " + self.value(instruction.first!) + ", i64 " + self.integerBits(instruction.second!) + ", i64 1)"); return }
+            if op == "builder_build" { self.writer.line("    " + self.value(instruction.result!) + " = call ptr @\"valen_builder_build\"(ptr " + self.value(instruction.first!) + ")"); return }
+            if op == "string_grapheme_length" { self.writer.line("    " + self.value(instruction.result!) + " = call i64 @\"valen_string_grapheme_length\"(ptr " + self.value(instruction.first!) + ")"); return }
+            if op == "string_grapheme_at" { self.writer.line("    " + self.value(instruction.result!) + " = call ptr @\"valen_string_grapheme_at\"(ptr " + self.value(instruction.first!) + ", i64 " + self.value(instruction.second!) + ")"); return }
+            if op == "string_codepoint_length" { self.writer.line("    " + self.value(instruction.result!) + " = call i64 @\"valen_string_codepoint_length\"(ptr " + self.value(instruction.first!) + ")"); return }
+            if op == "string_codepoint_at" { self.writer.line("    " + self.value(instruction.result!) + " = call i64 @\"valen_string_codepoint_at\"(ptr " + self.value(instruction.first!) + ", i64 " + self.value(instruction.second!) + ")"); return }
+            if op == "string_equal" {
+                local equality = self.value(instruction.result!)
+                if instruction.operator != null { if instruction.operator! == "!=" { equality = self.derived(instruction.result!, "string.equal") } }
+                self.writer.line("    " + equality + " = call i1 @\"valen_string_equal\"(ptr " + self.value(instruction.first!) + ", ptr " + self.value(instruction.second!) + ")")
+                if equality != self.value(instruction.result!) { self.writer.line("    " + self.value(instruction.result!) + " = xor i1 " + equality + ", true") }
+                return
+            }
+            if op == "structural_equal" && instruction.ownerType != null && instruction.ownerType! == "string" {
+                local equality = self.value(instruction.result!)
+                if instruction.operator != null { if instruction.operator! == "!=" { equality = self.derived(instruction.result!, "structural.string.equal") } }
+                self.writer.line("    " + equality + " = call i1 @\"valen_string_equal\"(ptr " + self.value(instruction.first!) + ", ptr " + self.value(instruction.second!) + ")")
+                if equality != self.value(instruction.result!) { self.writer.line("    " + self.value(instruction.result!) + " = xor i1 " + equality + ", true") }
+                return
+            }
+            if op == "structural_equal" { self.structuralEqual(instruction); return }
+            if op == "structural_hash" { self.structuralHash(instruction); return }
+            if op == "structural_copy" { self.structuralCopy(instruction); return }
+            if op == "destroy_object" {
+                local destroyed = self.value(instruction.first!)
+                if instruction.first!.kind == "local" {
+                    destroyed = self.derived(instruction.first!, "destroy.value")
+                    self.writer.line("    " + destroyed + " = load ptr, ptr " + self.localName(instruction.first!.name))
+                }
+                self.writer.line("    call void @\"valen_destroy_object\"(ptr " + destroyed + ")")
+                return
+            }
+            if op == "store_local" {
+                local localType = self.localType(function, instruction.name!)
+                local stored = self.coerce(instruction.first!, localType, "store." + instruction.name!)
+                self.writer.line("    store " + self.llvmType(localType) + " " + stored + ", ptr " + self.localName(instruction.name!))
+                if self.isManagedReferenceType(localType) { self.storeRoot(function, instruction.name!, stored) }
+                return
+            }
+            if op == "binary" { self.binary(instruction); return }
+            if op == "unary" { self.unary(instruction); return }
+            if op == "convert" { self.convert(instruction); return }
+            if op == "jump" { self.emitSafepoint(function, instruction); self.writer.line("    br label %" + self.labelReference(instruction.target!)); return }
+            if op == "branch" {
+                self.emitSafepoint(function, instruction)
+                local condition = self.truthValue(instruction.first!)
+                self.writer.line("    br i1 " + condition + ", label %" + self.labelReference(instruction.target!) + ", label %" + self.labelReference(instruction.alternateTarget!))
+                return
+            }
+            if op == "call" { self.call(function, instruction); return }
+            if op == "virtual_call" { self.virtualCall(instruction); return }
+            if op == "contract_call" { self.contractCall(instruction); return }
+            if op == "type_test" || op == "checked_cast" { self.typeOperation(instruction); return }
+            if op == "test_expect" { self.writer.line("    call void @\"valen_test_expect\"(i1 " + self.value(instruction.first!) + ")"); return }
+            if op == "test_failures" { self.writer.line("    " + self.value(instruction.result!) + " = call i64 @\"valen_test_failure_count\"()"); return }
+            if op == "return" {
+                if self.rootCount(function) > 0 { self.writer.line("    call void @\"valen_gc_root_pop\"(ptr %\"llvm.gc.record\")") }
+                if instruction.first == null { self.writer.line("    ret void") }
+                else {
+                    local returnType = self.llvmType(function.returnType)
+                    local valueType = self.llvmType(instruction.first!.typeName)
+                    if returnType == valueType { self.writer.line("    ret " + returnType + " " + self.value(instruction.first!)) }
+                    else {
+                        local operation = "trunc"
+                        if self.typeBits(instruction.first!.typeName) < self.typeBits(function.returnType) { if self.isUnsigned(instruction.first!.typeName) { operation = "zext" } else { operation = "sext" } }
+                        local converted = "%\"return.convert." + instruction.first!.name + "\""
+                        self.writer.line("    " + converted + " = " + operation + " " + valueType + " " + self.value(instruction.first!) + " to " + returnType)
+                        self.writer.line("    ret " + returnType + " " + converted)
+                    }
+                }
+                return
+            }
+            self.fail("LLVM prototype does not support IR operation '" + op + "'")
+        }
+
+        constant(instruction:Ir.Instruction) -> void {
+            return
+        }
+
+        scanStringLiterals() -> void {
+            self.stringLiterals = new Array<string>(0)
+            local functionIndex:i64 = 0
+            while functionIndex < self.program.functions.length {
+                local function = self.program.functions[functionIndex]
+                if self.emits(function) {
+                    local blockIndex:i64 = 0
+                    while blockIndex < function.blocks.length {
+                        local instructions = function.blocks[blockIndex].instructions
+                        local instructionIndex:i64 = 0
+                        while instructionIndex < instructions.length {
+                            local instruction = instructions[instructionIndex]
+                            if instruction.op == "string_constant" && instruction.text != null { self.internString(instruction.text!) }
+                            instructionIndex = instructionIndex + 1
+                        }
+                        blockIndex = blockIndex + 1
+                    }
+                }
+                functionIndex = functionIndex + 1
+            }
+        }
+
+        internString(value:string) -> i64 {
+            local index:i64 = 0
+            while index < self.stringLiterals.length { if self.stringLiterals[index] == value { return index }; index = index + 1 }
+            self.stringLiterals.append(value)
+            return self.stringLiterals.length - 1
+        }
+
+        writeStringLiterals() -> void {
+            local index:i64 = 0
+            while index < self.stringLiterals.length {
+                local value = self.stringLiterals[index]
+                local bytes = new StringBuilder()
+                local byteIndex:i64 = 0
+                while byteIndex < value.length { bytes.append("\\"); bytes.append(self.hexByte(value[byteIndex] as i64)); byteIndex = byteIndex + 1 }
+                self.writer.line("@\"valen.llvm.string.data." + index.toString() + "\" = private constant [" + value.length.toString() + " x i8] c\"" + bytes.build() + "\"")
+                self.writer.line("@\"valen.llvm.string." + index.toString() + "\" = private constant { ptr, i64 } { ptr @\"valen.llvm.string.data." + index.toString() + "\", i64 " + value.length.toString() + " }")
+                index = index + 1
+            }
+            if self.stringLiterals.length > 0 { self.writer.line("") }
+        }
+
+        stringConstant(instruction:Ir.Instruction) -> void {
+            local index = self.internString(instruction.text!)
+            self.writer.line("    " + self.value(instruction.result!) + " = getelementptr { ptr, i64 }, ptr @\"valen.llvm.string." + index.toString() + "\", i64 0")
+        }
+
+        hexByte(value:i64) -> string {
+            local digits = "0123456789ABCDEF"
+            local high = value / 16
+            local low = value - high * 16
+            return digits.slice(high, 1) + digits.slice(low, 1)
+        }
+
+        loadField(instruction:Ir.Instruction) -> void {
+            local field = self.findField(instruction.name!)
+            if field == null { self.fail("LLVM backend cannot resolve field '" + instruction.name! + "'"); return }
+            local address = self.derived(instruction.result!, "field.address")
+            self.writer.line("    " + address + " = getelementptr i8, ptr " + self.value(instruction.first!) + ", i64 " + self.fieldOffset(field!).toString())
+            if field!.ownership == "member-weak" {
+                local loaded = self.derived(instruction.result!, "weak.field.value")
+                self.writer.line("    " + loaded + " = load ptr, ptr " + address)
+                self.writer.line("    " + self.value(instruction.result!) + " = call ptr @\"valen_weak_load\"(ptr " + loaded + ")")
+            } else { self.writer.line("    " + self.value(instruction.result!) + " = load " + self.llvmType(field!.typeName) + ", ptr " + address) }
+        }
+
+        storeField(instruction:Ir.Instruction) -> void {
+            local field = self.findField(instruction.name!)
+            if field == null { self.fail("LLVM backend cannot resolve field '" + instruction.name! + "'"); return }
+            local address = self.derived(instruction.second!, "field.address")
+            self.writer.line("    " + address + " = getelementptr i8, ptr " + self.value(instruction.first!) + ", i64 " + self.fieldOffset(field!).toString())
+            local stored = self.coerce(instruction.second!, field!.typeName, "field." + instruction.name!)
+            self.writer.line("    store " + self.llvmType(field!.typeName) + " " + stored + ", ptr " + address)
+        }
+
+        allocate(instruction:Ir.Instruction) -> void {
+            local typeName = instruction.ownerType!
+            self.writer.line("    " + self.value(instruction.result!) + " = call ptr @\"valen_gc_alloc\"(i64 " + self.typeSize(typeName).toString() + ", ptr " + self.gcTraceGlobal(typeName) + ", ptr " + self.gcWeakGlobal(typeName) + ", ptr null)")
+            self.writer.line("    store ptr " + self.typeGlobal(typeName) + ", ptr " + self.value(instruction.result!))
+            local countAddress = self.derived(instruction.result!, "count.address")
+            self.writer.line("    " + countAddress + " = getelementptr i8, ptr " + self.value(instruction.result!) + ", i64 8")
+            self.writer.line("    store i64 1, ptr " + countAddress)
+        }
+
+        optionalBox(instruction:Ir.Instruction) -> void {
+            self.writer.line("    " + self.value(instruction.result!) + " = call ptr @\"valen_gc_alloc\"(i64 24, ptr null, ptr null, ptr null)")
+            self.writer.line("    store ptr null, ptr " + self.value(instruction.result!))
+            local countAddress = self.derived(instruction.result!, "optional.count.address")
+            self.writer.line("    " + countAddress + " = getelementptr i8, ptr " + self.value(instruction.result!) + ", i64 8")
+            self.writer.line("    store i64 1, ptr " + countAddress)
+            local valueAddress = self.derived(instruction.result!, "optional.value.address")
+            self.writer.line("    " + valueAddress + " = getelementptr i8, ptr " + self.value(instruction.result!) + ", i64 16")
+            self.writer.line("    store i64 " + self.integerBits(instruction.first!) + ", ptr " + valueAddress)
+        }
+
+        unwrap(instruction:Ir.Instruction) -> void {
+            local isNull = self.derived(instruction.result!, "optional.is.null")
+            local failure = "llvm.optional.failure." + self.nextInternal.toString(); self.nextInternal = self.nextInternal + 1
+            local present = "llvm.optional.present." + self.nextInternal.toString(); self.nextInternal = self.nextInternal + 1
+            self.writer.line("    " + isNull + " = icmp eq ptr " + self.value(instruction.first!) + ", null")
+            self.writer.line("    br i1 " + isNull + ", label %\"" + failure + "\", label %\"" + present + "\"")
+            self.writer.line("\"" + failure + "\":")
+            self.writer.line("    call void @\"valen_System_exit\"(i32 71)")
+            self.writer.line("    unreachable")
+            self.writer.line("\"" + present + "\":")
+            if self.isPrimitiveOptional(instruction.ownerType!) {
+                local address = self.derived(instruction.result!, "optional.value.address")
+                local bits = self.derived(instruction.result!, "optional.value.bits")
+                self.writer.line("    " + address + " = getelementptr i8, ptr " + self.value(instruction.first!) + ", i64 16")
+                self.writer.line("    " + bits + " = load i64, ptr " + address)
+                self.fromIntegerBits(bits, instruction.typeName!, instruction.result!)
+            } else { self.writer.line("    " + self.value(instruction.result!) + " = getelementptr i8, ptr " + self.value(instruction.first!) + ", i64 0") }
+        }
+
+        arrayNew(instruction:Ir.Instruction) -> void {
+            local arrayType = instruction.result!.typeName
+            self.writer.line("    " + self.value(instruction.result!) + " = call ptr @\"valen_gc_array_new\"(i64 " + self.typeBytes(instruction.elementType!).toString() + ", i64 " + self.value(instruction.first!) + ", ptr " + self.gcArrayTraceGlobal(arrayType) + ", ptr " + self.gcArrayWeakGlobal(arrayType) + ")")
+        }
+
+        arrayLoad(instruction:Ir.Instruction) -> void {
+            local address = self.derived(instruction.result!, "array.element.address")
+            self.writer.line("    " + address + " = call ptr @\"valen_array_address\"(ptr " + self.value(instruction.first!) + ", i64 " + self.value(instruction.second!) + ", i64 " + self.typeBytes(instruction.elementType!).toString() + ")")
+            if instruction.elementOwnership != null && instruction.elementOwnership! == "weak" {
+                local loaded = self.derived(instruction.result!, "weak.array.value")
+                self.writer.line("    " + loaded + " = load ptr, ptr " + address)
+                self.writer.line("    " + self.value(instruction.result!) + " = call ptr @\"valen_weak_load\"(ptr " + loaded + ")")
+            } else { self.writer.line("    " + self.value(instruction.result!) + " = load " + self.llvmType(instruction.elementType!) + ", ptr " + address) }
+        }
+
+        arrayStore(instruction:Ir.Instruction) -> void {
+            local address = self.derived(instruction.third!, "array.store.address")
+            self.writer.line("    " + address + " = call ptr @\"valen_array_address\"(ptr " + self.value(instruction.first!) + ", i64 " + self.value(instruction.second!) + ", i64 " + self.typeBytes(instruction.elementType!).toString() + ")")
+            if instruction.elementOwnership != null && instruction.elementOwnership! == "owned" && self.isManagedReferenceType(instruction.elementType!) {
+                local previous = self.derived(instruction.third!, "array.previous")
+                self.writer.line("    " + previous + " = load ptr, ptr " + address)
+                self.writer.line("    call void @\"valen_destroy_object\"(ptr " + previous + ")")
+            }
+            local stored = self.coerce(instruction.third!, instruction.elementType!, "array.store")
+            self.writer.line("    store " + self.llvmType(instruction.elementType!) + " " + stored + ", ptr " + address)
+        }
+
+        integerBits(value:Ir.Value) -> string {
+            local typeName = self.llvmType(value.typeName)
+            if typeName == "i64" { return self.value(value) }
+            local converted = self.derived(value, "integer.bits")
+            if typeName == "ptr" { self.writer.line("    " + converted + " = ptrtoint ptr " + self.value(value) + " to i64"); return converted }
+            if typeName == "double" { self.writer.line("    " + converted + " = bitcast double " + self.value(value) + " to i64"); return converted }
+            if typeName == "float" {
+                local bits32 = self.derived(value, "integer.bits32")
+                self.writer.line("    " + bits32 + " = bitcast float " + self.value(value) + " to i32")
+                self.writer.line("    " + converted + " = zext i32 " + bits32 + " to i64")
+                return converted
+            }
+            local operation = "zext"
+            if !self.isUnsigned(value.typeName) { operation = "sext" }
+            self.writer.line("    " + converted + " = " + operation + " " + typeName + " " + self.value(value) + " to i64")
+            return converted
+        }
+
+        fromIntegerBits(bits:string, typeName:string, result:Ir.Value) -> void {
+            local llvmType = self.llvmType(typeName)
+            if llvmType == "i64" { self.writer.line("    " + self.value(result) + " = add i64 " + bits + ", 0") }
+            else if llvmType == "ptr" { self.writer.line("    " + self.value(result) + " = inttoptr i64 " + bits + " to ptr") }
+            else if llvmType == "double" { self.writer.line("    " + self.value(result) + " = bitcast i64 " + bits + " to double") }
+            else if llvmType == "float" { local bits32 = self.derived(result, "float.bits32"); self.writer.line("    " + bits32 + " = trunc i64 " + bits + " to i32"); self.writer.line("    " + self.value(result) + " = bitcast i32 " + bits32 + " to float") }
+            else { self.writer.line("    " + self.value(result) + " = trunc i64 " + bits + " to " + llvmType) }
+        }
+
+        floatConstant(instruction:Ir.Instruction) -> void {
+            return
+        }
+
+        binary(instruction:Ir.Instruction) -> void {
+            local operator = instruction.operator!
+            local operandType = self.llvmType(instruction.first!.typeName)
+            if self.isFloat(instruction.first!.typeName) { self.floatBinary(instruction); return }
+            local operation = ""
+            if operator == "+" { operation = "add" }
+            else if operator == "-" { operation = "sub" }
+            else if operator == "*" { operation = "mul" }
+            else if operator == "/" { if self.isUnsigned(instruction.first!.typeName) { operation = "udiv" } else { operation = "sdiv" } }
+            else if operator == "%" { if self.isUnsigned(instruction.first!.typeName) { operation = "urem" } else { operation = "srem" } }
+            else if operator == "&" { operation = "and" }
+            else if operator == "|" { operation = "or" }
+            else if operator == "^" { operation = "xor" }
+            else if operator == "<<" || operator == ">>" {
+                local shift = self.value(instruction.second!)
+                local masked = self.derived(instruction.result!, "shift")
+                self.writer.line("    " + masked + " = and " + operandType + " " + shift + ", " + (self.typeBits(instruction.first!.typeName) - 1).toString())
+                if operator == "<<" { operation = "shl" }
+                else { if self.isUnsigned(instruction.first!.typeName) { operation = "lshr" } else { operation = "ashr" } }
+                self.writer.line("    " + self.value(instruction.result!) + " = " + operation + " " + operandType + " " + self.value(instruction.first!) + ", " + masked)
+                return
+            }
+            if operation.length > 0 {
+                if operator == "/" || operator == "%" {
+                    local zero = self.derived(instruction.result!, "division.zero")
+                    local failure = "llvm.division.failure." + self.nextInternal.toString(); self.nextInternal = self.nextInternal + 1
+                    local valid = "llvm.division.valid." + self.nextInternal.toString(); self.nextInternal = self.nextInternal + 1
+                    self.writer.line("    " + zero + " = icmp eq " + operandType + " " + self.value(instruction.second!) + ", 0")
+                    self.writer.line("    br i1 " + zero + ", label %\"" + failure + "\", label %\"" + valid + "\"")
+                    self.writer.line("\"" + failure + "\":")
+                    self.writer.line("    call void @\"valen_System_exit\"(i32 73)")
+                    self.writer.line("    unreachable")
+                    self.writer.line("\"" + valid + "\":")
+                }
+                self.writer.line("    " + self.value(instruction.result!) + " = " + operation + " " + operandType + " " + self.value(instruction.first!) + ", " + self.value(instruction.second!))
+                return
+            }
+            local condition = ""
+            if operator == "==" || operator == "===" { condition = "eq" }
+            else if operator == "!=" || operator == "!==" { condition = "ne" }
+            else if operator == "<" { if self.isUnsigned(instruction.first!.typeName) { condition = "ult" } else { condition = "slt" } }
+            else if operator == "<=" { if self.isUnsigned(instruction.first!.typeName) { condition = "ule" } else { condition = "sle" } }
+            else if operator == ">" { if self.isUnsigned(instruction.first!.typeName) { condition = "ugt" } else { condition = "sgt" } }
+            else if operator == ">=" { if self.isUnsigned(instruction.first!.typeName) { condition = "uge" } else { condition = "sge" } }
+            if condition.length == 0 { self.fail("LLVM prototype does not support binary operator '" + operator + "'"); return }
+            self.writer.line("    " + self.value(instruction.result!) + " = icmp " + condition + " " + operandType + " " + self.value(instruction.first!) + ", " + self.value(instruction.second!))
+        }
+
+        floatBinary(instruction:Ir.Instruction) -> void {
+            local operator = instruction.operator!
+            local typeName = self.llvmType(instruction.first!.typeName)
+            local operation = ""
+            if operator == "+" { operation = "fadd" }
+            else if operator == "-" { operation = "fsub" }
+            else if operator == "*" { operation = "fmul" }
+            else if operator == "/" { operation = "fdiv" }
+            if operation.length > 0 {
+                self.writer.line("    " + self.value(instruction.result!) + " = " + operation + " " + typeName + " " + self.value(instruction.first!) + ", " + self.value(instruction.second!))
+                return
+            }
+            local condition = ""
+            if operator == "==" { condition = "oeq" }
+            else if operator == "!=" { condition = "une" }
+            else if operator == "<" { condition = "olt" }
+            else if operator == "<=" { condition = "ole" }
+            else if operator == ">" { condition = "ogt" }
+            else if operator == ">=" { condition = "oge" }
+            if condition.length == 0 { self.fail("LLVM backend does not support floating-point operator '" + operator + "'"); return }
+            self.writer.line("    " + self.value(instruction.result!) + " = fcmp " + condition + " " + typeName + " " + self.value(instruction.first!) + ", " + self.value(instruction.second!))
+        }
+
+        unary(instruction:Ir.Instruction) -> void {
+            local operator = instruction.operator!
+            local typeName = self.llvmType(instruction.first!.typeName)
+            if operator == "!" { self.writer.line("    " + self.value(instruction.result!) + " = xor i1 " + self.value(instruction.first!) + ", true"); return }
+            if operator == "-" {
+                if self.isFloat(instruction.first!.typeName) { self.writer.line("    " + self.value(instruction.result!) + " = fneg " + typeName + " " + self.value(instruction.first!)) }
+                else { self.writer.line("    " + self.value(instruction.result!) + " = sub " + typeName + " 0, " + self.value(instruction.first!)) }
+                return
+            }
+            if operator == "~" { self.writer.line("    " + self.value(instruction.result!) + " = xor " + typeName + " " + self.value(instruction.first!) + ", -1"); return }
+            self.fail("LLVM backend does not support unary operator '" + operator + "'")
+        }
+
+        convert(instruction:Ir.Instruction) -> void {
+            local fromName = instruction.first!.typeName
+            local toName = instruction.typeName!
+            local fromType = self.llvmType(fromName)
+            local toType = self.llvmType(toName)
+            local operation = ""
+            if fromType == toType {
+                if self.isFloat(fromName) { operation = "fadd " + fromType + " " + self.value(instruction.first!) + ", 0.0" }
+                else { operation = "add " + fromType + " " + self.value(instruction.first!) + ", 0" }
+                self.writer.line("    " + self.value(instruction.result!) + " = " + operation)
+                return
+            }
+            if self.isFloat(fromName) && self.isFloat(toName) {
+                if self.typeBits(fromName) < self.typeBits(toName) { operation = "fpext" } else { operation = "fptrunc" }
+            } else if self.isFloat(fromName) {
+                if self.isUnsigned(toName) { operation = "fptoui" } else { operation = "fptosi" }
+            } else if self.isFloat(toName) {
+                if self.isUnsigned(fromName) { operation = "uitofp" } else { operation = "sitofp" }
+            } else if self.typeBits(fromName) < self.typeBits(toName) {
+                if self.isUnsigned(fromName) { operation = "zext" } else { operation = "sext" }
+            } else { operation = "trunc" }
+            self.writer.line("    " + self.value(instruction.result!) + " = " + operation + " " + fromType + " " + self.value(instruction.first!) + " to " + toType)
+        }
+
+        call(function:Ir.Function, instruction:Ir.Instruction) -> void {
+            local target = instruction.target!
+            local returnType = "void"
+            local targetName = self.globalName(target)
+            local targetFunction = self.findFunction(target)
+            if targetFunction != null { returnType = self.llvmType(targetFunction!.returnType) }
+            else {
+                local external = self.findExternal(target)
+                if external == null { self.fail("LLVM prototype cannot resolve call target '" + target + "'"); return }
+                returnType = self.llvmType(external!.returnType)
+                targetName = "@\"" + external!.runtimeName + "\""
+            }
+            local line = "    "
+            if instruction.result != null { line = line + self.value(instruction.result!) + " = " }
+            line = line + "call " + returnType + " " + targetName + "("
+            local argumentIndex:i64 = 0
+            while argumentIndex < instruction.arguments.length {
+                if argumentIndex > 0 { line = line + ", " }
+                local argument = instruction.arguments[argumentIndex]
+                line = line + self.llvmType(argument.typeName) + " " + self.value(argument)
+                argumentIndex = argumentIndex + 1
+            }
+            self.writer.line(line + ")")
+        }
+
+        virtualCall(instruction:Ir.Instruction) -> void {
+            if instruction.arguments.length == 0 { self.fail("LLVM virtual call has no receiver"); return }
+            local receiver = instruction.arguments[0]
+            local stem = "virtual." + instruction.slot.toString()
+            local typeAddress = self.derived(receiver, stem + ".type.address")
+            local typeValue = self.derived(receiver, stem + ".type")
+            local slotAddress = self.derived(receiver, stem + ".slot.address")
+            local method = self.derived(receiver, stem + ".method")
+            self.writer.line("    " + typeAddress + " = getelementptr i8, ptr " + self.value(receiver) + ", i64 0")
+            self.writer.line("    " + typeValue + " = load ptr, ptr " + typeAddress)
+            self.writer.line("    " + slotAddress + " = getelementptr i8, ptr " + typeValue + ", i64 " + (40 + instruction.slot * 8).toString())
+            self.writer.line("    " + method + " = load ptr, ptr " + slotAddress)
+            local returnType = "void"
+            if instruction.typeName != null { returnType = self.llvmType(instruction.typeName!) }
+            local line = "    "
+            if instruction.result != null { line = line + self.value(instruction.result!) + " = " }
+            line = line + "call " + returnType + " " + method + "("
+            local index:i64 = 0
+            while index < instruction.arguments.length {
+                if index > 0 { line = line + ", " }
+                line = line + self.llvmType(instruction.arguments[index].typeName) + " " + self.value(instruction.arguments[index])
+                index = index + 1
+            }
+            self.writer.line(line + ")")
+        }
+
+        contractCall(instruction:Ir.Instruction) -> void {
+            if instruction.arguments.length == 0 { self.fail("LLVM contract call has no receiver"); return }
+            local receiver = instruction.arguments[0]
+            local method = self.derived(receiver, "contract.method")
+            self.writer.line("    " + method + " = call ptr @\"valen_contract_method\"(ptr " + self.value(receiver) + ", ptr " + self.typeGlobal(instruction.ownerType!) + ", i64 " + instruction.slot.toString() + ")")
+            local returnType = "void"
+            if instruction.typeName != null { returnType = self.llvmType(instruction.typeName!) }
+            local line = "    "
+            if instruction.result != null { line = line + self.value(instruction.result!) + " = " }
+            line = line + "call " + returnType + " " + method + "("
+            local index:i64 = 0
+            while index < instruction.arguments.length {
+                if index > 0 { line = line + ", " }
+                line = line + self.llvmType(instruction.arguments[index].typeName) + " " + self.value(instruction.arguments[index])
+                index = index + 1
+            }
+            self.writer.line(line + ")")
+        }
+
+        typeOperation(instruction:Ir.Instruction) -> void {
+            local tested = self.value(instruction.result!)
+            if instruction.op == "checked_cast" { tested = self.derived(instruction.result!, "type.test") }
+            self.writer.line("    " + tested + " = call i1 @\"valen_type_test\"(ptr " + self.value(instruction.first!) + ", ptr " + self.typeGlobal(instruction.ownerType!) + ")")
+            if instruction.op == "checked_cast" { self.writer.line("    " + self.value(instruction.result!) + " = select i1 " + tested + ", ptr " + self.value(instruction.first!) + ", ptr null") }
+        }
+
+        structuralEqual(instruction:Ir.Instruction) -> void {
+            local target = "@\"valen_object_equal\""
+            local ownerType = self.baseType(instruction.ownerType!)
+            if self.isArray(ownerType) { target = self.arrayEqualityGlobal(ownerType) }
+            local equality = self.value(instruction.result!)
+            if instruction.operator != null { if instruction.operator! == "!=" { equality = self.derived(instruction.result!, "structural.equal") } }
+            self.writer.line("    " + equality + " = call i1 " + target + "(ptr " + self.value(instruction.first!) + ", ptr " + self.value(instruction.second!) + ", ptr null)")
+            if equality != self.value(instruction.result!) { self.writer.line("    " + self.value(instruction.result!) + " = xor i1 " + equality + ", true") }
+        }
+
+        structuralHash(instruction:Ir.Instruction) -> void {
+            local target = "@\"valen_object_hash\""
+            local ownerType = self.baseType(instruction.ownerType!)
+            if ownerType == "string" { target = "@\"valen_string_hash_context\"" }
+            else if self.isArray(ownerType) { target = self.arrayHashGlobal(ownerType) }
+            self.writer.line("    " + self.value(instruction.result!) + " = call i64 " + target + "(ptr " + self.value(instruction.first!) + ", ptr null)")
+        }
+
+        structuralCopy(instruction:Ir.Instruction) -> void {
+            local target = "@\"valen_object_copy\""
+            local ownerType = self.baseType(instruction.ownerType!)
+            if ownerType == "string" { target = "@\"valen_string_copy_context\"" }
+            else if self.isArray(ownerType) { target = self.arrayCopyGlobal(ownerType) }
+            self.writer.line("    " + self.value(instruction.result!) + " = call ptr " + target + "(ptr " + self.value(instruction.first!) + ", ptr null)")
+        }
+
+        findFunction(name:string) -> Ir.Function? {
+            local index:i64 = 0
+            while index < self.program.functions.length {
+                if self.program.functions[index].name == name { return copy self.program.functions[index] }
+                index = index + 1
+            }
+            return null
+        }
+
+        findExternal(name:string) -> Ir.ExternalFunction? {
+            local index:i64 = 0
+            while index < self.program.externals.length {
+                if self.program.externals[index].name == name { return copy self.program.externals[index] }
+                index = index + 1
+            }
+            return null
+        }
+
+        findField(name:string) -> Ir.Field? {
+            local typeIndex:i64 = 0
+            while typeIndex < self.program.types.length {
+                local fields = self.program.types[typeIndex].fields
+                local fieldIndex:i64 = 0
+                while fieldIndex < fields.length {
+                    if fields[fieldIndex].qualifiedName == name { return copy fields[fieldIndex] }
+                    fieldIndex = fieldIndex + 1
+                }
+                typeIndex = typeIndex + 1
+            }
+            return null
+        }
+
+        fieldOffset(target:Ir.Field) -> i64 {
+            local typeIndex:i64 = 0
+            while typeIndex < self.program.types.length {
+                local fields = self.program.types[typeIndex].fields
+                local offset:i64 = 16
+                local fieldIndex:i64 = 0
+                while fieldIndex < fields.length {
+                    local alignment = self.typeBytes(fields[fieldIndex].typeName)
+                    if alignment > 8 { alignment = 8 }
+                    offset = self.align(offset, alignment)
+                    if fields[fieldIndex].qualifiedName == target.qualifiedName { return offset }
+                    offset = offset + self.typeBytes(fields[fieldIndex].typeName)
+                    fieldIndex = fieldIndex + 1
+                }
+                typeIndex = typeIndex + 1
+            }
+            return 16
+        }
+
+        typeSize(name:string) -> i64 {
+            local typeIndex:i64 = 0
+            while typeIndex < self.program.types.length {
+                local typeNode = self.program.types[typeIndex]
+                if typeNode.name == name {
+                    local offset:i64 = 16
+                    local alignment:i64 = 1
+                    local fieldIndex:i64 = 0
+                    while fieldIndex < typeNode.fields.length {
+                        local fieldAlignment = self.typeBytes(typeNode.fields[fieldIndex].typeName)
+                        if fieldAlignment > 8 { fieldAlignment = 8 }
+                        offset = self.align(offset, fieldAlignment)
+                        offset = offset + self.typeBytes(typeNode.fields[fieldIndex].typeName)
+                        if fieldAlignment > alignment { alignment = fieldAlignment }
+                        fieldIndex = fieldIndex + 1
+                    }
+                    return self.align(offset, alignment)
+                }
+                typeIndex = typeIndex + 1
+            }
+            return 16
+        }
+
+        typeBytes(name:string) -> i64 {
+            if name == "bool" || name == "i8" || name == "u8" { return 1 }
+            if name == "i16" || name == "u16" { return 2 }
+            if name == "i32" || name == "u32" || name == "f32" { return 4 }
+            return 8
+        }
+
+        align(value:i64, alignment:i64) -> i64 { return ((value + alignment - 1) / alignment) * alignment }
+
+        localType(function:Ir.Function, name:string) -> string {
+            local blockIndex:i64 = 0
+            while blockIndex < function.blocks.length {
+                local instructions = function.blocks[blockIndex].instructions
+                local index:i64 = 0
+                while index < instructions.length {
+                    if instructions[index].op == "declare_local" && instructions[index].name != null && instructions[index].name! == name { return instructions[index].typeName! }
+                    index = index + 1
+                }
+                blockIndex = blockIndex + 1
+            }
+            return "i64"
+        }
+
+        coerce(value:Ir.Value, toName:string, prefix:string) -> string {
+            local fromName = value.typeName
+            local fromType = self.llvmType(fromName)
+            local toType = self.llvmType(toName)
+            if fromType == toType { return self.value(value) }
+            local operation = "trunc"
+            if self.isFloat(fromName) && self.isFloat(toName) { if self.typeBits(fromName) < self.typeBits(toName) { operation = "fpext" } else { operation = "fptrunc" } }
+            else if self.isFloat(fromName) { if self.isUnsigned(toName) { operation = "fptoui" } else { operation = "fptosi" } }
+            else if self.isFloat(toName) { if self.isUnsigned(fromName) { operation = "uitofp" } else { operation = "sitofp" } }
+            else if self.typeBits(fromName) < self.typeBits(toName) { if self.isUnsigned(fromName) { operation = "zext" } else { operation = "sext" } }
+            local result = "%\"coerce." + prefix + "." + value.name + "\""
+            self.writer.line("    " + result + " = " + operation + " " + fromType + " " + self.value(value) + " to " + toType)
+            return result
+        }
+
+        llvmType(typeName:string) -> string {
+            if typeName == "void" { return "void" }
+            if typeName == "bool" { return "i1" }
+            if typeName == "i8" || typeName == "u8" { return "i8" }
+            if typeName == "i16" || typeName == "u16" { return "i16" }
+            if typeName == "i32" || typeName == "u32" { return "i32" }
+            if typeName == "i64" || typeName == "u64" { return "i64" }
+            if typeName == "f32" { return "float" }
+            if typeName == "f64" { return "double" }
+            if typeName == "null" || typeName == "string" || typeName == "StringBuilder" || self.isArray(typeName) { return "ptr" }
+            if typeName.length > 0 { if typeName[typeName.length - 1] == 63 { return "ptr" } }
+            local index:i64 = 0
+            while index < self.program.types.length { if self.program.types[index].name == typeName { return "ptr" }; index = index + 1 }
+            return "i64"
+        }
+        zeroValue(typeName:string) -> string { if self.llvmType(typeName) == "ptr" { return "null" }; if self.llvmType(typeName) == "float" || self.llvmType(typeName) == "double" { return "0.0" }; if self.llvmType(typeName) == "i1" { return "false" }; return "0" }
+
+        isUnsigned(typeName:string) -> bool { return typeName == "bool" || typeName == "u8" || typeName == "u16" || typeName == "u32" || typeName == "u64" }
+        isFloat(typeName:string) -> bool { return typeName == "f32" || typeName == "f64" }
+        isArray(typeName:string) -> bool { return typeName.length >= 7 && typeName.slice(0, 6) == "Array<" }
+        isPrimitiveOptional(typeName:string) -> bool {
+            if typeName.length < 2 || typeName[typeName.length - 1] != 63 { return false }
+            local base = typeName.slice(0, typeName.length - 1)
+            return base == "bool" || base == "u8" || base == "i8" || base == "u16" || base == "i16" || base == "u32" || base == "i32" || base == "u64" || base == "i64" || base == "f32" || base == "f64"
+        }
+        isManagedReferenceType(typeName:string) -> bool {
+            if self.isPrimitiveOptional(typeName) { return true }
+            local base = typeName
+            if base.length > 0 { if base[base.length - 1] == 63 { base = base.slice(0, base.length - 1) } }
+            if base == "string" || base == "StringBuilder" || self.isArray(base) { return true }
+            local index:i64 = 0
+            while index < self.program.types.length { if self.program.types[index].name == base { return true }; index = index + 1 }
+            return false
+        }
+        baseType(typeName:string) -> string { if typeName.length > 0 { if typeName[typeName.length - 1] == 63 { return typeName.slice(0, typeName.length - 1) } }; return typeName }
+        typeBits(typeName:string) -> i64 {
+            if typeName == "bool" { return 1 }
+            if typeName == "i8" || typeName == "u8" { return 8 }
+            if typeName == "i16" || typeName == "u16" { return 16 }
+            if typeName == "i32" || typeName == "u32" || typeName == "f32" { return 32 }
+            return 64
+        }
+        globalName(name:string) -> string { return "@\"" + self.mangle(name) + "\"" }
+        typeGlobal(name:string) -> string { return "@\"valen_type_" + self.mangle(name) + "\"" }
+        gcTraceGlobal(name:string) -> string { return "@\"valen_type_" + self.mangle(name) + "_gc_trace\"" }
+        gcWeakGlobal(name:string) -> string { return "@\"valen_type_" + self.mangle(name) + "_gc_weak\"" }
+        gcArrayTraceGlobal(name:string) -> string { return "@\"valen_gc_array_trace_" + self.mangle(name) + "\"" }
+        gcArrayWeakGlobal(name:string) -> string { return "@\"valen_gc_array_weak_" + self.mangle(name) + "\"" }
+        arrayEqualityGlobal(name:string) -> string { return "@\"valen_array_equal_" + self.mangle(name) + "\"" }
+        arrayHashGlobal(name:string) -> string { return "@\"valen_array_hash_" + self.mangle(name) + "\"" }
+        arrayCopyGlobal(name:string) -> string { return "@\"valen_array_copy_" + self.mangle(name) + "\"" }
+        arraySliceGlobal(name:string) -> string { return "@\"valen_array_slice_" + self.mangle(name) + "\"" }
+        arrayDestroyGlobal(name:string) -> string { return "@\"valen_array_destroy_" + self.mangle(name) + "\"" }
+        rootTraceGlobal(function:Ir.Function) -> string { return "@\"" + self.mangle(function.name) + ".llvm.gc.roots\"" }
+        mangle(name:string) -> string {
+            local builder = new StringBuilder()
+            builder.append("valen_fn")
+            local index:i64 = 0
+            while index < name.length { builder.append("_"); builder.append(name[index].toString()); index = index + 1 }
+            return builder.build()
+        }
+        parameterName(name:string) -> string { return "%\"arg." + name + "\"" }
+        localName(name:string) -> string { return "%\"local." + name + "\"" }
+        labelName(name:string) -> string { return "\"" + name + "\"" }
+        labelReference(name:string) -> string { return "\"" + name + "\"" }
+        value(value:Ir.Value) -> string {
+            local immediateIndex:i64 = 0
+            while immediateIndex < self.immediateNames.length { if self.immediateNames[immediateIndex] == value.name { return self.immediateValues[immediateIndex] }; immediateIndex = immediateIndex + 1 }
+            if value.kind == "parameter" { return self.parameterName(value.name) }
+            if value.name.length > 0 { if value.name[0] == 37 {
+                if self.currentFunction != null && self.needsSpill(self.currentFunction!, value.name) && !self.definitionBlock(self.currentFunction!, value.name, self.currentBlock) {
+                    local loaded = self.derived(value, "spill.load")
+                    self.writer.line("    " + loaded + " = load " + self.llvmType(value.typeName) + ", ptr " + self.spillName(value.name))
+                    return loaded
+                }
+                return self.localTemporary(value)
+            } }
+            return "%\"value." + value.name + "\""
+        }
+        truthValue(value:Ir.Value) -> string {
+            local source = self.value(value)
+            local typeName = self.llvmType(value.typeName)
+            if typeName == "i1" { return source }
+            local result = self.derived(value, "truth")
+            if typeName == "ptr" { self.writer.line("    " + result + " = icmp ne ptr " + source + ", null") }
+            else if typeName == "float" { self.writer.line("    " + result + " = fcmp une float " + source + ", 0.0") }
+            else if typeName == "double" { self.writer.line("    " + result + " = fcmp une double " + source + ", 0.0") }
+            else { self.writer.line("    " + result + " = icmp ne " + typeName + " " + source + ", 0") }
+            return result
+        }
+        derived(value:Ir.Value, suffix:string) -> string { local index = self.nextInternal; self.nextInternal = self.nextInternal + 1; return "%\"llvm." + suffix + "." + value.name + "." + index.toString() + "\"" }
+        localTemporary(value:Ir.Value) -> string { return "%\"temp." + self.currentBlock + "." + value.name + "\"" }
+        spillName(name:string) -> string { return "%\"spill." + name + "\"" }
+
+        definitionBlock(function:Ir.Function, name:string, blockName:string) -> bool {
+            local blockIndex:i64 = 0
+            while blockIndex < function.blocks.length {
+                if function.blocks[blockIndex].label == blockName {
+                    local instructions = function.blocks[blockIndex].instructions
+                    local index:i64 = 0
+                    while index < instructions.length { if instructions[index].result != null && instructions[index].result!.name == name { return true }; index = index + 1 }
+                }
+                blockIndex = blockIndex + 1
+            }
+            return false
+        }
+
+        needsSpill(function:Ir.Function, name:string) -> bool {
+            local blockIndex:i64 = 0
+            while blockIndex < function.blocks.length {
+                local definedHere = self.definitionBlock(function, name, function.blocks[blockIndex].label)
+                local instructions = function.blocks[blockIndex].instructions
+                local index:i64 = 0
+                while index < instructions.length {
+                    if self.usesValue(instructions[index], name) && !definedHere { return true }
+                    index = index + 1
+                }
+                blockIndex = blockIndex + 1
+            }
+            return false
+        }
+
+        usesValue(instruction:Ir.Instruction, name:string) -> bool {
+            if instruction.first != null { if instruction.first!.name == name { return true } }
+            if instruction.second != null { if instruction.second!.name == name { return true } }
+            if instruction.third != null { if instruction.third!.name == name { return true } }
+            local index:i64 = 0
+            while index < instruction.arguments.length { if instruction.arguments[index].name == name { return true }; index = index + 1 }
+            return false
+        }
+        hasRuntime(name:string) -> bool {
+            local index:i64 = 0
+            while index < self.program.externals.length { if self.program.externals[index].runtimeName == name { return true }; index = index + 1 }
+            return false
+        }
+        emitSafepoint(function:Ir.Function, instruction:Ir.Instruction) -> void {
+            if !self.hasRuntime("valen_Operations_threadStart") { return }
+            local blockIndex:i64 = 0
+            while blockIndex < function.blocks.length && function.blocks[blockIndex].label != self.currentBlock { blockIndex = blockIndex + 1 }
+            local targetIndex:i64 = 0
+            while targetIndex < function.blocks.length && function.blocks[targetIndex].label != instruction.target! { targetIndex = targetIndex + 1 }
+            local backedge = targetIndex <= blockIndex
+            if instruction.op == "branch" {
+                targetIndex = 0
+                while targetIndex < function.blocks.length && function.blocks[targetIndex].label != instruction.alternateTarget! { targetIndex = targetIndex + 1 }
+                if targetIndex <= blockIndex { backedge = true }
+            }
+            if backedge { self.writer.line("    call void @\"valen_gc_safepoint\"()") }
+        }
+        fail(message:string) -> void { if self.error.length == 0 { self.error = message } }
+    }}
+}}

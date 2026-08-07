@@ -33,6 +33,11 @@ source -> tokens -> AST -> module graph -> semantic symbols
 - Validation rejects malformed IR before backend generation.
 - The x86-64 backend emits a controlled Intel-syntax subset. Both generation 0 and the self-hosted
   compiler encode that subset and write ELF64 relocatable objects directly.
+- The optional LLVM backend translates the same validated Valen IR into textual LLVM IR for
+  `x86_64-linux`. Clang verifies and optimizes that module, while Valen's existing freestanding
+  runtime object and linker retain startup, ownership, garbage collection, native facilities,
+  and static executable behavior. It is an additional backend, not a replacement for Valen's
+  native encoders.
 - The initial generation-0 AArch64 backend emits and directly encodes a deliberately restricted
   integer/control-flow subset, including full-width constants, integer conversions and normalization,
   division checks, loops, direct calls, scalar `f32`/`f64` arithmetic and comparisons, and checked
@@ -150,6 +155,19 @@ Inspect the deterministic target-independent IR emitted by a native compiler:
 ```sh
 ./valen --emit-ir examples/simple/simple.ar
 ```
+
+Build through LLVM on x86-64 Linux:
+
+```sh
+./valen --backend llvm --target x86_64-linux examples/simple/simple.ar -O1 -o /tmp/simple-llvm
+/tmp/simple-llvm
+```
+
+The LLVM path requires `/usr/bin/clang`; the ordinary native backend, bootstrap chain, Docker
+builder, and scratch runtime do not. Both `-O0` and `-O1` are supported. The generated textual
+module remains beside the executable as `<output>.ll`, with LLVM and runtime objects at
+`<output>.llvm.o` and `<output>.runtime.o` for inspection. Library and standalone object emission
+remain native-backend features for now.
 
 This length-delimited form includes types, fields, dispatch tables, functions, blocks,
 instructions, operands, externals, and foreign libraries. The conformance suite compares it

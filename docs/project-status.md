@@ -5,6 +5,7 @@
 - JavaScript generation-0 compiler
 - compiler written in Valen
 - native x86-64 Linux executables
+- optional LLVM-generated x86-64 Linux executables using the existing Valen runtime and linker
 - objects, nested objects, constructors, fields, and methods
 - inheritance, virtual dispatch, contracts, and checked casts
 - public-by-default and private members

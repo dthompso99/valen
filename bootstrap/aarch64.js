@@ -14,7 +14,7 @@ export class AArch64Backend {
             'valen_System_lastError', 'valen_System_arguments', 'valen_System_currentDirectory',
             'valen_System_environmentVariable', 'valen_System_enableProcessArena', 'valen_System_writeBytes',
             'valen_System_sync', 'valen_System_replaceFile', 'valen_System_removeFile', 'valen_System_makeExecutable',
-            'valen_System_link', 'valen_System_memoryCopy', 'valen_System_memoryCompare',
+            'valen_System_link', 'valen_System_compileLlvm', 'valen_System_memoryCopy', 'valen_System_memoryCompare',
             'valen_System_fileDescriptor', 'valen_System_makeFileNonblocking',
             'valen_Network_listen', 'valen_Network_accept', 'valen_Network_receive', 'valen_Network_send',
             'valen_Network_sendSome', 'valen_Network_closeListener', 'valen_Network_closeConnection',
@@ -1087,6 +1087,9 @@ export class AArch64Backend {
         if (['valen_System_replaceFile', 'valen_System_removeFile', 'valen_System_makeExecutable', 'valen_System_link']
             .some(symbol => this.runtimeSymbols.has(symbol))) lines.push(...this.systemPathRuntime());
         if (this.runtimeSymbols.has('valen_System_link')) lines.push(...this.systemLinkRuntime());
+        if (this.runtimeSymbols.has('valen_System_compileLlvm')) lines.push(
+            '.globl valen_System_compileLlvm', '.type valen_System_compileLlvm, %function', 'valen_System_compileLlvm:',
+            '    mov x0, #127', '    ret', '.size valen_System_compileLlvm, .-valen_System_compileLlvm', '');
         if (this.runtimeSymbols.has('valen_System_memoryCopy')) lines.push(...this.systemMemoryCopyRuntime());
         if (this.runtimeSymbols.has('valen_System_memoryCompare')) lines.push(...this.systemMemoryCompareRuntime());
         if (this.runtimeSymbols.has('valen_System_fileDescriptor')) lines.push(...this.descriptorRuntime('valen_System_fileDescriptor'));

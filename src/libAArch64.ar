@@ -118,7 +118,7 @@ library AArch64 {{
             if name == "valen_System_collectGarbage" || name == "valen_System_print" || name == "valen_System_write" || name == "valen_System_writeError" || name == "valen_System_exit" { return true }
             if name == "valen_System_openRead" || name == "valen_System_openWrite" || name == "valen_System_read" || name == "valen_System_writeFile" || name == "valen_System_close" { return true }
             if name == "valen_System_lastError" || name == "valen_System_arguments" || name == "valen_System_currentDirectory" || name == "valen_System_environmentVariable" { return true }
-            if name == "valen_System_enableProcessArena" || name == "valen_System_writeBytes" || name == "valen_System_sync" || name == "valen_System_replaceFile" || name == "valen_System_removeFile" || name == "valen_System_makeExecutable" || name == "valen_System_link" { return true }
+            if name == "valen_System_enableProcessArena" || name == "valen_System_writeBytes" || name == "valen_System_sync" || name == "valen_System_replaceFile" || name == "valen_System_removeFile" || name == "valen_System_makeExecutable" || name == "valen_System_link" || name == "valen_System_compileLlvm" { return true }
             if name == "valen_System_memoryCopy" || name == "valen_System_memoryCompare" || name == "valen_System_fileDescriptor" || name == "valen_System_makeFileNonblocking" { return true }
             if name == "valen_System_enableShutdownSignals" || name == "valen_System_shutdownRequested" { return true }
             if name == "valen_Network_listen" || name == "valen_Network_accept" || name == "valen_Network_receive" || name == "valen_Network_send" || name == "valen_Network_sendSome" { return true }
@@ -345,6 +345,7 @@ library AArch64 {{
             local template = new AArch64Runtime.Template()
             if self.threading { template.appendThreadedAllocation(self.writer.builder) } else { template.appendAllocation(self.writer.builder) }
             template.append(self.writer.builder)
+            if self.hasRuntime("valen_System_compileLlvm") { self.writer.line(".globl valen_System_compileLlvm"); self.writer.line("valen_System_compileLlvm:"); self.writer.line("    mov x0, #127"); self.writer.line("    ret") }
             if self.hasRuntime("valen_Operations_threadAvailable") { template.appendThreadAvailable(self.writer.builder) }
             if self.hasRuntime("valen_Operations_threadStart") { template.appendThreadStart(self.writer.builder) }
             if self.hasRuntime("valen_Operations_threadJoin") { template.appendThreadJoin(self.writer.builder) }
