@@ -537,8 +537,8 @@ test('bootstrap compiler collects AArch64 object graphs and clears weak referenc
     assert.match(result.assembly, /valen_gc_collect:[\s\S]*\.Lgc_collect_roots:[\s\S]*\.Lgc_collect_weak:[\s\S]*\.Lgc_collect_sweep:/);
     assert.match(result.assembly, /valen_gc_maybe_collect:[\s\S]*valen_gc_threshold[\s\S]*b valen_gc_collect/);
     assert.match(result.assembly, /valen_gc_bytes:[\s\S]*valen_gc_threshold:/);
-    assert.match(result.assembly, /valen_gc_array_finalize:[\s\S]*mov x8, #215/);
-    assert.match(result.assembly, /valen_string_finalize:[\s\S]*mov x8, #215/);
+    assert.match(result.assembly, /valen_gc_array_finalize:[\s\S]*b valen_free/);
+    assert.match(result.assembly, /valen_string_finalize:[\s\S]*b valen_free/);
 });
 
 test('bootstrap compiler emits freestanding AArch64 console and process facilities', t => {
@@ -584,6 +584,9 @@ test('bootstrap compiler preserves and exposes AArch64 process state', t => {
     assert.match(result.assembly, /valen_System_arguments:[\s\S]*valen_array_new/);
     assert.match(result.assembly, /valen_System_currentDirectory:[\s\S]*mov x8, #17/);
     assert.match(result.assembly, /valen_System_environmentVariable:[\s\S]*\.Lsystem_environment_compare:/);
+    assert.match(result.assembly, /valen_System_enableProcessArena:[\s\S]*valen_arena_enabled/);
+    assert.match(result.assembly, /valen_alloc:[\s\S]*valen_arena_free_list[\s\S]*valen_arena_chunks/);
+    assert.match(result.assembly, /valen_gc_maybe_collect:[\s\S]*valen_arena_enabled[\s\S]*cbnz w10, \.Lgc_maybe_collect_done/);
 });
 
 test('bootstrap compiler emits an AArch64 system-linker driver', t => {
