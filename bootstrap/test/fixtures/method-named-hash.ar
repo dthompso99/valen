@@ -1,0 +1,13 @@
+Hasher {{
+    hash(input:string) -> i64 {
+        return input.length
+    }
+}}
+
+entry {{
+    __() -> i32 {
+        local hasher = new Hasher()
+        if hasher.hash("valen") != 5 { return 1 }
+        return 0
+    }
+}}

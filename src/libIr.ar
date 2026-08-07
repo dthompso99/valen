@@ -1347,15 +1347,15 @@ library Ir {{
             if callee.kind == "Member" {
                 if callee.left!.inferredType != null { receiverType = callee.left!.inferredType! }
             }
-            if name == "hash" {
+            if callee.symbol != null {
+                if callee.symbol!.kind == "StructuralHash" || callee.symbol!.kind == "EnumHash" {
                 local hashValue = self.lowerExpression(callee.left!)
-                if callee.symbol != null {
-                    if callee.symbol!.kind == "EnumHash" { hashValue.typeName = "i64"; return hashValue }
-                }
+                if callee.symbol!.kind == "EnumHash" { hashValue.typeName = "i64"; return hashValue }
                 local hashed = self.temporary("structural_hash", "i64")
                 hashed.first = hashValue
                 hashed.ownerType = receiverType
                 return hashed.result!
+                }
             }
             if (name == "append" || name == "appendByte" || name == "appendBytes" || name == "insert") && (receiverType == "StringBuilder" || self.isArray(receiverType)) {
                 local op = "array_append"

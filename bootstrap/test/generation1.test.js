@@ -385,6 +385,7 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                 'bootstrap/test/fixtures/unicode-strings.ar',
                 'bootstrap/test/fixtures/inheritance.ar',
                 'bootstrap/test/fixtures/contract-references.ar',
+                'bootstrap/test/fixtures/method-named-hash.ar',
                 'bootstrap/test/fixtures/optional-primitives.ar',
                 'bootstrap/test/fixtures/collection-ownership.ar',
                 'bootstrap/test/fixtures/garbage-collection.ar',

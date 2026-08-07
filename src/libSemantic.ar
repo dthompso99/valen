@@ -1370,7 +1370,10 @@ library Semantics {{
                 if expression.left!.kind == "Member" {
                     if expression.left!.name! == "hash" && expression.left!.symbol == null {
                         if expression.arguments.length != 0 { self.error(expression.span, "hash() expects no arguments") }
-                        expression.symbol = expression.left!.symbol
+                        local structuralHash = new Symbols.Symbol("StructuralHash", "hash", "hash", expression.span)
+                        structuralHash.returnType = "i64"
+                        expression.left!.symbol = structuralHash
+                        expression.symbol = structuralHash
                         return self.typed(expression, "i64")
                     }
                 }
