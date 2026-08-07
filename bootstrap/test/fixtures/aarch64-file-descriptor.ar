@@ -1,0 +1,19 @@
+library System {{
+    native openRead(path:string) -> File?
+    native close(own file:File) -> i64
+    native fileDescriptor(file:File) -> i64
+    native makeFileNonblocking(file:File) -> bool
+
+    File {{ member descriptor:i64 }}
+}}
+
+entry {{
+    __() -> i32 {
+        local file = System.openRead("/dev/null")
+        if file == null { return 1 }
+        if System.fileDescriptor(file!) < 0 { return 2 }
+        if !System.makeFileNonblocking(file!) { return 3 }
+        if System.close(file!) != 0 { return 4 }
+        return 0
+    }
+}}

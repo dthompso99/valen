@@ -465,6 +465,26 @@ test('bootstrap compiler emits the native AArch64 test runner', t => {
     assert.match(result.assembly, /mov x8, #64/);
 });
 
+test('bootstrap compiler emits synchronous AArch64 networking', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-network-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = fileURLToPath(new URL('fixtures/aarch64-network.ar', import.meta.url));
+    const result = new Compiler().compile(source, path.join(directory, 'network'), {target: 'aarch64-linux'});
+
+    assert.equal(fs.readFileSync(path.join(directory, 'network')).readUInt16LE(18), 183);
+    assert.match(result.assembly, /valen_Network_listen:/);
+    assert.match(result.assembly, /mov x8, #198/);
+    assert.match(result.assembly, /valen_Network_accept:/);
+    assert.match(result.assembly, /valen_Network_sendSome:/);
+    assert.match(result.assembly, /valen_gc_native_handle_finalize:/);
+
+    const descriptorSource = fileURLToPath(new URL('fixtures/aarch64-file-descriptor.ar', import.meta.url));
+    const descriptor = new Compiler().compile(descriptorSource, path.join(directory, 'descriptor'), {target: 'aarch64-linux'});
+    assert.match(descriptor.assembly, /valen_System_fileDescriptor:/);
+    assert.match(descriptor.assembly, /valen_System_makeFileNonblocking:/);
+    assert.match(descriptor.assembly, /mov x8, #25/);
+});
+
 test('bootstrap compiler collects AArch64 object graphs and clears weak references', t => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-gc-'));
     t.after(() => fs.rmSync(directory, {recursive: true, force: true}));

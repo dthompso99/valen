@@ -1,0 +1,36 @@
+library Network {{
+    native listen(port:u16, backlog:i32) -> Listener?
+    native accept(listener:Listener) -> Connection?
+    native receive(connection:Connection, count:i64) -> string?
+    native send(connection:Connection, input:string) -> i64
+    native sendSome(connection:Connection, input:string, offset:i64, count:i64) -> i64
+    native closeListener(own listener:Listener) -> i64
+    native closeConnection(own connection:Connection) -> i64
+    native lastError() -> i64
+    native listenerDescriptor(listener:Listener) -> i64
+    native connectionDescriptor(connection:Connection) -> i64
+    native makeListenerNonblocking(listener:Listener) -> bool
+    native makeConnectionNonblocking(connection:Connection) -> bool
+
+    Listener {{ member descriptor:i64 }}
+    Connection {{ member descriptor:i64 }}
+}}
+
+entry {{
+    __() -> i32 {
+        local listener = Network.listen(39876, 4)
+        if listener == null { return 1 }
+        if Network.listenerDescriptor(listener!) < 0 { return 2 }
+        local connection = Network.accept(listener!)
+        if connection == null { return 3 }
+        if Network.connectionDescriptor(connection!) < 0 { return 4 }
+        local request = Network.receive(connection!, 64)
+        if request == null || request!.length == 0 { return 5 }
+        if !Network.makeConnectionNonblocking(connection!) { return 9 }
+        if !Network.makeListenerNonblocking(listener!) { return 10 }
+        if Network.sendSome(connection!, "OK", 0, 2) != 2 { return 6 }
+        if Network.closeConnection(connection!) != 0 { return 7 }
+        if Network.closeListener(listener!) != 0 { return 8 }
+        return 0
+    }
+}}

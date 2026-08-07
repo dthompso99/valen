@@ -14,7 +14,12 @@ export class AArch64Backend {
             'valen_System_lastError', 'valen_System_arguments', 'valen_System_currentDirectory',
             'valen_System_environmentVariable', 'valen_System_enableProcessArena', 'valen_System_writeBytes',
             'valen_System_sync', 'valen_System_replaceFile', 'valen_System_removeFile', 'valen_System_makeExecutable',
-            'valen_System_link', 'valen_System_memoryCopy', 'valen_System_memoryCompare']);
+            'valen_System_link', 'valen_System_memoryCopy', 'valen_System_memoryCompare',
+            'valen_System_fileDescriptor', 'valen_System_makeFileNonblocking',
+            'valen_Network_listen', 'valen_Network_accept', 'valen_Network_receive', 'valen_Network_send',
+            'valen_Network_sendSome', 'valen_Network_closeListener', 'valen_Network_closeConnection',
+            'valen_Network_lastError', 'valen_Network_listenerDescriptor', 'valen_Network_connectionDescriptor',
+            'valen_Network_makeListenerNonblocking', 'valen_Network_makeConnectionNonblocking']);
         this.program = program;
         this.runtimeLabel = 0;
         this.fieldOffsets = new Map();
@@ -528,7 +533,12 @@ export class AArch64Backend {
             ...this.constant('x11', 1048576), '    cmp x10, x11', '    b.cs .Lgc_collect_threshold_ready',
             '    mov x10, x11', '.Lgc_collect_threshold_ready:', ...this.address('x9', 'valen_gc_threshold'),
             '    str x10, [x9, #0]', '    ldr x30, [sp, #56]',
-            '    add sp, sp, #64', '    ret', '.size valen_gc_collect, .-valen_gc_collect',
+            '    add sp, sp, #64', '    ret', '.size valen_gc_collect, .-valen_gc_collect', '',
+            '.globl valen_gc_native_handle_finalize', 'valen_gc_native_handle_finalize:',
+            '    ldr x9, [x0, #16]', '    cmp x9, #0', '    b.lt .Lgc_native_handle_done', '    mov x10, x0',
+            '    mov x0, x9', '    mov x8, #57', '    svc #0', '    mov x9, #-1', '    str x9, [x10, #16]',
+            '    str xzr, [x10, #8]', '.Lgc_native_handle_done:', '    ret',
+            '.size valen_gc_native_handle_finalize, .-valen_gc_native_handle_finalize',
             '.Lallocation_error:', '    mov x0, #72', '    mov x8, #93', '    svc #0', ''];
     }
 
@@ -916,6 +926,9 @@ export class AArch64Backend {
         if (this.runtimeSymbols.has('valen_System_link')) lines.push(...this.systemLinkRuntime());
         if (this.runtimeSymbols.has('valen_System_memoryCopy')) lines.push(...this.systemMemoryCopyRuntime());
         if (this.runtimeSymbols.has('valen_System_memoryCompare')) lines.push(...this.systemMemoryCompareRuntime());
+        if (this.runtimeSymbols.has('valen_System_fileDescriptor')) lines.push(...this.descriptorRuntime('valen_System_fileDescriptor'));
+        if (this.runtimeSymbols.has('valen_System_makeFileNonblocking')) lines.push(...this.nonblockingRuntime('valen_System_makeFileNonblocking'));
+        if ([...this.runtimeSymbols].some(symbol => symbol.startsWith('valen_Network_'))) lines.push(...this.networkRuntime());
         return lines;
     }
 
@@ -1181,6 +1194,93 @@ export class AArch64Backend {
             '    ldr x30, [sp, #56]', '    add sp, sp, #64', '    ret',
             '.size valen_System_environmentVariable, .-valen_System_environmentVariable', ''];
     }
+
+    descriptorRuntime(name, offset = 0) {
+        return [`.globl ${name}`, `.type ${name}, %function`, `${name}:`, `    ldr x0, [x0, #${offset}]`,
+            '    ret', `.size ${name}, .-${name}`, ''];
+    }
+
+    nonblockingRuntime(name, offset = 0) {
+        const error = `.L${name}_error`, done = `.L${name}_done`;
+        return [`.globl ${name}`, `.type ${name}, %function`, `${name}:`, '    sub sp, sp, #32',
+            '    str x30, [sp, #24]', `    ldr x9, [x0, #${offset}]`, '    str x9, [sp, #0]', '    mov x0, x9',
+            '    mov x1, #3', '    mov x8, #25', '    svc #0', '    cmp x0, #0', `    b.lt ${error}`,
+            '    mov x2, #2048', '    orr x2, x0, x2', '    ldr x0, [sp, #0]', '    mov x1, #4',
+            '    mov x8, #25', '    svc #0', '    cmp x0, #0', `    b.lt ${error}`, '    mov x0, #1',
+            `    b ${done}`, `${error}:`, '    mov x0, #0', `${done}:`, '    ldr x30, [sp, #24]',
+            '    add sp, sp, #32', '    ret', `.size ${name}, .-${name}`, ''];
+    }
+
+    networkRuntime() {
+        const close = name => [`.globl ${name}`, `${name}:`, '    b valen_gc_native_handle_finalize', ''];
+        return [
+            '.globl valen_Network_listen', 'valen_Network_listen:', '    sub sp, sp, #80', '    str x19, [sp, #0]',
+            '    str x20, [sp, #8]', '    str x30, [sp, #72]', '    mov x19, x0', '    mov x20, x1',
+            '    mov x0, #2', '    mov x1, #1', '    mov x2, #0', '    mov x8, #198', '    svc #0',
+            '    cmp x0, #0', '    b.lt .Lnetwork_listen_error', '    str x0, [sp, #16]', '    mov x9, #1',
+            '    str w9, [sp, #32]', '    mov x1, #1', '    mov x2, #2', '    add x3, sp, #32', '    mov x4, #4',
+            '    mov x8, #208', '    svc #0', '    cmp x0, #0', '    b.lt .Lnetwork_listen_close_error',
+            '    mov x9, #2', '    strh w9, [sp, #32]', '    lsr x10, x19, #8', '    lsl x11, x19, #8',
+            '    orr x10, x10, x11', '    strh w10, [sp, #34]', '    mov x9, #0', '    str w9, [sp, #36]',
+            '    str xzr, [sp, #40]',
+            '    ldr x0, [sp, #16]', '    add x1, sp, #32', '    mov x2, #16', '    mov x8, #200', '    svc #0',
+            '    cmp x0, #0', '    b.lt .Lnetwork_listen_close_error', '    ldr x0, [sp, #16]', '    mov x1, x20',
+            '    mov x8, #201', '    svc #0', '    cmp x0, #0', '    b.lt .Lnetwork_listen_close_error',
+            '    mov x0, #24', '    mov x1, #0', '    mov x2, #0', ...this.address('x3', 'valen_gc_native_handle_finalize'),
+            '    bl valen_gc_alloc', '    mov x9, #1', '    str x9, [x0, #8]', '    ldr x9, [sp, #16]',
+            '    str x9, [x0, #16]', ...this.clearNetworkError(), '    b .Lnetwork_listen_done',
+            '.Lnetwork_listen_close_error:', '    str x0, [sp, #24]', '    ldr x0, [sp, #16]', '    mov x8, #57',
+            '    svc #0', '    ldr x0, [sp, #24]', '.Lnetwork_listen_error:', '    neg x9, x0',
+            ...this.storeNetworkError('x9'), '    mov x0, #0', '.Lnetwork_listen_done:', '    ldr x19, [sp, #0]',
+            '    ldr x20, [sp, #8]', '    ldr x30, [sp, #72]', '    add sp, sp, #80', '    ret', '',
+            '.globl valen_Network_accept', 'valen_Network_accept:', '    sub sp, sp, #48', '    str x30, [sp, #40]',
+            '    ldr x0, [x0, #16]', '    mov x1, #0', '    mov x2, #0', '    mov x8, #202', '    svc #0',
+            '    cmp x0, #0', '    b.lt .Lnetwork_accept_error', '    str x0, [sp, #0]', '    mov x0, #24',
+            '    mov x1, #0', '    mov x2, #0', ...this.address('x3', 'valen_gc_native_handle_finalize'),
+            '    bl valen_gc_alloc', '    mov x9, #1', '    str x9, [x0, #8]', '    ldr x9, [sp, #0]',
+            '    str x9, [x0, #16]', ...this.clearNetworkError(), '    b .Lnetwork_accept_done',
+            '.Lnetwork_accept_error:', '    neg x9, x0', ...this.storeNetworkError('x9'), '    mov x0, #0',
+            '.Lnetwork_accept_done:', '    ldr x30, [sp, #40]', '    add sp, sp, #48', '    ret', '',
+            '.globl valen_Network_receive', 'valen_Network_receive:', '    cmp x1, #0',
+            '    b.lt .Lnetwork_invalid_null', '    sub sp, sp, #64', '    str x19, [sp, #0]', '    str x20, [sp, #8]',
+            '    str x30, [sp, #56]', '    ldr x19, [x0, #16]', '    mov x20, x1', '    mov x0, x1',
+            '    bl valen_string_new', '    str x0, [sp, #16]', '    ldr x1, [x0, #0]', '    mov x0, x19',
+            '    mov x2, x20', '    mov x8, #63', '    svc #0', '    cmp x0, #0', '    b.lt .Lnetwork_receive_error',
+            '    ldr x9, [sp, #16]', '    str x0, [x9, #8]', '    mov x0, x9', ...this.clearNetworkError(),
+            '    b .Lnetwork_receive_done', '.Lnetwork_receive_error:', '    neg x9, x0',
+            ...this.storeNetworkError('x9'), '    mov x0, #0', '.Lnetwork_receive_done:', '    ldr x19, [sp, #0]',
+            '    ldr x20, [sp, #8]', '    ldr x30, [sp, #56]', '    add sp, sp, #64', '    ret', '',
+            '.globl valen_Network_send', 'valen_Network_send:', '    ldr x9, [x0, #16]', '    ldr x10, [x1, #0]',
+            '    ldr x11, [x1, #8]', '    mov x12, #0', '.Lnetwork_send_next:', '    cbz x11, .Lnetwork_send_done',
+            '    mov x0, x9', '    mov x1, x10', '    mov x2, x11', '    mov x8, #64', '    svc #0',
+            '    mov x13, #-4', '    cmp x0, x13', '    b.eq .Lnetwork_send_next', '    cmp x0, #0',
+            '    b.lt .Lnetwork_send_error', '    add x12, x12, x0', '    add x10, x10, x0', '    sub x11, x11, x0',
+            '    b .Lnetwork_send_next', '.Lnetwork_send_done:', ...this.clearNetworkError(), '    mov x0, x12', '    ret',
+            '.Lnetwork_send_error:', '    neg x13, x0', ...this.storeNetworkError('x13'), '    cmp x12, #0',
+            '    b.eq .Lnetwork_send_error_return', '    mov x0, x12', '.Lnetwork_send_error_return:', '    ret', '',
+            '.globl valen_Network_sendSome', 'valen_Network_sendSome:', '    cmp x2, #0',
+            '    b.lt .Lnetwork_invalid_negative', '    cmp x3, #0', '    b.lt .Lnetwork_invalid_negative',
+            '    ldr x9, [x1, #8]', '    cmp x2, x9', '    b.hi .Lnetwork_invalid_negative', '    sub x9, x9, x2',
+            '    cmp x3, x9', '    b.hi .Lnetwork_invalid_negative', '    ldr x9, [x0, #16]', '    ldr x10, [x1, #0]',
+            '    add x10, x10, x2', '    mov x0, x9', '    mov x1, x10', '    mov x2, x3',
+            '.Lnetwork_send_some_retry:', '    mov x8, #64', '    svc #0', '    mov x9, #-4', '    cmp x0, x9',
+            '    b.eq .Lnetwork_send_some_retry', '    cmp x0, #0', '    b.lt .Lnetwork_send_some_error',
+            ...this.clearNetworkError(), '    ret', '.Lnetwork_send_some_error:', '    neg x9, x0',
+            ...this.storeNetworkError('x9'), '    mov x0, #-1', '    ret', '.Lnetwork_invalid_negative:',
+            '    mov x9, #22', ...this.storeNetworkError('x9'), '    mov x0, #-1', '    ret',
+            '.Lnetwork_invalid_null:', '    mov x9, #22', ...this.storeNetworkError('x9'), '    mov x0, #0', '    ret', '',
+            ...close('valen_Network_closeListener'), ...close('valen_Network_closeConnection'),
+            ...this.descriptorRuntime('valen_Network_listenerDescriptor', 16),
+            ...this.descriptorRuntime('valen_Network_connectionDescriptor', 16),
+            ...this.nonblockingRuntime('valen_Network_makeListenerNonblocking', 16),
+            ...this.nonblockingRuntime('valen_Network_makeConnectionNonblocking', 16),
+            '.globl valen_Network_lastError', 'valen_Network_lastError:', ...this.address('x9', 'valen_network_error'),
+            '    ldr x0, [x9, #0]', '    ret', ''
+        ];
+    }
+
+    clearNetworkError() { return [...this.address('x9', 'valen_network_error'), '    str xzr, [x9, #0]']; }
+    storeNetworkError(register) { return [...this.address('x10', 'valen_network_error'), `    str ${register}, [x10, #0]`]; }
 
     call(instruction, dynamic) {
         const lines = this.loadCallArguments(instruction.arguments);
@@ -1743,7 +1843,8 @@ export class AArch64Backend {
             'valen_gc_bytes:', '    .quad 0', '.globl valen_gc_threshold', 'valen_gc_threshold:',
             '    .quad 1048576', '.globl valen_filesystem_error', 'valen_filesystem_error:', '    .quad 0',
             '.globl valen_process_argc', 'valen_process_argc:', '    .quad 0', '.globl valen_process_argv',
-            'valen_process_argv:', '    .quad 0', '.globl valen_process_envp', 'valen_process_envp:', '    .quad 0', '.text'];
+            'valen_process_argv:', '    .quad 0', '.globl valen_process_envp', 'valen_process_envp:', '    .quad 0',
+            '.globl valen_network_error', 'valen_network_error:', '    .quad 0', '.text'];
     }
 
     testData() {
