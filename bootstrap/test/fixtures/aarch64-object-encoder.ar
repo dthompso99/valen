@@ -1,4 +1,5 @@
 import AArch64Object from '../../../src/libAArch64Object.ar'
+import Linking from '../../../src/libLinker.ar'
 
 test AArch64ObjectEncoderTests {{
     encodesInstructionsDataSymbolsAndRelocations() -> void {
@@ -24,7 +25,7 @@ test AArch64ObjectEncoderTests {{
 
     coversExtendedInstructionFamilies() -> void {
         local assembler = new AArch64Object.Assembler()
-        local object = assembler.assembleObject(".text\nstart:\n    adrp x0, value\n    add x0, x0, :lo12:value\n    sub sp, sp, #16\n    and x1, x2, x3\n    lsl x4, x5, #7\n    str x4, [sp, #8]\n    ldar x6, [x7]\n    ldaxr w8, [x9]\n    stlr x10, [x11]\n    stlxr w12, x13, [x14]\n    movz x15, #4660, lsl #16\n    movk x15, #22136\n    fmov d0, x0\n    fadd d1, d2, d3\n    fcmp d1, d2\n    fcvt s4, d5\n    scvtf d6, x7\n    fcvtzu x8, d9\n    cmp x8, #9\n    cset x9, ne\n    b.eq done\n    blr x10\n    clrex\n    svc #0\ndone:\n    ret\n.data\nvalue:\n    .quad 7\n")
+        local object = assembler.assembleObject(".text\n.globl _start\n_start:\n    adrp x0, value\n    add x0, x0, :lo12:value\n    sub sp, sp, #16\n    and x1, x2, x3\n    lsl x4, x5, #7\n    str x4, [sp, #8]\n    ldar x6, [x7]\n    ldaxr w8, [x9]\n    stlr x10, [x11]\n    stlxr w12, x13, [x14]\n    movz x15, #4660, lsl #16\n    movk x15, #22136\n    fmov d0, x0\n    fadd d1, d2, d3\n    fcmp d1, d2\n    fcvt s4, d5\n    scvtf d6, x7\n    fcvtzu x8, d9\n    cmp x8, #9\n    cset x9, ne\n    b.eq done\n    blr x10\n    clrex\n    svc #0\ndone:\n    ret\n.data\nvalue:\n    .quad 7\n")
         expect(object != null)
         expect(object!.sections[0].data.length == 100)
         local expected = [2415919104, 2432696320, 3506455551, 2315452481, 3547979940,
@@ -42,5 +43,11 @@ test AArch64ObjectEncoderTests {{
         expect(object!.relocations.length == 2)
         expect(object!.relocations[0].type == 275)
         expect(object!.relocations[1].type == 277)
+        local linker = new Linking.Linker()
+        local executable = linker.link(object!)
+        expect(executable != null)
+        expect(executable!.length >= 65544)
+        expect(executable![18] == 183 && executable![19] == 0)
+        expect(executable![56] == 2 && executable![57] == 0)
     }
 }}

@@ -95,9 +95,10 @@ library Linking {{
         symbol(object:Elf.Object, name:string) -> ref Elf.Symbol? { local index:i64 = 0; while index < object.symbols.length { if object.symbols[index].name == name { return object.symbols[index] }; index = index + 1 }; return null }
 
         link(object:Elf.Object) -> Array<u8>? {
-            if object.machine != 62 { self.error = "Unsupported ELF machine " + object.machine.toString(); return null }
+            if object.machine != 62 && object.machine != 183 { self.error = "Unsupported ELF machine " + object.machine.toString(); return null }
             local base:i64 = 4194304
             local page:i64 = 4096
+            if object.machine == 183 { page = 65536 }
             local fileOffset:i64 = page
             local index:i64 = 0
             while index < object.sections.length {
@@ -164,11 +165,15 @@ library Linking {{
                 if symbol < 0 { self.error = "Undefined symbol '" + relocation.symbolName + "'"; return null }
                 local location = layout!.fileOffset + relocation.offset
                 local value = symbol + relocation.addend
-                if relocation.type == 2 || relocation.type == 4 { value = value - (layout!.address + relocation.offset) }
-                if relocation.type == 1 { output.patch64(location, value) }
-                else {
-                    if relocation.type == 2 || relocation.type == 4 || relocation.type == 10 || relocation.type == 11 { output.patch32(location, value) }
-                    else { self.error = "Unsupported x86-64 relocation " + relocation.type.toString(); return null }
+                if object.machine == 183 {
+                    if !self.applyAArch64Relocation(output, location, layout!.address + relocation.offset, value, relocation) { return null }
+                } else {
+                    if relocation.type == 2 || relocation.type == 4 { value = value - (layout!.address + relocation.offset) }
+                    if relocation.type == 1 { output.patch64(location, value) }
+                    else {
+                        if relocation.type == 2 || relocation.type == 4 || relocation.type == 10 || relocation.type == 11 { output.patch32(location, value) }
+                        else { self.error = "Unsupported x86-64 relocation " + relocation.type.toString(); return null }
+                    }
                 }
                 index = index + 1
             }
@@ -181,6 +186,34 @@ library Linking {{
             self.programHeader(output, 64, 5, 0, base, readOnlyEnd, readOnlyEnd, page)
             self.programHeader(output, 120, 6, writableStart, base + writableStart, fileOffset - writableStart, memoryEnd - writableStart, page)
             return copy output.values
+        }
+
+        applyAArch64Relocation(output:Elf.Bytes, location:i64, place:i64, target:i64, relocation:Elf.Relocation) -> bool {
+            if relocation.type == 257 { output.patch64(location, target); return true }
+            local instruction = self.read32(output, location)
+            if relocation.type == 275 {
+                local pages = target / 4096 - place / 4096
+                if pages < -1048576 || pages >= 1048576 { self.error = "AArch64 page relocation to '" + relocation.symbolName + "' is out of range"; return false }
+                if pages < 0 { pages = pages + 2097152 }
+                local encoded = (instruction & 2667577375) | ((pages & 3) << 29) | (((pages >> 2) & 524287) << 5)
+                output.patch32(location, encoded); return true
+            }
+            if relocation.type == 277 {
+                output.patch32(location, (instruction & 4290774015) | ((target & 4095) << 10)); return true
+            }
+            if relocation.type != 282 && relocation.type != 283 { self.error = "Unsupported AArch64 relocation " + relocation.type.toString(); return false }
+            local displacement = target - place
+            if displacement - (displacement / 4) * 4 != 0 || displacement < -134217728 || displacement > 134217724 {
+                self.error = "AArch64 branch relocation to '" + relocation.symbolName + "' is out of range"; return false
+            }
+            local immediate = displacement / 4
+            if immediate < 0 { immediate = immediate + 67108864 }
+            output.patch32(location, (instruction & 4227858432) | immediate)
+            return true
+        }
+
+        read32(input:Elf.Bytes, offset:i64) -> i64 {
+            return (input.values[offset] as i64) + (input.values[offset + 1] as i64) * 256 + (input.values[offset + 2] as i64) * 65536 + (input.values[offset + 3] as i64) * 16777216
         }
 
         programHeader(output:Elf.Bytes, offset:i64, flags:i64, fileOffset:i64, address:i64, fileSize:i64, memorySize:i64, alignment:i64) -> void {
