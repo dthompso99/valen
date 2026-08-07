@@ -29,13 +29,13 @@ COPY bootstrap/target.js ./bootstrap/target.js
 ENV VALEN_LIBRARY_PATH=/app/lib
 ENV VALEN_SYSROOT=/app/lib/valen/current/x86_64-linux
 RUN mkdir dist
-RUN ["./valen", "src/valen.ar", "-o", "dist/valen"]
+RUN ["./valen", "src/valen.ar", "-o", "dist/valen", "--backend", "llvm"]
 RUN ["node", "scripts/package-stdlib.mjs", "--compiler", "/app/dist/valen", "--output", "/app/dist/lib/valen"]
 RUN ls -al dist
 
 
 FROM alpine:3.20 AS stage3
-RUN apk update && apk add --no-cache build-base sqlite-dev
+RUN apk update && apk add --no-cache build-base sqlite-dev llvm llvm-dev clang clang-dev
 WORKDIR /app
 COPY --from=stage2 /app/dist/valen .
 COPY --from=stage2 /app/dist/lib ./lib
