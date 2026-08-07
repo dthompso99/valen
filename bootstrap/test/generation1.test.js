@@ -417,6 +417,18 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                 assert.equal(spawnSync(executable, [], {encoding: 'utf8', env: environment, cwd: projectRoot}).status, 0);
             }
 
+            const llvmCompiler = path.join(directory, 'valen-llvm-selfhost');
+            const selfhost = spawnSync(compilerPath,
+                ['--backend', 'llvm', '--target', 'x86_64-linux', '-O1', path.join(projectRoot, 'src/valen.ar'), '-o', llvmCompiler],
+                {encoding: 'utf8', env: environment, cwd: projectRoot, timeout: 60000, maxBuffer: 64 * 1024 * 1024});
+            assert.equal(selfhost.status, 0, selfhost.stderr || selfhost.stdout || selfhost.signal);
+            const selfhostProgram = path.join(directory, 'llvm-selfhost-simple');
+            const selfhostCompile = spawnSync(llvmCompiler,
+                [path.join(projectRoot, 'examples/simple/simple.ar'), '-o', selfhostProgram],
+                {encoding: 'utf8', env: environment, cwd: projectRoot, timeout: 30000, maxBuffer: 64 * 1024 * 1024});
+            assert.equal(selfhostCompile.status, 0, selfhostCompile.stderr || selfhostCompile.stdout || selfhostCompile.signal);
+            assert.equal(spawnSync(selfhostProgram, [], {encoding: 'utf8', env: environment, cwd: projectRoot}).status, 0);
+
             const unsupportedTarget = spawnSync(compilerPath,
                 ['--backend', 'llvm', '--target', 'aarch64-linux', path.join(projectRoot, 'examples/simple/simple.ar'), '-o', path.join(directory, 'llvm-aarch64')],
                 {encoding: 'utf8', env: environment, cwd: projectRoot});

@@ -647,6 +647,10 @@ library LLVM {{
         }
 
         unwrap(instruction:Ir.Instruction) -> void {
+            if self.llvmType(instruction.ownerType!) != "ptr" {
+                self.fromIntegerBits(self.integerBits(instruction.first!), instruction.typeName!, instruction.result!)
+                return
+            }
             local isNull = self.derived(instruction.result!, "optional.is.null")
             local failure = "llvm.optional.failure." + self.nextInternal.toString(); self.nextInternal = self.nextInternal + 1
             local present = "llvm.optional.present." + self.nextInternal.toString(); self.nextInternal = self.nextInternal + 1
@@ -726,6 +730,7 @@ library LLVM {{
         binary(instruction:Ir.Instruction) -> void {
             local operator = instruction.operator!
             local operandType = self.llvmType(instruction.first!.typeName)
+            if instruction.first!.typeName == "null" { operandType = self.llvmType(instruction.second!.typeName) }
             if self.isFloat(instruction.first!.typeName) { self.floatBinary(instruction); return }
             local operation = ""
             if operator == "+" { operation = "add" }
@@ -768,7 +773,7 @@ library LLVM {{
             else if operator == ">" { if self.isUnsigned(instruction.first!.typeName) { condition = "ugt" } else { condition = "sgt" } }
             else if operator == ">=" { if self.isUnsigned(instruction.first!.typeName) { condition = "uge" } else { condition = "sge" } }
             if condition.length == 0 { self.fail("LLVM prototype does not support binary operator '" + operator + "'"); return }
-            self.writer.line("    " + self.value(instruction.result!) + " = icmp " + condition + " " + operandType + " " + self.value(instruction.first!) + ", " + self.value(instruction.second!))
+            self.writer.line("    " + self.value(instruction.result!) + " = icmp " + condition + " " + operandType + " " + self.valueForType(instruction.first!, operandType) + ", " + self.valueForType(instruction.second!, operandType))
         }
 
         floatBinary(instruction:Ir.Instruction) -> void {
@@ -1036,8 +1041,11 @@ library LLVM {{
             local fromType = self.llvmType(fromName)
             local toType = self.llvmType(toName)
             if fromType == toType { return self.value(value) }
+            if fromName == "null" && toType != "ptr" { return "0" }
             local operation = "trunc"
-            if self.isFloat(fromName) && self.isFloat(toName) { if self.typeBits(fromName) < self.typeBits(toName) { operation = "fpext" } else { operation = "fptrunc" } }
+            if fromType == "ptr" { operation = "ptrtoint" }
+            else if toType == "ptr" { operation = "inttoptr" }
+            else if self.isFloat(fromName) && self.isFloat(toName) { if self.typeBits(fromName) < self.typeBits(toName) { operation = "fpext" } else { operation = "fptrunc" } }
             else if self.isFloat(fromName) { if self.isUnsigned(toName) { operation = "fptoui" } else { operation = "fptosi" } }
             else if self.isFloat(toName) { if self.isUnsigned(fromName) { operation = "uitofp" } else { operation = "sitofp" } }
             else if self.typeBits(fromName) < self.typeBits(toName) { if self.isUnsigned(fromName) { operation = "zext" } else { operation = "sext" } }
@@ -1056,7 +1064,13 @@ library LLVM {{
             if typeName == "f32" { return "float" }
             if typeName == "f64" { return "double" }
             if typeName == "null" || typeName == "string" || typeName == "StringBuilder" || self.isArray(typeName) { return "ptr" }
-            if typeName.length > 0 { if typeName[typeName.length - 1] == 63 { return "ptr" } }
+            if typeName.length > 0 { if typeName[typeName.length - 1] == 63 {
+                local base = typeName.slice(0, typeName.length - 1)
+                if self.isPrimitiveOptional(typeName) || base == "string" || base == "StringBuilder" || self.isArray(base) { return "ptr" }
+                local optionalIndex:i64 = 0
+                while optionalIndex < self.program.types.length { if self.program.types[optionalIndex].name == base { return "ptr" }; optionalIndex = optionalIndex + 1 }
+                return "i64"
+            } }
             local index:i64 = 0
             while index < self.program.types.length { if self.program.types[index].name == typeName { return "ptr" }; index = index + 1 }
             return "i64"
@@ -1135,6 +1149,10 @@ library LLVM {{
             else if typeName == "double" { self.writer.line("    " + result + " = fcmp une double " + source + ", 0.0") }
             else { self.writer.line("    " + result + " = icmp ne " + typeName + " " + source + ", 0") }
             return result
+        }
+        valueForType(value:Ir.Value, llvmTypeName:string) -> string {
+            if value.typeName == "null" && llvmTypeName != "ptr" { return "0" }
+            return self.value(value)
         }
         derived(value:Ir.Value, suffix:string) -> string { local index = self.nextInternal; self.nextInternal = self.nextInternal + 1; return "%\"llvm." + suffix + "." + value.name + "." + index.toString() + "\"" }
         localTemporary(value:Ir.Value) -> string { return "%\"temp." + self.currentBlock + "." + value.name + "\"" }
