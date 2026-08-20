@@ -19,6 +19,22 @@ This map connects implemented rules to deterministic fixtures. A mapping means t
 | `OWN-010`–`OWN-012` | `bootstrap/test/fixtures/collection-ownership.ar`, weak-reference and array insertion/removal tests |
 | `OWN-020`–`OWN-023` | structural copy/hash/equality and managed-root tests in `bootstrap/test/pipeline.test.js`; `bootstrap/test/fixtures/garbage-collection.ar` |
 | `OWN-030`, `OWN-031` | native-handle ownership tests in `bootstrap/test/pipeline.test.js`; networking and filesystem conformance fixtures |
+| `OBJ-001`–`OBJ-004` | object construction, default-field, inheritance, subtype, and `super` tests in `bootstrap/test/pipeline.test.js`; `bootstrap/test/fixtures/inheritance.ar` |
+| `OBJ-010`–`OBJ-012` | overload/default-argument and private-dispatch tests in `bootstrap/test/pipeline.test.js` |
+| `OBJ-013`–`OBJ-015` | `bootstrap/test/fixtures/inheritance.ar`, `contract-references.ar`, `abi-contract-arguments.ar`, `subtypes.ar`, and invalid missing-implementation coverage |
+| `EVAL-001`–`EVAL-004` | statement/expression lowering tests in `bootstrap/test/pipeline.test.js`; `bootstrap/test/fixtures/short-circuit.ar` and instruction-selection fixtures |
+| `EVAL-010`–`EVAL-014` | `bootstrap/test/fixtures/else-if.ar`, `conditional-expressions.ar`, `for-loops.ar`, `short-circuit.ar`, and return-path invalid fixtures |
+| `EVAL-015` | expected-failure entries in `bootstrap/test/conformance-manifest.js` and generation conformance execution |
+| `EVAL-020`–`EVAL-022` | structural equality/hash tests and result-propagation tests in `bootstrap/test/pipeline.test.js`; native test runner fixtures |
+| `VAL-001`–`VAL-005` | array literal, insertion/removal, capacity, slicing, nesting, ownership, and bounds fixtures in `bootstrap/test/fixtures/` |
+| `VAL-010`–`VAL-013` | `bootstrap/test/fixtures/unicode-strings.ar`, `unicode-index-bounds.ar`, `byte-conversions.ar`, and `string-interpolation.ar` |
+| `VAL-020`–`VAL-023` | `bootstrap/test/fixtures/optional-primitives.ar`, `optional-narrowing.ar`, `diagnostics.ar`, and optional/result propagation tests |
+| `VAL-030`–`VAL-033` | `bootstrap/test/fixtures/enums.ar`, `enum-match.ar`, `enum-failing.ar`, and `enum-match-failing.ar` |
+| `VAL-040`–`VAL-042` | generic specialization/constraint tests in `bootstrap/test/pipeline.test.js`; cross-module and standard-collection fixtures |
+| `NAT-001`–`NAT-004` | native/unsafe semantic and symbol validation tests in `bootstrap/test/pipeline.test.js`; `bootstrap/test/fixtures/foreign-libc.ar` |
+| `NAT-010`–`NAT-012` | foreign ABI boundary tests in `bootstrap/test/pipeline.test.js`; SQLite adapter and native-handle fixtures |
+| `TGT-001`–`TGT-005` | target normalization/capability tests in `bootstrap/test/generation1.test.js`; `bootstrap/test/fixtures/unsupported-native.ar` and AArch64 target tests |
+| `TGT-006` | production-runtime symbol-omission test in `bootstrap/test/pipeline.test.js`; instrumented native/LLVM generation conformance |
 | `COMP-002` | retained `artifacts-v1` fuzz corpus and metadata/interface parser tests |
 | `COMP-003` | deterministic interface, metadata, manifest, and lockfile tests |
 | `COMP-005` | `bootstrap/test/library-metadata.test.js` |

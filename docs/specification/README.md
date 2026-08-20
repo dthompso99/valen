@@ -24,10 +24,13 @@ An implementation bug does not silently redefine a rule. Either the implementati
 - [Modules, imports, names, and visibility](modules-and-names.md)
 - [Types, literals, and numeric operations](types-and-numerics.md)
 - [Ownership and lifetime boundaries](ownership-and-lifetimes.md)
+- [Objects, contracts, dispatch, and control flow](objects-and-control-flow.md)
+- [Collections, strings, optionals, enums, and generics](collections-optionals-enums-and-generics.md)
+- [Native, unsafe, FFI, and target capabilities](native-and-targets.md)
 - [Compatibility policy](compatibility.md)
 - [Conformance map](conformance.md)
 
-The following areas remain **WIP and non-normative here**: object/contract dispatch; complete evaluation-order rules; collections, optionals, enums, matching, and generics; unsafe/FFI behavior; and target capability failures. Existing guides describe their implemented behavior until dedicated normative sections land.
+Features explicitly described as **WIP** in the language guide remain non-normative until incorporated here. The specification covers the currently implemented core language surface; optional libraries and tooling protocols retain their own versioned references.
 
 ## Rule identifiers
 
