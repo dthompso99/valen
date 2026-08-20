@@ -34,8 +34,109 @@ export class IrCanonicalizer {
             this.simplifyControlFlow(fn);
             this.removeUnreachable(fn);
             this.propagateLocalValues(fn);
+            if (program) {
+                this.devirtualizeExactCalls(fn, program);
+                this.inlineLeafCalls(fn, program);
+                this.propagateLocalValues(fn);
+            }
             if (program && scalarReplacement) this.replaceLocalObjects(fn, program);
             this.removeDeadValues(fn);
+        }
+    }
+
+    devirtualizeExactCalls(fn, program) {
+        const allocations = new Map();
+        const declarations = new Map();
+        const invalidLocals = new Set();
+        for (const block of fn.blocks) for (const instruction of block.instructions) {
+            if (instruction.op === 'allocate' && instruction.result) allocations.set(instruction.result, instruction.type ?? instruction.objectType);
+            if (instruction.op === 'declare_local') {
+                if (declarations.has(instruction.name)) invalidLocals.add(instruction.name);
+                else declarations.set(instruction.name, instruction.value);
+            }
+            if (instruction.op === 'store_local') invalidLocals.add(instruction.name);
+        }
+        const exactLocals = new Map();
+        const exactTemporaries = new Map(allocations);
+        let changed = true;
+        while (changed) {
+            changed = false;
+            for (const [name, value] of declarations) if (!invalidLocals.has(name) && !exactLocals.has(name) && value?.kind === 'temporary' && exactTemporaries.has(value.name)) {
+                exactLocals.set(name, exactTemporaries.get(value.name)); changed = true;
+            }
+            for (const block of fn.blocks) for (const instruction of block.instructions) if (instruction.op === 'load_local' && instruction.result && exactLocals.has(instruction.name) && !exactTemporaries.has(instruction.result)) {
+                exactTemporaries.set(instruction.result, exactLocals.get(instruction.name)); changed = true;
+            }
+        }
+        const types = new Map(program.types.map(type => [type.name, type]));
+        for (const block of fn.blocks) for (const instruction of block.instructions) {
+            if (!['virtual_call', 'contract_call'].includes(instruction.op) || !instruction.arguments?.length) continue;
+            const receiver = instruction.arguments[0];
+            const type = receiver?.kind === 'temporary' ? types.get(exactTemporaries.get(receiver.name)) : null;
+            let target = null;
+            if (instruction.op === 'virtual_call') target = type?.virtualMethods?.[instruction.slot]?.target;
+            else target = type?.contracts?.find(contract => contract.name === (instruction.contractType ?? instruction.ownerType))?.methods?.[instruction.slot]?.target;
+            if (!target) continue;
+            instruction.op = 'call';
+            instruction.target = target;
+            instruction.ownerType = null;
+            instruction.contractType = null;
+            instruction.slot = -1;
+        }
+    }
+
+    inlineLeafCalls(fn, program) {
+        const primitive = type => ['bool', 'u8', 'i8', 'u16', 'i16', 'u32', 'i32', 'u64', 'i64', 'f32', 'f64'].includes(type);
+        const functions = new Map(program.functions.map(item => [item.name, item]));
+        const used = new Set(fn.blocks.flatMap(block => block.instructions).map(item => item.result).filter(Boolean));
+        let sequence = 0;
+        const fresh = () => { let name; do name = `%inline${sequence++}`; while (used.has(name)); used.add(name); return name; };
+        for (const block of fn.blocks) {
+            const aliases = new Map();
+            const resolve = value => {
+                const visited = new Set();
+                while (value?.kind === 'temporary' && aliases.has(value.name) && !visited.has(value.name)) { visited.add(value.name); value = aliases.get(value.name); }
+                return value;
+            };
+            const replace = value => {
+                if (!value || typeof value !== 'object') return value;
+                if (value.kind) return resolve(value);
+                if (Array.isArray(value)) return value.map(replace);
+                for (const [key, child] of Object.entries(value)) if (key !== 'result') value[key] = replace(child);
+                return value;
+            };
+            const retained = [];
+            for (const instruction of block.instructions) {
+                for (const [key, value] of Object.entries(instruction)) if (key !== 'result') instruction[key] = replace(value);
+                const callee = instruction.op === 'call' ? functions.get(instruction.target) : null;
+                const body = callee?.blocks?.length === 1 ? callee.blocks[0].instructions : [];
+                const allowed = new Set(['constant', 'float_constant', 'binary', 'unary', 'convert', 'return']);
+                if (!callee || callee === fn || callee.moduleId !== fn.moduleId || !instruction.result || !primitive(instruction.type) || body.length > 6 ||
+                    body.length === 0 || body.at(-1).op !== 'return' || body.some(item => !allowed.has(item.op)) ||
+                    callee.parameters.length !== instruction.arguments.length) { retained.push(instruction); continue; }
+                const values = new Map(callee.parameters.map((parameter, index) => [parameter.name, instruction.arguments[index]]));
+                const remap = value => {
+                    if (!value || typeof value !== 'object') return value;
+                    if (value.kind === 'parameter') return values.get(value.name) ?? value;
+                    if (value.kind === 'temporary') return values.get(value.name) ?? value;
+                    if (Array.isArray(value)) return value.map(remap);
+                    for (const [key, child] of Object.entries(value)) if (key !== 'result') value[key] = remap(child);
+                    return value;
+                };
+                for (const item of body.slice(0, -1)) {
+                    const clone = structuredClone(item);
+                    for (const [key, value] of Object.entries(clone)) if (key !== 'result') clone[key] = remap(value);
+                    if (clone.result) { const name = fresh(); values.set(clone.result, {kind: 'temporary', name, type: clone.type}); clone.result = name; }
+                    retained.push(clone);
+                }
+                const returned = remap(structuredClone(body.at(-1).value));
+                if (returned?.kind === 'temporary') {
+                    const producer = retained.findLast(item => item.result === returned.name);
+                    if (producer) { producer.result = instruction.result; values.set(returned.name, {kind: 'temporary', name: instruction.result, type: instruction.type}); }
+                    else aliases.set(instruction.result, returned);
+                } else aliases.set(instruction.result, returned);
+            }
+            block.instructions = retained;
         }
     }
 

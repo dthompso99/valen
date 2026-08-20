@@ -23,6 +23,13 @@ library IrValidation {{
         __(name:string, blockIndex:i64) -> void { self.name = name; self.blockIndex = blockIndex; self.crossesBlocks = false }
     }}
 
+    ExactType {{
+        member name:string
+        member typeName:string
+        member invalid:bool
+        __(name:string, typeName:string) -> void { self.name = name; self.typeName = typeName; self.invalid = false }
+    }}
+
     Pass {{
         prepare(program:Ir.Program, optimize:bool=true, requireEntry:bool=true, scalarReplacement:bool=true) -> Array<string> {
             self.canonicalize(program, optimize, scalarReplacement)
@@ -56,11 +63,174 @@ library IrValidation {{
                     self.simplifyControlFlow(functionNode)
                     self.removeUnreachable(functionNode)
                     self.propagateLocalValues(functionNode)
+                    self.devirtualizeExactCalls(program, functionNode)
+                    self.inlineLeafCalls(program, functionNode)
+                    self.propagateLocalValues(functionNode)
                     if scalarReplacement { self.replaceLocalObjects(program, functionNode) }
                     self.removeDeadValues(functionNode)
                 }
                 functionIndex = functionIndex + 1
             }
+        }
+
+        devirtualizeExactCalls(program:Ir.Program, functionNode:Ir.Function) -> void {
+            local exactTemporaries = new Array<ExactType>(0)
+            local declarations = new Array<PropagatedValue>(0)
+            local exactLocals = new Array<ExactType>(0)
+            local blockIndex:i64 = 0
+            while blockIndex < functionNode.blocks.length {
+                local instructionIndex:i64 = 0
+                while instructionIndex < functionNode.blocks[blockIndex].instructions.length {
+                    local instruction = functionNode.blocks[blockIndex].instructions[instructionIndex]
+                    if instruction.op == "allocate" && instruction.result != null { self.setExactType(exactTemporaries, instruction.result!.name, instruction.result!.typeName) }
+                    if instruction.op == "declare_local" && instruction.name != null && instruction.first != null {
+                        if self.findPropagated(declarations, instruction.name!) != null { self.invalidateExactType(exactLocals, instruction.name!) }
+                        else { declarations.append(new PropagatedValue(instruction.name!, instruction.first!)) }
+                    }
+                    if instruction.op == "store_local" && instruction.name != null { self.invalidateExactType(exactLocals, instruction.name!) }
+                    instructionIndex = instructionIndex + 1
+                }
+                blockIndex = blockIndex + 1
+            }
+            local changed:bool = true
+            while changed {
+                changed = false
+                local declarationIndex:i64 = 0
+                while declarationIndex < declarations.length {
+                    local declaration = declarations[declarationIndex]
+                    if self.findExactType(exactLocals, declaration.name) == null && !self.exactTypeInvalid(exactLocals, declaration.name) {
+                        local typeName = self.findExactType(exactTemporaries, declaration.value.name)
+                        if typeName != null { self.setExactType(exactLocals, declaration.name, typeName!); changed = true }
+                    }
+                    declarationIndex = declarationIndex + 1
+                }
+                blockIndex = 0
+                while blockIndex < functionNode.blocks.length {
+                    local instructionIndex:i64 = 0
+                    while instructionIndex < functionNode.blocks[blockIndex].instructions.length {
+                        local instruction = functionNode.blocks[blockIndex].instructions[instructionIndex]
+                        if instruction.op == "load_local" && instruction.result != null && instruction.name != null && self.findExactType(exactTemporaries, instruction.result!.name) == null {
+                            local typeName = self.findExactType(exactLocals, instruction.name!)
+                            if typeName != null { self.setExactType(exactTemporaries, instruction.result!.name, typeName!); changed = true }
+                        }
+                        instructionIndex = instructionIndex + 1
+                    }
+                    blockIndex = blockIndex + 1
+                }
+            }
+            blockIndex = 0
+            while blockIndex < functionNode.blocks.length {
+                local instructionIndex:i64 = 0
+                while instructionIndex < functionNode.blocks[blockIndex].instructions.length {
+                    local instruction = functionNode.blocks[blockIndex].instructions[instructionIndex]
+                    if (instruction.op == "virtual_call" || instruction.op == "contract_call") && instruction.arguments.length > 0 {
+                        local exactName = self.findExactType(exactTemporaries, instruction.arguments[0].name)
+                        if exactName != null {
+                            local typeNode = self.findType(program, exactName!)
+                            local target:string? = null
+                            if instruction.op == "virtual_call" {
+                                if typeNode != null && instruction.slot >= 0 && instruction.slot < typeNode!.virtualMethods.length { target = typeNode!.virtualMethods[instruction.slot].target }
+                            } else if typeNode != null && instruction.ownerType != null {
+                                local contractIndex:i64 = 0
+                                while contractIndex < typeNode!.contracts.length {
+                                    if typeNode!.contracts[contractIndex].name == instruction.ownerType! && instruction.slot >= 0 && instruction.slot < typeNode!.contracts[contractIndex].methods.length { target = typeNode!.contracts[contractIndex].methods[instruction.slot].target }
+                                    contractIndex = contractIndex + 1
+                                }
+                            }
+                            if target != null { instruction.op = "call"; instruction.target = target; instruction.ownerType = null; instruction.slot = -1 }
+                        }
+                    }
+                    instructionIndex = instructionIndex + 1
+                }
+                blockIndex = blockIndex + 1
+            }
+        }
+
+        inlineLeafCalls(program:Ir.Program, functionNode:Ir.Function) -> void {
+            local blockIndex:i64 = 0
+            while blockIndex < functionNode.blocks.length {
+                local retained = new Array<ref Ir.Instruction>(0)
+                local instructionIndex:i64 = 0
+                while instructionIndex < functionNode.blocks[blockIndex].instructions.length {
+                    local instruction = functionNode.blocks[blockIndex].instructions[instructionIndex]
+                    local callee:Ir.Function? = null
+                    if instruction.op == "call" && instruction.target != null { callee = self.findDefinedFunction(program, instruction.target!) }
+                    if callee == null || callee!.name == functionNode.name || callee!.modulePath != functionNode.modulePath || instruction.result == null || !self.scalarPrimitive(instruction.result!.typeName) || !self.inlineableLeaf(callee!) || callee!.parameters.length != instruction.arguments.length {
+                        retained.append(instruction)
+                    } else {
+                        local values = new Array<PropagatedValue>(0)
+                        local parameterIndex:i64 = 0
+                        while parameterIndex < callee!.parameters.length { values.append(new PropagatedValue(callee!.parameters[parameterIndex].name, instruction.arguments[parameterIndex])); parameterIndex = parameterIndex + 1 }
+                        local body = callee!.blocks[0].instructions
+                        local bodyIndex:i64 = 0
+                        while bodyIndex < body.length - 1 {
+                            local clone = self.cloneInstruction(body[bodyIndex])
+                            clone.first = self.resolveInlineValue(clone.first, values); clone.second = self.resolveInlineValue(clone.second, values); clone.third = self.resolveInlineValue(clone.third, values)
+                            local argumentIndex:i64 = 0
+                            while argumentIndex < clone.arguments.length { clone.arguments[argumentIndex] = self.resolveInlineValue(clone.arguments[argumentIndex], values)!; argumentIndex = argumentIndex + 1 }
+                            if clone.result != null {
+                                local oldName = clone.result!.name
+                                if bodyIndex == body.length - 2 { clone.result = instruction.result }
+                                else { clone.result = new Ir.Value("temporary", "%inline_" + blockIndex.toString() + "_" + instructionIndex.toString() + "_" + bodyIndex.toString(), clone.result!.typeName) }
+                                self.setPropagated(values, oldName, clone.result!)
+                            }
+                            retained.append(clone)
+                            bodyIndex = bodyIndex + 1
+                        }
+                    }
+                    instructionIndex = instructionIndex + 1
+                }
+                functionNode.blocks[blockIndex].instructions = retained
+                blockIndex = blockIndex + 1
+            }
+        }
+
+        inlineableLeaf(functionNode:Ir.Function) -> bool {
+            if functionNode.blocks.length != 1 || functionNode.blocks[0].instructions.length < 2 || functionNode.blocks[0].instructions.length > 6 { return false }
+            local instructions = functionNode.blocks[0].instructions
+            local returned = instructions[instructions.length - 1]
+            local producer = instructions[instructions.length - 2]
+            if returned.op != "return" || returned.first == null || returned.first!.kind != "temporary" || producer.result == null || producer.result!.name != returned.first!.name { return false }
+            local index:i64 = 0
+            while index < instructions.length - 1 { if !self.inlineableInstruction(instructions[index].op) { return false }; index = index + 1 }
+            return true
+        }
+        inlineableInstruction(op:string) -> bool { return op == "constant" || op == "float_constant" || op == "binary" || op == "unary" || op == "convert" }
+        cloneInstruction(source:Ir.Instruction) -> ref Ir.Instruction {
+            local clone = new Ir.Instruction(source.op)
+            if source.result != null { clone.result = new Ir.Value(source.result!.kind, source.result!.name, source.result!.typeName) }
+            clone.first = source.first; clone.second = source.second; clone.third = source.third
+            local index:i64 = 0
+            while index < source.arguments.length { clone.arguments.append(source.arguments[index]); index = index + 1 }
+            clone.name = source.name; clone.target = source.target; clone.alternateTarget = source.alternateTarget; clone.operator = source.operator; clone.typeName = source.typeName; clone.ownerType = source.ownerType; clone.elementType = source.elementType; clone.elementOwnership = source.elementOwnership; clone.text = source.text; clone.slot = source.slot
+            return clone
+        }
+        resolveInlineValue(value:Ir.Value?, values:Array<PropagatedValue>) -> ref Ir.Value? {
+            if value == null { return null }
+            local replacement = self.findPropagated(values, value!.name)
+            if replacement != null { return replacement }
+            return value
+        }
+
+        findExactType(values:Array<ExactType>, name:string) -> string? {
+            local index:i64 = 0
+            while index < values.length { if values[index].name == name && !values[index].invalid { return values[index].typeName }; index = index + 1 }
+            return null
+        }
+        exactTypeInvalid(values:Array<ExactType>, name:string) -> bool {
+            local index:i64 = 0
+            while index < values.length { if values[index].name == name { return values[index].invalid }; index = index + 1 }
+            return false
+        }
+        setExactType(values:Array<ExactType>, name:string, typeName:string) -> void {
+            local index:i64 = 0
+            while index < values.length { if values[index].name == name { if !values[index].invalid { values[index].typeName = typeName }; return }; index = index + 1 }
+            values.append(new ExactType(name, typeName))
+        }
+        invalidateExactType(values:Array<ExactType>, name:string) -> void {
+            local index:i64 = 0
+            while index < values.length { if values[index].name == name { values[index].invalid = true; return }; index = index + 1 }
+            local value = new ExactType(name, ""); value.invalid = true; values.append(value)
         }
 
         replaceLocalObjects(program:Ir.Program, functionNode:Ir.Function) -> void {

@@ -596,7 +596,7 @@ test('contract dispatch preserves register and stack arguments', () => {
     const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/abi-contract-arguments.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
-    const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
+    const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic), {optimizationLevel: 0});
     assert.match(assembly, /mov r11, QWORD PTR \[rax\+\d+\][\s\S]*call r11/);
 });
 
@@ -1399,6 +1399,32 @@ test('IR optimization scalar-replaces non-escaping primitive objects', () => {
     ];
     new IrCanonicalizer().canonicalizeFunction(escaping, true, program);
     assert.ok(escaping.blocks[0].instructions.some(instruction => instruction.op === 'allocate'));
+});
+
+test('IR optimization devirtualizes exact receivers and inlines tiny leaf methods', () => {
+    const source = `
+        Base {{ apply(value:i64) -> i64 { return value + 1 } }}
+        Child inherits Base {{ apply(value:i64) -> i64 { return value + 2 } }}
+        entry {{ __() -> i64 { local receiver:Base = new Child(); return receiver.apply(5) } }}
+    `;
+    const analyze = () => new SemanticAnalyzer().analyze(new Parser().parse(source, 'inline-exact.ar'));
+    const optimized = new IrGenerator().generate(analyze());
+    new IrCanonicalizer().run(optimized);
+    const entry = optimized.functions.find(fn => fn.displayName === 'entry.__');
+    assert.ok(!entry.blocks.flatMap(block => block.instructions).some(instruction => ['call', 'virtual_call'].includes(instruction.op) && instruction.target.endsWith('apply')));
+    assert.ok(entry.blocks.flatMap(block => block.instructions).some(instruction => instruction.op === 'binary' && instruction.operator === '+'));
+
+    const mutatedSource = `
+        Base {{ apply(value:i64) -> i64 { return value + 1 } }}
+        Child inherits Base {{ apply(value:i64) -> i64 { return value + 2 } }}
+        entry {{ __() -> i64 { local receiver:Base = new Child(); receiver = new Base(); return receiver.apply(5) } }}
+    `;
+    const mutatedSemantic = new SemanticAnalyzer().analyze(new Parser().parse(mutatedSource, 'inline-mutated.ar'));
+    assert.equal(mutatedSemantic.success, true, JSON.stringify(mutatedSemantic.diagnostics));
+    const mutated = new IrGenerator().generate(mutatedSemantic);
+    new IrCanonicalizer().run(mutated);
+    const mutatedEntry = mutated.functions.find(fn => fn.displayName === 'entry.__');
+    assert.ok(mutatedEntry.blocks.flatMap(block => block.instructions).some(instruction => instruction.op === 'virtual_call'));
 });
 
 test('IR validation rejects malformed control flow and calls before assembly', () => {
