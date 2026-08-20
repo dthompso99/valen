@@ -18,6 +18,7 @@ import Elf from './libElf.ar'
 import LibraryMetadata from './libLibraryMetadata.ar'
 import ModuleInterfaces from './libModuleInterface.ar'
 import Target from './libTarget.ar'
+import BuildIdentity from './libBuildIdentity.ar'
 
 entry {{
     __() -> i32 {
@@ -236,6 +237,9 @@ entry {{
             while llvmLibraryIndex < ir.foreignLibraries.length { llvmInputs.append(ir.foreignLibraries[llvmLibraryIndex]); llvmLibraryIndex = llvmLibraryIndex + 1 }
             local linkResult = System.link(runtimeObjectPath, outputPath!, llvmInputs)
             if linkResult != 0 { System.writeError("valen: LLVM linker exited with status "); System.writeError(linkResult.toString()); System.writeError("\n"); return 69 }
+            local llvmIdentity = new BuildIdentity.Builder(graph, targetName, optimizationLevel, "llvm", "system", runtimeMetrics, ir.foreignLibraries)
+            local llvmArtifact = Compiler.loadSource(outputPath!)
+            if llvmArtifact == null || !llvmIdentity.write(outputPath!, llvmArtifact!.content) { System.writeError("valen: could not write build identity\n"); return 74 }
             return 0
         }
         local runtimeErrors = new Array<string>(0)
@@ -384,6 +388,7 @@ entry {{
     }
 
     link(assembly:string, outputPath:string, libraries:Array<string>, linkerMode:string, ir:Ir.Program?=null, graph:ModuleLoading.ModuleGraph?=null, optimizationLevel:i64=1, cache:CompilerCache.Cache?=null, analysis:Semantics.Analysis?=null, targetName:string="x86_64-linux", runtimeMetrics:bool=false) -> i64 {
+        local identity:BuildIdentity.Builder? = null
         local structured = self.assembleObject(assembly, targetName)
         if structured == null {
             System.writeError("valen: native object encoder does not support generated assembly\n")
@@ -406,6 +411,9 @@ entry {{
             }
         }
         local nativeLink:bool = linkerMode == "native" || (linkerMode == "auto" && linkInputs.length == 0)
+        local selectedLinker = "system"
+        if nativeLink { selectedLinker = "native" }
+        if graph != null { identity = new BuildIdentity.Builder(graph!, targetName, optimizationLevel, "native", selectedLinker, runtimeMetrics, libraries) }
         if nativeLink {
             if linkInputs.length > 0 {
                 System.writeError("valen: native linker cannot resolve external object inputs or foreign libraries; use --linker system\n")
@@ -445,9 +453,13 @@ entry {{
             if executable == null { System.writeError("valen: native linker: "); System.writeError(linker.error); System.writeError("\n"); return 69 }
             if !self.writeObject(outputPath, executable!) { return 74 }
             if System.makeExecutable(outputPath) != 0 { System.writeError("valen: could not make output executable; OS error "); System.writeError(System.lastError().toString()); System.writeError("\n"); return 74 }
+            local nativeArtifact = Compiler.loadSource(outputPath)
+            if identity != null { if nativeArtifact == null || !identity!.write(outputPath, nativeArtifact!.content) { System.writeError("valen: could not write build identity\n"); return 74 } }
             return 0
         }
-        return System.link(inputPath, outputPath, linkInputs)
+        local result = System.link(inputPath, outputPath, linkInputs)
+        if result == 0 && identity != null { local systemArtifact = Compiler.loadSource(outputPath); if systemArtifact == null || !identity!.write(outputPath, systemArtifact!.content) { System.writeError("valen: could not write build identity\n"); return 74 } }
+        return result
     }
 
     generateAssembly(ir:Ir.Program, targetName:string, optimizationLevel:i64, emissionModule:string?, includeRuntime:bool, includeModuleMetadata:bool=false, runtimeMetrics:bool=false) -> string {

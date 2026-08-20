@@ -6,6 +6,7 @@ import net from 'node:net';
 import {spawn, spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
+import {BuildIdentity} from '../build-identity.js';
 import {Compiler} from '../compiler.js';
 import {compileOnlyPrograms, expectedFailures, invalidPrograms, targetFailures, validPrograms} from './conformance-manifest.js';
 
@@ -459,6 +460,26 @@ test('generation 1 passes the native compiler conformance suite', async t => {
         assert.equal(build.status, 0, build.stderr || build.stdout || `generation 2 build terminated by ${build.signal ?? 'an unknown signal'}`);
         assert.equal(fs.existsSync(`${generation2Path}.o`), true, 'generation 2 was not built from a native object');
         assert.equal(fs.existsSync(`${generation2Path}.s`), false, 'generation 2 unexpectedly required an assembler');
+
+        await t.test('native compilers emit inspectable deterministic build identities', () => {
+            const sourcePath = path.join(projectRoot, 'bootstrap/test/fixtures/runtime-foundation.ar');
+            const identities = [];
+            for (const [generation, compiler] of [[1, compilerPath], [2, generation2Path]]) {
+                const executable = path.join(directory, `identity-${generation}`);
+                const compile = spawnSync(compiler, [sourcePath, '-o', executable], {
+                    encoding: 'utf8', env: environment, cwd: projectRoot
+                });
+                assert.equal(compile.status, 0, compile.stderr || compile.stdout);
+                const sidecar = `${executable}.vbuild`;
+                assert.equal(fs.existsSync(sidecar), true);
+                const identity = BuildIdentity.inspect(sidecar);
+                assert.equal(identity.backend, 'native');
+                assert.equal(identity.linker, 'native');
+                identities.push(identity);
+            }
+            assert.equal(identities[1].id, identities[0].id);
+            assert.equal(identities[1].artifactFingerprint, identities[0].artifactFingerprint);
+        });
 
         await t.test('native compilers emit deterministic newline-delimited JSON diagnostics', () => {
             const sourcePath = path.join(projectRoot, invalidPrograms.find(fixture => fixture.name === 'multiple semantic errors').source);

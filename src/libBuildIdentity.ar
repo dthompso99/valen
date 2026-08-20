@@ -1,0 +1,108 @@
+import System from './libSystem.ar'
+import Diagnostics from './libDiagnostics.ar'
+import ModuleLoading from './libModuleLoader.ar'
+import ModuleInterfaces from './libModuleInterface.ar'
+
+library BuildIdentity {{
+    Builder {{
+        member target:string
+        member optimization:i64
+        member backend:string
+        member linker:string
+        member runtimeMetrics:bool
+        member entryInterface:string
+        member modules:string
+        member foreignLibraries:Array<string>
+
+        __(graph:ModuleLoading.ModuleGraph, target:string, optimization:i64, backend:string, linker:string, runtimeMetrics:bool, libraries:Array<string>) -> void {
+            self.target = target; self.optimization = optimization; self.backend = backend; self.linker = linker; self.runtimeMetrics = runtimeMetrics
+            self.foreignLibraries = self.sortedStrings(libraries)
+            local interfaceBuilder = new ModuleInterfaces.Builder()
+            self.entryInterface = ""
+            if graph.entry != null { self.entryInterface = self.hex(interfaceBuilder.create(graph.entry!).interfaceFingerprint) }
+            local artifacts = new Array<ModuleInterfaces.Artifact>(0)
+            local index:i64 = 0
+            while index < graph.modules.length { artifacts.append(interfaceBuilder.create(graph.modules[index])); index = index + 1 }
+            self.sortArtifacts(artifacts)
+            local output = new StringBuilder(); output.append("[")
+            index = 0
+            while index < artifacts.length {
+                if index > 0 { output.append(",") }
+                local artifact = artifacts[index]
+                local module:ModuleLoading.Module? = null; local moduleIndex:i64 = 0
+                while moduleIndex < graph.modules.length { if interfaceBuilder.create(graph.modules[moduleIndex]).interfaceFingerprint == artifact.interfaceFingerprint { module = graph.modules[moduleIndex]; break }; moduleIndex = moduleIndex + 1 }
+                output.append("{\"implementationFingerprint\":"); output.append(Diagnostics.jsonString(self.hex(artifact.implementationFingerprint)))
+                output.append(",\"interfaceFingerprint\":"); output.append(Diagnostics.jsonString(self.hex(artifact.interfaceFingerprint)))
+                output.append(",\"dependencies\":[")
+                local dependencies = new Array<string>(0)
+                if module != null { local importIndex:i64 = 0; while importIndex < module!.imports.length { dependencies.append(module!.imports[importIndex].name); importIndex = importIndex + 1 } }
+                dependencies = self.sortedStrings(dependencies)
+                local dependencyIndex:i64 = 0
+                while dependencyIndex < dependencies.length { if dependencyIndex > 0 { output.append(",") }; output.append(Diagnostics.jsonString(dependencies[dependencyIndex])); dependencyIndex = dependencyIndex + 1 }
+                output.append("]}"); index = index + 1
+            }
+            output.append("]"); self.modules = output.build()
+        }
+
+        write(path:string, artifact:string) -> bool {
+            local artifactFingerprint = self.hash(artifact)
+            local remainder = self.remainder(artifactFingerprint)
+            local unsigned = "{\"format\":1," + remainder + "}"
+            local content = "{\"format\":1,\"id\":" + Diagnostics.jsonString(self.hash(unsigned)) + "," + remainder + "}\n"
+            local output = System.openWrite(path + ".vbuild")
+            if output == null { return false }
+            local written = System.writeFile(output!, content); local closed = System.close(output!)
+            return written == content.length && closed == 0
+        }
+
+        remainder(artifactFingerprint:string) -> string {
+            local output = new StringBuilder()
+            output.append("\"compilerInterface\":\"valen-interface-1\",\"target\":"); output.append(Diagnostics.jsonString(self.target))
+            output.append(",\"abi\":\"valen-native-1\",\"optimization\":"); output.append(self.optimization.toString())
+            output.append(",\"backend\":"); output.append(Diagnostics.jsonString(self.backend)); output.append(",\"linker\":"); output.append(Diagnostics.jsonString(self.linker))
+            output.append(",\"runtimeMetrics\":"); if self.runtimeMetrics { output.append("true") } else { output.append("false") }
+            output.append(",\"foreignLibraries\":[")
+            local index:i64 = 0
+            while index < self.foreignLibraries.length { if index > 0 { output.append(",") }; output.append(Diagnostics.jsonString(self.foreignLibraries[index])); index = index + 1 }
+            output.append("],\"artifactFingerprint\":"); output.append(Diagnostics.jsonString(artifactFingerprint))
+            output.append(",\"entryInterface\":"); output.append(Diagnostics.jsonString(self.entryInterface))
+            output.append(",\"projectFingerprint\":null,\"lockFingerprint\":null,\"modules\":"); output.append(self.modules)
+            return output.build()
+        }
+
+        hash(input:string) -> string {
+            local value:i64 = 1469598103934665603; local index:i64 = 0
+            while index < input.length { value = (value ^ input[index] as i64) * 1099511628211; index = index + 1 }
+            return self.hex(value)
+        }
+
+        hex(value:i64) -> string {
+            local digits = "0123456789abcdef"; local output = new StringBuilder(); local shift:i64 = 60
+            while shift >= 0 { local digit = (value >> shift) & 15; output.append(digits.slice(digit, 1)); shift = shift - 4 }
+            return output.build()
+        }
+
+        sortedStrings(values:Array<string>) -> Array<string> {
+            local result = new Array<string>(0); for value in values { result.append(value) }
+            local index:i64 = 1
+            while index < result.length { local current = result[index]; local position = index; while position > 0 && self.less(current, result[position - 1]) { result[position] = result[position - 1]; position = position - 1 }; result[position] = current; index = index + 1 }
+            return result
+        }
+
+        less(left:string, right:string) -> bool {
+            local index:i64 = 0; local length = left.length
+            if right.length < length { length = right.length }
+            while index < length { if left[index] < right[index] { return true }; if left[index] > right[index] { return false }; index = index + 1 }
+            return left.length < right.length
+        }
+
+        sortArtifacts(values:Array<ModuleInterfaces.Artifact>) -> void {
+            local index:i64 = 1
+            while index < values.length {
+                local current = values[index]; local position = index
+                while position > 0 && (self.less(self.hex(current.interfaceFingerprint), self.hex(values[position - 1].interfaceFingerprint)) || (current.interfaceFingerprint == values[position - 1].interfaceFingerprint && self.less(self.hex(current.implementationFingerprint), self.hex(values[position - 1].implementationFingerprint)))) { values[position] = copy values[position - 1]; position = position - 1 }
+                values[position] = copy current; index = index + 1
+            }
+        }
+    }}
+}}

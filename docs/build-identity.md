@@ -1,6 +1,6 @@
 # Build identity
 
-Generation-zero executable builds write a deterministic `<output>.vbuild` sidecar. The sidecar records the compatibility-relevant inputs used to produce the executable and fingerprints the resulting artifact.
+Generation-zero and self-hosted executable builds write a deterministic `<output>.vbuild` sidecar. The sidecar records the compatibility-relevant inputs used to produce the executable and fingerprints the resulting artifact.
 
 Inspect and validate a sidecar without recompiling:
 
@@ -22,4 +22,6 @@ Inspection verifies that the build identifier matches the recorded inputs before
 
 Module source and interface fingerprints participate in identity, but filesystem locations do not. Identical projects therefore retain the same identity after moving to another checkout path. Timestamps, usernames, temporary paths, and hostnames are excluded.
 
-The initial sidecar is emitted by the JavaScript generation-zero compiler. Self-hosted emission, embedded ELF notes, detailed cache-miss explanations, and a stable machine-readable explanation schema remain **WIP** under issue #107.
+The JavaScript generation-zero compiler includes normalized project-manifest and lockfile fingerprints. Direct self-hosted compilation currently records those fields as `null` because it does not yet load project metadata.
+
+Embedded ELF notes, project metadata in direct self-hosted builds, detailed cache-miss explanations, and a stable machine-readable explanation schema remain **WIP** under issue #107.
