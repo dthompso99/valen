@@ -12,6 +12,12 @@ The service required bounded pending output, configurable message and connection
 
 Disconnect churn exposed unsafe and ineffective tracing collection. Issue #79 moved strings and native handles into managed layouts, added adaptive collection and safe finalization, hardened stale-root handling, and retained a process-lifetime arena for the self-hosted compiler. A 4,000-request local soak then showed bounded memory cycling instead of monotonic growth. Production follow-up is tracked in #80.
 
+Issue #102 added a bounded mixed-traffic reproducer in `scripts/clippy-memory-soak.mjs`. Each cycle sends 50 health requests and churns 20 successful WebSocket handshakes, forces two collections through an instrumentation-only endpoint, and records managed-heap, root, native-handle, RSS, virtual-memory, and mapping data. After warm-up, both native and LLVM x86_64 builds held a 1,984-byte/24-object managed floor, five roots, and two open native handles; 12 cycles finalized 852 transient handles without changing either live count.
+
+The audit also corrected Clippy's connection table: retired slots were set to `null` but never reused, so the array and every event-loop descriptor scan grew with lifetime connection count. New accepts now fill the first retired slot before extending the array.
+
+The remaining process-memory signal was outside the tracked managed heap. An isolated 150-request HTTP run grew RSS and virtual memory by only 16 KiB, and 60 rejected WebSocket upgrades behaved the same, but 60 successful upgrades added 256 KiB and left 52 additional 4 KiB anonymous mappings. Splitting the successful path showed handshake hashing/base64 remained flat while initial frame encoding reproduced the growth. The x86_64 `StringBuilder.append(string)` bulk-growth path allocated a replacement buffer and overwrote the old pointer without unmapping it; AArch64 already used the ownership-correct array reserve primitive. Routing x86_64 through that same primitive reduced both a 100-upgrade run and the 12-cycle mixed workload to a fixed 16-20 KiB warm-up in bootstrap, self-hosted native, and LLVM builds. Production redeployment and the multi-hour confirmation remain pending.
+
 Graceful shutdown needed a minimal native signal boundary. `System.enableShutdownSignals()` installs handlers for SIGINT and SIGTERM; handlers only set a flag. `System.shutdownRequested()` lets the event loop observe that flag at a safe point, close clients and the listener, and exit successfully. Cleanup never runs in signal context.
 
 ## Compiler and tooling findings

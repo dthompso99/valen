@@ -53,10 +53,12 @@ entry {{
     member maximumMessage:i64
     member rejected:i64
     member messages:i64
+    member runtimeDiagnostics:bool
 
     __() -> i32 {
         self.clients = new Array<Client?>(0); self.protocol = new WebSocket.Protocol(); self.handshake = new WebSocket.Handshake()
         self.clipboard = "{\"type\":\"text\",\"data\":\"\"}"; self.maximumMessage = 104857600; self.rejected = 0; self.messages = 0
+        self.runtimeDiagnostics = System.environmentVariable("VALEN_RUNTIME_METRICS") != null
         local configuredMaximum = System.environmentVariable("VALEN_MAX_MESSAGE_BYTES")
         if configuredMaximum != null { local parsed = System.parseInteger(configuredMaximum!); if !parsed.valid || parsed.value < 1 { return 64 }; self.maximumMessage = parsed.value }
         local port:i64 = 3000
@@ -83,10 +85,14 @@ entry {{
     }
 
     accept(listener:Network.Listener) -> bool {
+        local slot = self.clients.length
+        local index:i64 = 0
+        while index < self.clients.length { if self.clients[index] == null && slot == self.clients.length { slot = index }; index = index + 1 }
         local connection = Network.accept(listener)
         if connection == null { return Network.lastError() == 11 }
         if !Network.makeConnectionNonblocking(connection!) { Network.closeConnection(connection!); return false }
-        self.clients.append(new Client(connection!, self.maximumMessage + 4096)); return true
+        if slot == self.clients.length { self.clients.append(null) }
+        self.clients[slot] = new Client(connection!, self.maximumMessage + 4096); return true
     }
     clientAt(active:i64) -> i64 {
         local seen:i64 = 0; local index:i64 = 0
@@ -114,6 +120,14 @@ entry {{
         local request = Http.parse(client.input)
         if request == null { client.queue((new Http.Response("400 Bad Request", "bad request\n")).serialize()); client.mode = 2; return }
         if request!.method == "GET" && request!.target == "/health" { client.queue((new Http.Response("200 OK", "ok\n")).serialize()); client.mode = 2; return }
+        if self.runtimeDiagnostics && request!.method == "GET" && request!.target == "/__runtime/collect" {
+            System.collectGarbage(); System.collectGarbage()
+            local metrics = System.runtimeMetrics()
+            local body = metrics.trackedBytes.toString() + "," + metrics.heapObjects.toString() + "," + metrics.roots.toString() + "," + metrics.peakRoots.toString() + "," + metrics.collections.toString() + "," + metrics.reclaimedObjects.toString() + "," + metrics.trackedReclaimedBytes.toString() + "," + metrics.weakReferencesCleared.toString() + "," + metrics.weakReferencesRetained.toString() + "," + metrics.nativeHandlesOpen.toString() + "," + metrics.nativeHandlesFinalized.toString() + "\n"
+            client.queue((new Http.Response("200 OK", body, "text/plain")).serialize()); client.mode = 2; return
+        }
+        if self.runtimeDiagnostics && request!.method == "GET" && request!.target == "/__runtime/handshake" { client.queue((new Http.Response("200 OK", self.handshake.accept("dGhlIHNhbXBsZSBub25jZQ=="))).serialize()); client.mode = 2; return }
+        if self.runtimeDiagnostics && request!.method == "GET" && request!.target == "/__runtime/frame" { client.queue((new Http.Response("200 OK", self.protocol.encode(1, self.clipboard))).serialize()); client.mode = 2; return }
         if request!.method == "GET" && request!.target == "/" { client.queue((new Http.Response("200 OK", Page.html(), "text/html; charset=utf-8")).serialize()); client.mode = 2; return }
         if request!.method != "GET" || request!.target != "/ws" { client.queue((new Http.Response("404 Not Found", "not found\n")).serialize()); client.mode = 2; return }
         local upgrade = request!.header("upgrade"); local connection = request!.header("connection")
