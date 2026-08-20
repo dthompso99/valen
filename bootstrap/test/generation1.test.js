@@ -135,7 +135,8 @@ test('generation 1 passes the native compiler conformance suite', async t => {
     const compilerPath = path.join(directory, 'valen');
     try {
         try {
-            new Compiler().compile(path.join(projectRoot, 'src/valen.ar'), compilerPath, {sourceRoot: projectRoot});
+            new Compiler().compile(path.join(projectRoot, 'src/valen.ar'), compilerPath,
+                {sourceRoot: projectRoot, libraryPath: path.join(projectRoot, 'lib')});
         } catch (error) {
             if (error?.code === 'EPERM') {
                 t.skip('process sandbox does not allow Node to spawn the system compiler');
@@ -191,6 +192,20 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                 {encoding: 'utf8', env: environment, cwd: projectRoot});
             assert.equal(unsupported.status, 64);
             assert.match(unsupported.stderr, /supported targets: x86_64-linux, aarch64-linux/);
+        });
+
+        await t.test('native compiler parses and validates project manifests', () => {
+            const manifest = path.join(directory, 'valen.project.json');
+            fs.writeFileSync(manifest, JSON.stringify({format: 1, package: {name: 'native-app', version: '0.1.0'},
+                executable: {source: 'src/main.ar'}, dependencies: []}));
+            const valid = spawnSync(compilerPath, ['--validate-project', manifest], {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(valid.status, 0, valid.stderr);
+            assert.equal(valid.stdout, 'native-app 0.1.0 src/main.ar\n');
+            fs.writeFileSync(manifest, JSON.stringify({format: 1, package: {name: 'native-app', version: '0.1.0'},
+                executable: {source: '../main.ar'}, dependencies: []}));
+            const invalid = spawnSync(compilerPath, ['--validate-project', manifest], {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(invalid.status, 65);
+            assert.match(invalid.stderr, /must stay within the project root/);
         });
 
         await t.test('compiled libraries carry validated version and ABI metadata', () => {

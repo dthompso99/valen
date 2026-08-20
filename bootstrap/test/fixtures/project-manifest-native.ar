@@ -1,0 +1,16 @@
+import ProjectManifest from '../../../src/libProjectManifest.ar'
+
+entry {{
+    __() -> i64 {
+        local codec = new ProjectManifest.Codec()
+        local parsed = codec.parse("{\"format\":1,\"package\":{\"name\":\"sample-app\",\"version\":\"0.1.0\"},\"executable\":{\"source\":\"src/main.ar\",\"target\":\"amd64-linux\"},\"dependencies\":[{\"name\":\"Zulu\",\"version\":\"2.0.0\",\"metadata\":\"deps/Zulu.o.vmeta\"},{\"name\":\"Alpha\",\"version\":\"1.0.0\",\"source\":\"deps/Alpha.ar\",\"metadata\":\"deps/Alpha.o.vmeta\"}]}")
+        if !parsed.valid { return 1 }
+        local manifest = parsed.manifest!
+        if manifest.name != "sample-app" || manifest.output != "build/app" || manifest.target! != "x86_64-linux" { return 2 }
+        if manifest.dependencies.length != 2 || manifest.dependencies[0].name != "Alpha" || manifest.dependencies[1].name != "Zulu" { return 3 }
+        if codec.parse("{\"format\":1,\"package\":{\"name\":\"bad\",\"version\":\"01.0.0\"},\"executable\":{\"source\":\"main.ar\"}}").valid { return 4 }
+        if codec.parse("{\"format\":1,\"package\":{\"name\":\"bad\",\"version\":\"1.0.0\"},\"executable\":{\"source\":\"../main.ar\"}}").valid { return 5 }
+        if codec.parse("{\"format\":1,\"package\":{\"name\":\"bad\",\"version\":\"1.0.0\"},\"executable\":{\"source\":\"main.ar\"},\"typo\":true}").valid { return 6 }
+        return 0
+    }
+}}

@@ -19,6 +19,7 @@ import LibraryMetadata from './libLibraryMetadata.ar'
 import ModuleInterfaces from './libModuleInterface.ar'
 import Target from './libTarget.ar'
 import BuildIdentity from './libBuildIdentity.ar'
+import ProjectManifest from './libProjectManifest.ar'
 
 entry {{
     __() -> i32 {
@@ -87,6 +88,7 @@ entry {{
             }
         }
         if compilerArguments.length == 3 { if compilerArguments[1] == "--validate-library" { return self.validateCompiledLibrary(compilerArguments[2], targetName) } }
+        if compilerArguments.length == 3 { if compilerArguments[1] == "--validate-project" { return self.validateProjectManifest(compilerArguments[2]) } }
 
         local sourcePath:string? = null
         local outputPath:string? = null
@@ -387,6 +389,19 @@ entry {{
         return 0
     }
 
+    validateProjectManifest(path:string) -> i32 {
+        local source = Compiler.loadSource(path)
+        if source == null { System.writeError("valen: cannot load project manifest; OS error "); System.writeError(System.lastError().toString()); System.writeError("\n"); return 66 }
+        local parsed = (new ProjectManifest.Codec()).parse(source!.content)
+        if !parsed.valid {
+            System.writeError("valen: project manifest"); if parsed.offset > 0 { System.writeError(" at byte "); System.writeError(parsed.offset.toString()) }
+            System.writeError(": "); System.writeError(parsed.message); System.writeError("\n"); return 65
+        }
+        local manifest = parsed.manifest!
+        System.write(manifest.name); System.write(" "); System.write(manifest.version); System.write(" "); System.write(manifest.source); System.write("\n")
+        return 0
+    }
+
     link(assembly:string, outputPath:string, libraries:Array<string>, linkerMode:string, ir:Ir.Program?=null, graph:ModuleLoading.ModuleGraph?=null, optimizationLevel:i64=1, cache:CompilerCache.Cache?=null, analysis:Semantics.Analysis?=null, targetName:string="x86_64-linux", runtimeMetrics:bool=false) -> i64 {
         local identity:BuildIdentity.Builder? = null
         local structured = self.assembleObject(assembly, targetName)
@@ -531,5 +546,6 @@ entry {{
         System.write("  valen --emit-object <source-file> -o <object-file>\n")
         System.write("  valen --library-version <semver> --emit-library <source-file> -o <object-file>\n")
         System.write("  valen --validate-library <object-file>.vmeta\n")
+        System.write("  valen --validate-project <valen.project.json>\n")
     }
 }}

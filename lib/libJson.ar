@@ -1,5 +1,3 @@
-import System from "libSystem.ar"
-
 library Json {{
     enum Kind {{ Null, Boolean, Integer, String, Array, Object }}
 
@@ -115,9 +113,18 @@ library Json {{
             if self.source[self.index] == 48 { self.index = self.index + 1; if self.index < self.source.length && self.source[self.index] >= 48 && self.source[self.index] <= 57 { self.fail("Leading zero in number"); return null } }
             else { if self.source[self.index] < 49 || self.source[self.index] > 57 { self.fail("Expected JSON value"); return null }; while self.index < self.source.length && self.source[self.index] >= 48 && self.source[self.index] <= 57 { self.index = self.index + 1 } }
             if self.index < self.source.length && (self.source[self.index] == 46 || self.source[self.index] == 69 || self.source[self.index] == 101) { self.fail("Non-integral JSON numbers are not supported"); return null }
-            local parsed = System.parseInteger(self.source.slice(start, self.index - start))
-            if !parsed.valid { self.fail("JSON integer is outside i64 range"); return null }
-            local result = new Value(Json.Kind.Integer); result.integer = parsed.value; return result
+            local digitsStart = start; local negative = self.source[start] == 45; if negative { digitsStart = start + 1 }
+            local digits = self.source.slice(digitsStart, self.index - digitsStart)
+            local limit = "9223372036854775807"; if negative { limit = "9223372036854775808" }
+            if digits.length > limit.length || digits.length == limit.length && self.stringGreater(digits, limit) { self.fail("JSON integer is outside i64 range"); return null }
+            local integer:i64 = 0; local digitIndex:i64 = 0
+            while digitIndex < digits.length { local digit = (digits[digitIndex] - 48) as i64; if negative { integer = integer * 10 - digit } else { integer = integer * 10 + digit }; digitIndex = digitIndex + 1 }
+            local result = new Value(Json.Kind.Integer); result.integer = integer; return result
+        }
+        stringGreater(left:string, right:string) -> bool {
+            local index:i64 = 0
+            while index < left.length { if left[index] > right[index] { return true }; if left[index] < right[index] { return false }; index = index + 1 }
+            return false
         }
         value() -> Value? {
             self.whitespace(); if self.index >= self.source.length { self.fail("Expected JSON value"); return null }

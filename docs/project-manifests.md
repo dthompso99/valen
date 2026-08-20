@@ -47,4 +47,12 @@ node scripts/valen-project.mjs build --locked valen.project.json
 
 Manifest source, output, dependency source, and dependency metadata paths are confined to the project root. Local compiled dependencies are resolved in deterministic manifest order and linked from the exact artifacts recorded by the lockfile.
 
+The native compiler shares the same format-1 schema boundary and can validate a manifest directly:
+
+```sh
+valen --validate-project valen.project.json
+```
+
+This validates and normalizes manifest semantics without writing files. Native lock verification and manifest-driven build orchestration remain subsequent slices; the generation-zero `valen-project` command remains the build driver until those are complete.
+
 The lockfile sorts dependencies by name and records exact compiler-interface, target, ABI, interface, implementation, and object fingerprints. It contains no timestamps or absolute host paths. Registry and Git transport are intentionally separate future extensions; direct source-file compilation remains available without project metadata.

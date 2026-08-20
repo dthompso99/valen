@@ -14,7 +14,7 @@ Other architectures and operating systems are **WIP**.
 From the repository root:
 
 ```sh
-node bootstrap/compiler.js src/valen.ar valen
+VALEN_LIBRARY_PATH=./lib node bootstrap/compiler.js src/valen.ar valen
 ```
 
 This uses the JavaScript generation-0 compiler to build the compiler written in Valen.

@@ -33,7 +33,7 @@ test('self-hosted toolchain packages and statically consumes the installed stand
     try {
         const compiler = path.join(directory, 'valen');
         let result = spawnSync(process.execPath, [path.join(root, 'bootstrap/compiler.js'), path.join(root, 'src/valen.ar'), compiler],
-            {cwd: root, encoding: 'utf8'});
+            {cwd: root, encoding: 'utf8', env: {...process.env, VALEN_LIBRARY_PATH: path.join(root, 'lib')}});
         assert.equal(result.status, 0, result.stderr);
         const libraryRoot = path.join(directory, 'lib/valen');
         result = spawnSync(process.execPath, [path.join(root, 'scripts/package-stdlib.mjs'), '--compiler', compiler, '--output', libraryRoot],

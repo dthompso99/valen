@@ -28,7 +28,7 @@ const directories = {
 for (const directory of Object.values(directories)) fs.mkdirSync(directory, {recursive: true});
 
 const modules = ['libSystem.ar', 'libNetwork.ar', 'libEventLoop.ar', 'libHttp.ar',
-    'libWebSocket.ar', 'libDiagnostics.ar', 'libScopes.ar', 'libStringMap.ar', 'libCollections.ar'];
+    'libWebSocket.ar', 'libDiagnostics.ar', 'libScopes.ar', 'libStringMap.ar', 'libCollections.ar', 'libJson.ar'];
 for (const module of modules) fs.copyFileSync(path.join(root, 'lib', module), path.join(directories.source, module));
 
 const previousSysroot = process.env.VALEN_SYSROOT;

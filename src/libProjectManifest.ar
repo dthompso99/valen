@@ -1,0 +1,190 @@
+import Json from 'libJson.ar'
+import Target from './libTarget.ar'
+
+library ProjectManifest {{
+    Dependency {{
+        member name:string
+        member version:string
+        member source:string?
+        member metadata:string
+        __(name:string, version:string, source:string?, metadata:string) -> void {
+            self.name = name; self.version = version; self.source = source; self.metadata = metadata
+        }
+    }}
+
+    Manifest {{
+        member name:string
+        member version:string
+        member source:string
+        member output:string
+        member target:string?
+        member optimization:i64
+        member dependencies:Array<Dependency>
+        __(name:string, version:string, source:string) -> void {
+            self.name = name; self.version = version; self.source = source; self.output = "build/app"
+            self.target = null; self.optimization = 1; self.dependencies = new Array<Dependency>(0)
+        }
+    }}
+
+    Result {{
+        member valid:bool
+        member manifest:Manifest?
+        member offset:i64
+        member message:string
+        __(valid:bool, manifest:Manifest?=null, offset:i64=0, message:string="") -> void {
+            self.valid = valid; self.manifest = manifest; self.offset = offset; self.message = message
+        }
+    }}
+
+    Codec {{
+        error(message:string) -> Result { return new Result(false, null, 0, message) }
+
+        parse(source:string) -> Result {
+            local decoded = Json.parse(source)
+            if !decoded.valid { return new Result(false, null, decoded.offset, "Malformed Valen project manifest: " + decoded.message) }
+            local root = decoded.value!
+            if root.kind != Json.Kind.Object { return self.error("Project manifest must be an object") }
+            local unknown = self.unknown(root, "format|package|executable|dependencies")
+            if unknown != null { return self.error("Unknown project manifest field '" + unknown! + "'") }
+            local format = root.get("format")
+            if format == null || format!.kind != Json.Kind.Integer || format!.integer != 1 { return self.error("Unsupported project manifest version") }
+
+            local package = root.get("package")
+            if package == null || package!.kind != Json.Kind.Object { return self.error("Project package must be an object") }
+            unknown = self.unknown(package!, "name|version")
+            if unknown != null { return self.error("Unknown project package field '" + unknown! + "'") }
+            local name = self.requiredString(package!, "name", "Project package name")
+            if name == null { return self.error("Project package name must be a non-empty string") }
+            if !self.validName(name!) { return self.error("Invalid project package name '" + name! + "'") }
+            local version = self.requiredString(package!, "version", "Project package version")
+            if version == null || !self.validVersion(version!) { return self.error("Project package version must be a semantic version") }
+
+            local executable = root.get("executable")
+            if executable == null || executable!.kind != Json.Kind.Object { return self.error("Project executable must be an object") }
+            unknown = self.unknown(executable!, "source|output|target|optimization")
+            if unknown != null { return self.error("Unknown project executable field '" + unknown! + "'") }
+            local executableSource = self.requiredString(executable!, "source", "Project executable source")
+            if executableSource == null { return self.error("Project executable source must be a non-empty string") }
+            if !self.validPath(executableSource!) { return self.error("Project executable source must stay within the project root") }
+            local result = new Manifest(name!, version!, executableSource!)
+            local output = executable!.get("output")
+            if output != null {
+                if output!.kind != Json.Kind.String || output!.text.length == 0 { return self.error("Project executable output must be a non-empty string") }
+                if !self.validPath(output!.text) { return self.error("Project executable output must stay within the project root") }
+                result.output = output!.text
+            }
+            local target = executable!.get("target")
+            if target != null {
+                if target!.kind != Json.Kind.String || target!.text.length == 0 { return self.error("Project executable target must be a non-empty string") }
+                local resolved = (new Target.Resolver()).resolve(target!.text)
+                if resolved == null { return self.error("Unsupported project executable target '" + target!.text + "'") }
+                result.target = resolved!.name
+            }
+            local optimization = executable!.get("optimization")
+            if optimization != null {
+                if optimization!.kind != Json.Kind.Integer || optimization!.integer != 0 && optimization!.integer != 1 { return self.error("Project executable optimization must be 0 or 1") }
+                result.optimization = optimization!.integer
+            }
+
+            local dependencies = root.get("dependencies")
+            if dependencies != null {
+                if dependencies!.kind != Json.Kind.Array { return self.error("Project dependencies must be an array") }
+                local index:i64 = 0
+                while index < dependencies!.values.length {
+                    local dependency = dependencies!.values[index]
+                    if dependency.kind != Json.Kind.Object { return self.error("Project dependency " + index.toString() + " must be an object") }
+                    unknown = self.unknown(dependency, "name|version|source|metadata")
+                    if unknown != null { return self.error("Unknown project dependency " + index.toString() + " field '" + unknown! + "'") }
+                    local dependencyName = self.requiredString(dependency, "name", "dependency name")
+                    local dependencyVersion = self.requiredString(dependency, "version", "dependency version")
+                    local metadata = self.requiredString(dependency, "metadata", "dependency metadata")
+                    if dependencyName == null || !self.validName(dependencyName!) { return self.error("Invalid project dependency name") }
+                    if dependencyVersion == null || !self.validVersion(dependencyVersion!) { return self.error("Project dependency '" + dependencyName! + "' version must be a semantic version") }
+                    if metadata == null || !self.validPath(metadata!) { return self.error("Project dependency '" + dependencyName! + "' metadata must stay within the project root") }
+                    local dependencySource:string? = null
+                    local sourceValue = dependency.get("source")
+                    if sourceValue != null {
+                        if sourceValue!.kind != Json.Kind.String || sourceValue!.text.length == 0 || !self.validPath(sourceValue!.text) { return self.error("Project dependency '" + dependencyName! + "' source must stay within the project root") }
+                        dependencySource = sourceValue!.text
+                    }
+                    local insertion:i64 = 0
+                    while insertion < result.dependencies.length && self.less(result.dependencies[insertion].name, dependencyName!) { insertion = insertion + 1 }
+                    if insertion < result.dependencies.length && result.dependencies[insertion].name == dependencyName! { return self.error("Duplicate project dependency '" + dependencyName! + "'") }
+                    result.dependencies.insert(insertion, new Dependency(dependencyName!, dependencyVersion!, dependencySource, metadata!))
+                    index = index + 1
+                }
+            }
+            return new Result(true, result)
+        }
+
+        requiredString(value:Json.Value, key:string, where:string) -> string? {
+            local selected = value.get(key)
+            if selected == null || selected!.kind != Json.Kind.String || selected!.text.length == 0 { return null }
+            return selected!.text
+        }
+
+        unknown(value:Json.Value, allowed:string) -> string? {
+            local index:i64 = 0
+            while index < value.keys.length {
+                local key = value.keys[index]
+                local surrounded = "|" + allowed + "|"; local needle = "|" + key + "|"
+                if !self.contains(surrounded, needle) { return key }
+                index = index + 1
+            }
+            return null
+        }
+
+        contains(value:string, needle:string) -> bool {
+            if needle.length > value.length { return false }; local index:i64 = 0
+            while index + needle.length <= value.length { if value.slice(index, needle.length) == needle { return true }; index = index + 1 }
+            return false
+        }
+
+        validPath(value:string) -> bool {
+            if value.length == 0 || value[0] == 47 || value[0] == 92 { return false }
+            local start:i64 = 0; local index:i64 = 0
+            while index <= value.length {
+                if index == value.length || value[index] == 47 || value[index] == 92 {
+                    if index - start == 2 && value[start] == 46 && value[start + 1] == 46 { return false }
+                    start = index + 1
+                }
+                index = index + 1
+            }
+            return true
+        }
+
+        validName(value:string) -> bool {
+            if value.length == 0 || !self.alpha(value[0]) && value[0] != 95 { return false }; local index:i64 = 1
+            while index < value.length { if !self.alpha(value[index]) && !self.digit(value[index]) && value[index] != 95 && value[index] != 45 { return false }; index = index + 1 }
+            return true
+        }
+
+        validVersion(value:string) -> bool {
+            local coreEnd = value.length; local index:i64 = 0
+            while index < value.length { if value[index] == 45 || value[index] == 43 { coreEnd = index; break }; index = index + 1 }
+            local component:i64 = 0; local start:i64 = 0; index = 0
+            while index <= coreEnd {
+                if index == coreEnd || value[index] == 46 {
+                    if index == start || component > 2 || index - start > 1 && value[start] == 48 { return false }
+                    local digitIndex = start; while digitIndex < index { if !self.digit(value[digitIndex]) { return false }; digitIndex = digitIndex + 1 }
+                    component = component + 1; start = index + 1
+                }
+                index = index + 1
+            }
+            if component != 3 { return false }
+            if coreEnd < value.length {
+                if coreEnd + 1 >= value.length { return false }; index = coreEnd + 1
+                while index < value.length { local byte = value[index]; if !self.alpha(byte) && !self.digit(byte) && byte != 45 && byte != 46 && byte != 43 { return false }; index = index + 1 }
+            }
+            return true
+        }
+
+        alpha(value:u8) -> bool { return value >= 65 && value <= 90 || value >= 97 && value <= 122 }
+        digit(value:u8) -> bool { return value >= 48 && value <= 57 }
+        less(left:string, right:string) -> bool {
+            local length = left.length; if right.length < length { length = right.length }; local index:i64 = 0
+            while index < length { if left[index] < right[index] { return true }; if left[index] > right[index] { return false }; index = index + 1 }
+            return left.length < right.length
+        }
+    }}
+}}

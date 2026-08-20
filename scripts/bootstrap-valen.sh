@@ -8,7 +8,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Bootstrapping Valen compiler..."
-node bootstrap/compiler.js src/valen.ar valen0
+VALEN_LIBRARY_PATH=./lib node bootstrap/compiler.js src/valen.ar valen0
 echo "Compiling Generation 1 valen compiler..."
 ./valen0 src/valen.ar -o valen1 -O0
 echo "Compiling final valen compiler..."

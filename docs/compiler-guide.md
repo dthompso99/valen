@@ -145,7 +145,7 @@ The main parallel files are intentionally easy to recognize: for example, `boots
 Build generation 1:
 
 ```sh
-node bootstrap/compiler.js src/valen.ar /tmp/valen-stage1
+VALEN_LIBRARY_PATH=./lib node bootstrap/compiler.js src/valen.ar /tmp/valen-stage1
 ```
 
 Run bootstrap tests:

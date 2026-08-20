@@ -43,6 +43,7 @@ export const validPrograms = [
     {name: 'exhaustive enum matching', source: 'bootstrap/test/fixtures/enum-match.ar'},
     {name: 'checked integer parsing', source: 'bootstrap/test/fixtures/integer-parsing.ar'},
     {name: 'native JSON parsing and serialization', source: 'bootstrap/test/fixtures/json.ar'},
+    {name: 'native project manifest schema', source: 'bootstrap/test/fixtures/project-manifest-native.ar'},
     {name: 'ordinary method named hash', source: 'bootstrap/test/fixtures/method-named-hash.ar'},
     {name: 'native test runner', source: 'bootstrap/test/fixtures/native-tests.ar'},
     {name: 'self-hosted x86 object parser', source: 'bootstrap/test/fixtures/x86-object-parser.ar'},
