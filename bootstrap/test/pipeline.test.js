@@ -1366,6 +1366,31 @@ test('IR optimization discovers predecessors and splits critical edges determini
     assert.ok(!unoptimized.blocks.some(block => block.label.startsWith('critical_edge_')));
 });
 
+test('IR validation accepts complete loop values and rejects mismatched incoming edges', () => {
+    const initial = {kind: 'parameter', name: 'initial', type: 'i64'};
+    const condition = {kind: 'parameter', name: 'condition', type: 'bool'};
+    const loop = {kind: 'temporary', name: '%loop', type: 'i64'};
+    const next = {kind: 'temporary', name: '%next', type: 'i64'};
+    const fn = {name: 'entry.__', owner: 'entry', parameters: [{name: 'initial', type: 'i64'}, {name: 'condition', type: 'bool'}], returnType: 'i64', blocks: [
+        {label: 'entry', instructions: [{op: 'jump', target: 'header'}]},
+        {label: 'header', instructions: [
+            {op: 'loop_value', result: '%loop', type: 'i64', first: initial, second: next, target: 'entry', alternateTarget: 'body'},
+            {op: 'branch', condition, thenTarget: 'body', elseTarget: 'exit'}
+        ]},
+        {label: 'body', instructions: [
+            {op: 'constant', result: '%one', type: 'i64', value: '1'},
+            {op: 'binary', result: '%next', type: 'i64', operator: '+', left: loop, right: {kind: 'temporary', name: '%one', type: 'i64'}},
+            {op: 'jump', target: 'header'}
+        ]},
+        {label: 'exit', instructions: [{op: 'return', value: loop}]}
+    ]};
+    const program = {types: [{name: 'entry', fields: [], virtualMethods: [], contracts: []}], functions: [fn], externals: [], entry: fn.name};
+    assert.doesNotThrow(() => new IrValidator().validate(program));
+    const invalid = structuredClone(program);
+    invalid.functions[0].blocks[1].instructions[0].alternateTarget = 'exit';
+    assert.throws(() => new IrValidator().validate(invalid), /incoming blocks do not match block predecessors/);
+});
+
 test('IR optimization propagates block-local primitive values without crossing control flow', () => {
     const value = {kind: 'temporary', name: '%0', type: 'i64'};
     const loaded = {kind: 'temporary', name: '%1', type: 'i64'};

@@ -782,14 +782,35 @@ library IrValidation {{
                 if block.instructions.length == 0 { errors.append(prefix + " block '" + block.label + "' is empty") }
                 else {
                     local instructionIndex:i64 = 0
+                    local ordinaryInstruction:bool = false
                     while instructionIndex < block.instructions.length {
-                        self.validateInstruction(program, functionNode, block.instructions[instructionIndex], errors)
+                        local instruction = block.instructions[instructionIndex]
+                        if instruction.op == "loop_value" { self.validateLoopValue(functionNode, block, instruction, ordinaryInstruction, errors) } else { ordinaryInstruction = true }
+                        self.validateInstruction(program, functionNode, instruction, errors)
                         instructionIndex = instructionIndex + 1
                     }
                     if !self.isTerminator(block.instructions[block.instructions.length - 1].op) { errors.append(prefix + " block '" + block.label + "' has no terminator") }
                 }
                 blockIndex = blockIndex + 1
             }
+        }
+
+        validateLoopValue(functionNode:Ir.Function, block:Ir.Block, instruction:Ir.Instruction, afterOrdinary:bool, errors:Array<string>) -> void {
+            local prefix = "function '" + functionNode.name + "' instruction 'loop_value'"
+            if afterOrdinary { errors.append(prefix + " must appear before ordinary instructions") }
+            if instruction.result == null || instruction.first == null || instruction.second == null || instruction.target == null || instruction.alternateTarget == null { errors.append(prefix + " is incomplete"); return }
+            if instruction.target! == instruction.alternateTarget! || self.predecessorCount(functionNode, block.label) != 2 || !self.blockTargets(functionNode, instruction.target!, block.label) || !self.blockTargets(functionNode, instruction.alternateTarget!, block.label) { errors.append(prefix + " incoming blocks do not match block predecessors") }
+            if instruction.first!.typeName != instruction.result!.typeName || instruction.second!.typeName != instruction.result!.typeName { errors.append(prefix + " incoming value types do not match result type") }
+            if !self.scalarPrimitive(instruction.result!.typeName) { errors.append(prefix + " requires a primitive result type") }
+        }
+
+        blockTargets(functionNode:Ir.Function, source:string, target:string) -> bool {
+            local block = self.findBlock(functionNode, source)
+            if block == null || block!.instructions.length == 0 { return false }
+            local end = block!.instructions[block!.instructions.length - 1]
+            if end.op == "jump" { return end.target! == target }
+            if end.op == "branch" { return end.target! == target || end.alternateTarget! == target }
+            return false
         }
 
         validateInstruction(program:Ir.Program, functionNode:Ir.Function, instruction:Ir.Instruction, errors:Array<string>) -> void {
@@ -863,6 +884,7 @@ library IrValidation {{
         }
         isTerminator(op:string) -> bool { return op == "return" || op == "jump" || op == "branch" }
         isSupported(op:string) -> bool {
+            if op == "loop_value" { return true }
             if op == "array_slice" { return true }
             return op == "allocate" || op == "array_append" || op == "array_capacity" || op == "array_insert" || op == "array_length" || op == "array_load" || op == "array_new" || op == "array_remove" || op == "array_reserve" || op == "array_shrink" || op == "array_store" || op == "binary" || op == "branch" || op == "builder_append_byte" || op == "builder_append_bytes" || op == "builder_append_string" || op == "builder_build" || op == "builder_length" || op == "builder_new" || op == "bytes_to_string" || op == "call" || op == "checked_cast" || op == "constant" || op == "float_constant" || op == "contract_call" || op == "convert" || op == "declare_local" || op == "destroy_array" || op == "destroy_object" || op == "integer_to_string" || op == "jump" || op == "load_field" || op == "load_local" || op == "optional_box" || op == "return" || op == "store_field" || op == "store_local" || op == "string_codepoint_at" || op == "string_codepoint_length" || op == "string_concat" || op == "string_constant" || op == "string_equal" || op == "string_grapheme_at" || op == "string_grapheme_length" || op == "string_length" || op == "string_load" || op == "string_slice" || op == "string_to_bytes" || op == "structural_copy" || op == "structural_equal" || op == "structural_hash" || op == "test_expect" || op == "test_failures" || op == "type_test" || op == "unary" || op == "unwrap" || op == "virtual_call"
         }

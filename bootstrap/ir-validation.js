@@ -4,7 +4,7 @@ const supportedOperations = new Set([
     'allocate', 'array_append', 'array_capacity', 'array_insert', 'array_length', 'array_load', 'array_new', 'array_remove', 'array_reserve', 'array_shrink', 'array_slice', 'array_store', 'binary', 'branch',
     'builder_append_byte', 'builder_append_bytes', 'builder_append_string', 'builder_build', 'builder_length', 'builder_new', 'bytes_to_string', 'call',
     'checked_cast', 'constant', 'float_constant', 'contract_call', 'convert', 'declare_local', 'destroy_array', 'destroy_object',
-    'integer_to_string', 'jump', 'load_field', 'load_local', 'optional_box', 'return', 'store_field', 'store_local', 'string_concat',
+    'integer_to_string', 'jump', 'load_field', 'load_local', 'loop_value', 'optional_box', 'return', 'store_field', 'store_local', 'string_concat',
     'string_codepoint_at', 'string_codepoint_length', 'string_constant', 'string_equal', 'string_grapheme_at', 'string_grapheme_length', 'string_length', 'string_load', 'string_slice', 'string_to_bytes', 'structural_copy',
     'structural_equal', 'structural_hash', 'test_expect', 'test_failures', 'type_test', 'unary', 'unwrap', 'virtual_call'
 ]);
@@ -477,6 +477,7 @@ export class IrValidator {
         const definitions = new Set(fn.parameters.map(parameter => `parameter:${parameter.name}`));
         const uses = [];
         const locals = new Set();
+        const predecessors = new IrCanonicalizer().predecessors(fn);
         for (const block of fn.blocks) {
             if (!block.instructions.length) errors.push(`${prefix} block '${block.label}' is empty`);
             block.instructions.forEach((instruction, index) => {
@@ -499,6 +500,16 @@ export class IrValidator {
                     if (!instruction.condition) errors.push(`${where} has no condition`);
                     if (!blocks.has(instruction.thenTarget)) errors.push(`${where} targets unknown block '${instruction.thenTarget}'`);
                     if (!blocks.has(instruction.elseTarget)) errors.push(`${where} targets unknown block '${instruction.elseTarget}'`);
+                }
+                if (instruction.op === 'loop_value') {
+                    if (block.instructions.slice(0, index).some(item => item.op !== 'loop_value')) errors.push(`${where} must appear before ordinary instructions`);
+                    if (!instruction.result || !instruction.first || !instruction.second || !instruction.target || !instruction.alternateTarget) errors.push(`${where} is incomplete`);
+                    else {
+                        const incoming = predecessors.get(block.label) ?? [];
+                        if (instruction.target === instruction.alternateTarget || incoming.length !== 2 || !incoming.includes(instruction.target) || !incoming.includes(instruction.alternateTarget)) errors.push(`${where} incoming blocks do not match block predecessors`);
+                        if (instruction.first.type !== instruction.type || instruction.second.type !== instruction.type) errors.push(`${where} incoming value types do not match result type '${instruction.type}'`);
+                        if (!integerTypes.has(instruction.type) && !['u64', 'f32', 'f64'].includes(instruction.type)) errors.push(`${where} requires a primitive result type`);
+                    }
                 }
                 if (['call', 'virtual_call', 'contract_call'].includes(instruction.op)) this.validateCall(instruction, functions, where, errors);
                 for (const value of this.values(instruction)) {
