@@ -1,0 +1,2 @@
+import System from 'libSystem.ar'
+entry {{ __() -> i32 { local checksum:i64 = 0; local index:i64 = 0; while index < 50000 { local output = new StringBuilder(); if (index & 1) == 0 { output.append("valen-") } else { output.append("argon-") }; output.append("runtime"); checksum = checksum + output.build().length; index = index + 1 }; System.print(checksum); return 0 } }}

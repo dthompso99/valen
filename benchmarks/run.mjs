@@ -15,7 +15,7 @@ const option = name => {
     return index < 0 ? null : process.argv[index + 1];
 };
 const requested = new Set((option('--languages') ?? 'valen,valen-llvm,c,cpp,rust,go,java,node').split(',').filter(Boolean));
-const requestedWorkloads = (option('--workloads') ?? 'integer-loop,object-dispatch').split(',').filter(Boolean);
+const requestedWorkloads = (option('--workloads') ?? 'integer-loop,object-dispatch,string-builders').split(',').filter(Boolean);
 const repetitions = Number(option('--repetitions') ?? 5);
 const outputPath = option('--output');
 const keep = process.argv.includes('--keep');
@@ -34,7 +34,8 @@ const fileFingerprint = filePath => createHash('sha256').update(fs.readFileSync(
 const artifactPath = (workload, language) => path.join(temporary, `${workload}-${language}`);
 const workloads = {
     'integer-loop': {expectedOutput: '124999999686\n', iterations: 1000000000, javaClass: 'IntegerLoop'},
-    'object-dispatch': {expectedOutput: '1426395009\n', iterations: 50000000, javaClass: 'ObjectDispatch'}
+    'object-dispatch': {expectedOutput: '1426395009\n', iterations: 50000000, javaClass: 'ObjectDispatch'},
+    'string-builders': {expectedOutput: '650000\n', iterations: 50000, javaClass: 'StringBuilders'}
 };
 for (const name of requestedWorkloads) if (!workloads[name]) throw new Error(`Unknown workload '${name}'`);
 

@@ -49,6 +49,11 @@ call, and one contract/interface call. Each result feeds the next call through a
 compilers cannot replace the loop with a closed-form sum. It measures object dispatch and call lowering without
 including allocation in the timed loop.
 
+`string-builders` constructs fifty thousand short strings from multiple appended fragments and totals their
+lengths. It deliberately measures each language's ordinary transient-string construction model: Valen and managed
+runtimes allocate their normal builder/string objects, while native implementations may keep short buffers on the
+stack or optimize fixed-length work. Treat it as an allocation/runtime workload, not a pure byte-copy comparison.
+
 Use `--workloads` to select a comma-separated subset. Reports identify every row by workload, and the JSON
 configuration records each workload's iteration count. All implementations of a workload must produce the same
 deterministic output before any timing is accepted.

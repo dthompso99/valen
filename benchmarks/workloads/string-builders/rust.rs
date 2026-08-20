@@ -1,0 +1,1 @@
+fn main(){let mut checksum:i64=0;for i in 0..50_000i64{let mut out=String::new();out.push_str(if i&1==0{"valen-"}else{"argon-"});out.push_str("runtime");checksum+=out.len() as i64;}println!("{checksum}");}

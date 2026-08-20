@@ -1,0 +1,1 @@
+public final class StringBuilders { public static void main(String[] args){long checksum=0;for(long i=0;i<50000;i++){StringBuilder out=new StringBuilder();out.append((i&1)==0?"valen-":"argon-");out.append("runtime");checksum+=out.length();}System.out.println(checksum);} }
