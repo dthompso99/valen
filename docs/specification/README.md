@@ -22,10 +22,12 @@ An implementation bug does not silently redefine a rule. Either the implementati
 
 - [Lexical structure and source files](lexical-structure.md)
 - [Modules, imports, names, and visibility](modules-and-names.md)
+- [Types, literals, and numeric operations](types-and-numerics.md)
+- [Ownership and lifetime boundaries](ownership-and-lifetimes.md)
 - [Compatibility policy](compatibility.md)
 - [Conformance map](conformance.md)
 
-The following areas remain **WIP and non-normative here**: the complete type and promotion system; object/contract dispatch; ownership and lifetime boundaries; evaluation order; collections, optionals, enums, matching, and generics; unsafe/FFI behavior; and target capability failures. Existing guides describe their implemented behavior until dedicated normative sections land.
+The following areas remain **WIP and non-normative here**: object/contract dispatch; complete evaluation-order rules; collections, optionals, enums, matching, and generics; unsafe/FFI behavior; and target capability failures. Existing guides describe their implemented behavior until dedicated normative sections land.
 
 ## Rule identifiers
 

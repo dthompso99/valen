@@ -13,7 +13,7 @@ test('normative specification has unique rule identifiers and valid local links'
     const definitions = new Map();
     for (const file of files) {
         const source = fs.readFileSync(file, 'utf8');
-        for (const match of source.matchAll(/\*\*((?:LEX|MOD|NAM|COMP)-\d{3})\b/g)) {
+        for (const match of source.matchAll(/\*\*((?:LEX|MOD|NAM|TYP|OWN|COMP)-\d{3})\b/g)) {
             assert.equal(definitions.has(match[1]), false, `duplicate normative rule ${match[1]}`);
             definitions.set(match[1], file);
         }
@@ -23,9 +23,9 @@ test('normative specification has unique rule identifiers and valid local links'
                 `${path.relative(projectRoot, file)} has missing link ${match[1]}`);
         }
     }
-    assert.ok(definitions.size >= 30, 'initial normative surface unexpectedly shrank');
+    assert.ok(definitions.size >= 55, 'normative surface unexpectedly shrank');
     const conformance = fs.readFileSync(path.join(specificationDirectory, 'conformance.md'), 'utf8');
-    for (const identifier of conformance.matchAll(/`((?:LEX|MOD|NAM|COMP)-\d{3})`/g)) {
+    for (const identifier of conformance.matchAll(/`((?:LEX|MOD|NAM|TYP|OWN|COMP)-\d{3})`/g)) {
         assert.ok(definitions.has(identifier[1]), `conformance map references unknown rule ${identifier[1]}`);
     }
 });

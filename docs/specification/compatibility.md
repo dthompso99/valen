@@ -13,7 +13,7 @@ Valen evolves through independent compatibility domains. A version change in one
 | Native ABI | `valen-native-1` | Exact epoch and target match required for compiled libraries. |
 | Whole-program and module cache | implementation-versioned | Disposable; deletion is always a valid recovery action. |
 | Standard-library API | `valen-stdlib-0` | Experimental and source-version coupled. |
-| Text diagnostics | `valen-diagnostics-0` | Human-readable; generation parity is tested, but prose is not a stable machine API. |
+| Diagnostics | JSON schema `1`; text `valen-diagnostics-0` | Structured fields are the tool interface; human prose remains revision-coupled. |
 
 ## Change rules
 
@@ -29,6 +29,6 @@ Valen evolves through independent compatibility domains. A version change in one
 
 **COMP-006 — Deprecation.** Before a stable source or standard-library epoch exists, deprecation periods are recommended but not guaranteed. Once a domain advances to a stable epoch, removal must be preceded by at least one documented release that diagnoses or marks the deprecated behavior.
 
-**COMP-007 — Diagnostics.** Tools must consume structured diagnostics when that interface becomes available rather than parse human prose. Until then, exact diagnostic parity tests protect compiler generations without promising permanent wording.
+**COMP-007 — Diagnostics.** Tools must consume newline-delimited JSON from `--diagnostic-format json` rather than parse human prose. Schema `1` consists of severity, message, source span, labels, notes, and fixes as documented in [compiler diagnostics](../compiler-diagnostics.md). Adding optional fields is compatible; removing or changing existing field meanings requires a schema change. Exact generation parity remains required.
 
 **COMP-008 — WIP behavior.** Behavior marked **WIP**, planned, optional without a declared capability, or absent from the normative specification carries no compatibility promise.

@@ -6,7 +6,7 @@ The native Valen compiler writes human-readable diagnostics to standard error by
 valen --diagnostic-format json --check src/main.ar
 ```
 
-The JSON format is newline-delimited: each line is one complete diagnostic object. Diagnostics retain their deterministic compiler order, and a failed check keeps the ordinary exit status of `65`.
+The JSON format is newline-delimited: each line is one complete diagnostic object. The current structured diagnostic schema is version `1`, selected by the explicit `--diagnostic-format json` contract. Diagnostics retain their deterministic compiler order, and a failed check keeps the ordinary exit status of `65`.
 
 Each object contains:
 
