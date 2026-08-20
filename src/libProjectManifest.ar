@@ -36,6 +36,44 @@ library ProjectManifest {{
         }
     }}
 
+    LockedDependency {{
+        member name:string
+        member version:string
+        member source:string?
+        member metadata:string
+        member compiler:string
+        member target:string
+        member abi:string
+        member interfaceFingerprint:string
+        member implementationFingerprint:string
+        member objectFingerprint:string
+        __(name:string, version:string, source:string?, metadata:string, compiler:string, target:string, abi:string, interfaceFingerprint:string, implementationFingerprint:string, objectFingerprint:string) -> void {
+            self.name = name; self.version = version; self.source = source; self.metadata = metadata; self.compiler = compiler
+            self.target = target; self.abi = abi; self.interfaceFingerprint = interfaceFingerprint
+            self.implementationFingerprint = implementationFingerprint; self.objectFingerprint = objectFingerprint
+        }
+    }}
+
+    Lock {{
+        member name:string
+        member version:string
+        member target:string
+        member dependencies:Array<LockedDependency>
+        __(name:string, version:string, target:string) -> void {
+            self.name = name; self.version = version; self.target = target; self.dependencies = new Array<LockedDependency>(0)
+        }
+    }}
+
+    LockResult {{
+        member valid:bool
+        member lock:Lock?
+        member offset:i64
+        member message:string
+        __(valid:bool, lock:Lock?=null, offset:i64=0, message:string="") -> void {
+            self.valid = valid; self.lock = lock; self.offset = offset; self.message = message
+        }
+    }}
+
     Codec {{
         error(message:string) -> Result { return new Result(false, null, 0, message) }
 
@@ -115,6 +153,75 @@ library ProjectManifest {{
                 }
             }
             return new Result(true, result)
+        }
+
+        parseLock(source:string) -> LockResult {
+            local decoded = Json.parse(source)
+            if !decoded.valid { return new LockResult(false, null, decoded.offset, "Malformed Valen project lockfile: " + decoded.message) }
+            local root = decoded.value!
+            if root.kind != Json.Kind.Object { return new LockResult(false, null, 0, "Project lockfile must be an object") }
+            local unknown = self.unknown(root, "format|package|target|dependencies")
+            if unknown != null { return new LockResult(false, null, 0, "Unknown project lockfile field '" + unknown! + "'") }
+            local format = root.get("format")
+            if format == null || format!.kind != Json.Kind.Integer || format!.integer != 1 { return new LockResult(false, null, 0, "Unsupported project lockfile version") }
+            local package = root.get("package")
+            if package == null || package!.kind != Json.Kind.Object { return new LockResult(false, null, 0, "Project lockfile package must be an object") }
+            unknown = self.unknown(package!, "name|version")
+            if unknown != null { return new LockResult(false, null, 0, "Unknown project lockfile package field '" + unknown! + "'") }
+            local name = self.requiredString(package!, "name", "lockfile package name")
+            local version = self.requiredString(package!, "version", "lockfile package version")
+            local targetValue = self.requiredString(root, "target", "lockfile target")
+            if name == null || !self.validName(name!) { return new LockResult(false, null, 0, "Invalid project lockfile package name") }
+            if version == null || !self.validVersion(version!) { return new LockResult(false, null, 0, "Project lockfile package version must be a semantic version") }
+            if targetValue == null || (new Target.Resolver()).resolve(targetValue!) == null { return new LockResult(false, null, 0, "Unsupported project lockfile target") }
+            local resolvedTarget = (new Target.Resolver()).resolve(targetValue!)!
+            local result = new Lock(name!, version!, resolvedTarget.name)
+            local dependencies = root.get("dependencies")
+            if dependencies == null || dependencies!.kind != Json.Kind.Array { return new LockResult(false, null, 0, "Project lockfile dependencies must be an array") }
+            local index:i64 = 0
+            while index < dependencies!.values.length {
+                local dependency = dependencies!.values[index]
+                if dependency.kind != Json.Kind.Object { return new LockResult(false, null, 0, "Project lockfile dependency " + index.toString() + " must be an object") }
+                unknown = self.unknown(dependency, "name|version|source|metadata|compiler|target|abi|interfaceFingerprint|implementationFingerprint|objectFingerprint")
+                if unknown != null { return new LockResult(false, null, 0, "Unknown project lockfile dependency " + index.toString() + " field '" + unknown! + "'") }
+                local dependencyName = self.requiredString(dependency, "name", "name")
+                local dependencyVersion = self.requiredString(dependency, "version", "version")
+                local metadata = self.requiredString(dependency, "metadata", "metadata")
+                local compiler = self.requiredString(dependency, "compiler", "compiler")
+                local dependencyTarget = self.requiredString(dependency, "target", "target")
+                local abi = self.requiredString(dependency, "abi", "abi")
+                local interfaceFingerprint = self.requiredString(dependency, "interfaceFingerprint", "interface fingerprint")
+                local implementationFingerprint = self.requiredString(dependency, "implementationFingerprint", "implementation fingerprint")
+                local objectFingerprint = self.requiredString(dependency, "objectFingerprint", "object fingerprint")
+                if dependencyName == null || !self.validName(dependencyName!) || dependencyVersion == null || !self.validVersion(dependencyVersion!) || metadata == null || !self.validPath(metadata!) || compiler == null || dependencyTarget == null || abi == null || interfaceFingerprint == null || implementationFingerprint == null || objectFingerprint == null { return new LockResult(false, null, 0, "Invalid project lockfile dependency " + index.toString()) }
+                local sourcePath:string? = null; local sourceValue = dependency.get("source")
+                if sourceValue != null {
+                    if sourceValue!.kind == Json.Kind.Null { sourcePath = null }
+                    else { if sourceValue!.kind != Json.Kind.String || sourceValue!.text.length == 0 || !self.validPath(sourceValue!.text) { return new LockResult(false, null, 0, "Invalid project lockfile dependency source") }; sourcePath = sourceValue!.text }
+                }
+                if dependencyTarget! != result.target || compiler! != "valen-interface-1" || abi! != "valen-native-1" { return new LockResult(false, null, 0, "Incompatible project lockfile dependency '" + dependencyName! + "'") }
+                if result.dependencies.length > 0 && !self.less(result.dependencies[result.dependencies.length - 1].name, dependencyName!) { return new LockResult(false, null, 0, "Project lockfile dependencies must be sorted by name without duplicates") }
+                result.dependencies.append(new LockedDependency(dependencyName!, dependencyVersion!, sourcePath, metadata!, compiler!, dependencyTarget!, abi!, interfaceFingerprint!, implementationFingerprint!, objectFingerprint!))
+                index = index + 1
+            }
+            return new LockResult(true, result)
+        }
+
+        verify(manifest:Manifest, lock:Lock, selectedTarget:string) -> string? {
+            local resolved = (new Target.Resolver()).resolve(selectedTarget)
+            if resolved == null { return "Unsupported selected project target '" + selectedTarget + "'" }
+            local expectedTarget = resolved!.name; if manifest.target != null { expectedTarget = manifest.target! }
+            if lock.name != manifest.name || lock.version != manifest.version || lock.target != expectedTarget { return "Valen project lockfile is stale" }
+            if lock.dependencies.length != manifest.dependencies.length { return "Valen project lockfile is stale" }
+            local index:i64 = 0
+            while index < manifest.dependencies.length {
+                local expected = manifest.dependencies[index]; local actual = lock.dependencies[index]
+                if actual.name != expected.name || actual.version != expected.version || actual.metadata != expected.metadata { return "Valen project lockfile is stale" }
+                if actual.source == null && expected.source != null || actual.source != null && expected.source == null { return "Valen project lockfile is stale" }
+                if actual.source != null && actual.source! != expected.source! { return "Valen project lockfile is stale" }
+                index = index + 1
+            }
+            return null
         }
 
         requiredString(value:Json.Value, key:string, where:string) -> string? {

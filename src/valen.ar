@@ -36,6 +36,12 @@ entry {{
         local targetName = self.hostTarget()
         local environmentTarget = System.environmentVariable("VALEN_TARGET")
         if environmentTarget != null { targetName = environmentTarget! }
+        if arguments.length >= 3 && arguments[1] == "--validate-project" {
+            if arguments.length == 3 { return self.validateProjectManifest(arguments[2], null, targetName) }
+            if arguments.length == 4 && arguments[2] == "--locked" { return self.validateProjectManifest(arguments[3], self.directoryName(arguments[3]) + "/valen.lock", targetName) }
+            if arguments.length == 5 && arguments[2] == "--locked" { return self.validateProjectManifest(arguments[3], arguments[4], targetName) }
+            self.writeUsage(); return 64
+        }
         local libraryVersion:string? = null
         local argumentIndex:i64 = 1
         while argumentIndex < arguments.length {
@@ -88,7 +94,6 @@ entry {{
             }
         }
         if compilerArguments.length == 3 { if compilerArguments[1] == "--validate-library" { return self.validateCompiledLibrary(compilerArguments[2], targetName) } }
-        if compilerArguments.length == 3 { if compilerArguments[1] == "--validate-project" { return self.validateProjectManifest(compilerArguments[2]) } }
 
         local sourcePath:string? = null
         local outputPath:string? = null
@@ -389,7 +394,7 @@ entry {{
         return 0
     }
 
-    validateProjectManifest(path:string) -> i32 {
+    validateProjectManifest(path:string, lockPath:string?, selectedTarget:string) -> i32 {
         local source = Compiler.loadSource(path)
         if source == null { System.writeError("valen: cannot load project manifest; OS error "); System.writeError(System.lastError().toString()); System.writeError("\n"); return 66 }
         local parsed = (new ProjectManifest.Codec()).parse(source!.content)
@@ -398,6 +403,17 @@ entry {{
             System.writeError(": "); System.writeError(parsed.message); System.writeError("\n"); return 65
         }
         local manifest = parsed.manifest!
+        if lockPath != null {
+            local lockSource = Compiler.loadSource(lockPath!)
+            if lockSource == null { System.writeError("valen: project lockfile is missing\n"); return 66 }
+            local locked = (new ProjectManifest.Codec()).parseLock(lockSource!.content)
+            if !locked.valid {
+                System.writeError("valen: project lockfile"); if locked.offset > 0 { System.writeError(" at byte "); System.writeError(locked.offset.toString()) }
+                System.writeError(": "); System.writeError(locked.message); System.writeError("\n"); return 65
+            }
+            local stale = (new ProjectManifest.Codec()).verify(manifest, locked.lock!, selectedTarget)
+            if stale != null { System.writeError("valen: "); System.writeError(stale!); System.writeError("\n"); return 65 }
+        }
         System.write(manifest.name); System.write(" "); System.write(manifest.version); System.write(" "); System.write(manifest.source); System.write("\n")
         return 0
     }
@@ -546,6 +562,6 @@ entry {{
         System.write("  valen --emit-object <source-file> -o <object-file>\n")
         System.write("  valen --library-version <semver> --emit-library <source-file> -o <object-file>\n")
         System.write("  valen --validate-library <object-file>.vmeta\n")
-        System.write("  valen --validate-project <valen.project.json>\n")
+        System.write("  valen --validate-project [--locked] <valen.project.json> [valen.lock]\n")
     }
 }}

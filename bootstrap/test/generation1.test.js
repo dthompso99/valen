@@ -201,6 +201,19 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             const valid = spawnSync(compilerPath, ['--validate-project', manifest], {encoding: 'utf8', env: environment, cwd: projectRoot});
             assert.equal(valid.status, 0, valid.stderr);
             assert.equal(valid.stdout, 'native-app 0.1.0 src/main.ar\n');
+            const lock = path.join(directory, 'valen.lock');
+            fs.writeFileSync(lock, JSON.stringify({format: 1, package: {name: 'native-app', version: '0.1.0'},
+                target: process.arch === 'arm64' ? 'aarch64-linux' : 'x86_64-linux', dependencies: []}));
+            const locked = spawnSync(compilerPath, ['--validate-project', '--locked', manifest, lock],
+                {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(locked.status, 0, locked.stderr);
+            const originalLock = fs.readFileSync(lock, 'utf8');
+            fs.writeFileSync(lock, originalLock.replace('0.1.0', '0.2.0'));
+            const stale = spawnSync(compilerPath, ['--validate-project', '--locked', manifest, lock],
+                {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(stale.status, 65);
+            assert.match(stale.stderr, /lockfile is stale/);
+            assert.equal(fs.readFileSync(lock, 'utf8'), originalLock.replace('0.1.0', '0.2.0'));
             fs.writeFileSync(manifest, JSON.stringify({format: 1, package: {name: 'native-app', version: '0.1.0'},
                 executable: {source: '../main.ar'}, dependencies: []}));
             const invalid = spawnSync(compilerPath, ['--validate-project', manifest], {encoding: 'utf8', env: environment, cwd: projectRoot});

@@ -602,7 +602,8 @@ test('contract dispatch preserves register and stack arguments', () => {
 
 test('Valen compiler source foundation and tokenizer load and lower', () => {
     const filePath = path.join(projectRoot, 'src/valen.ar');
-    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath,
+        {sourceRoot: projectRoot, libraryPath: path.join(projectRoot, 'lib')});
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     const ir = new IrGenerator().generate(semantic);
     assert.ok(ir.types.some(type => type.displayName === 'Compiler.SourceFile'));

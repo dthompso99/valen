@@ -11,6 +11,11 @@ entry {{
         if codec.parse("{\"format\":1,\"package\":{\"name\":\"bad\",\"version\":\"01.0.0\"},\"executable\":{\"source\":\"main.ar\"}}").valid { return 4 }
         if codec.parse("{\"format\":1,\"package\":{\"name\":\"bad\",\"version\":\"1.0.0\"},\"executable\":{\"source\":\"../main.ar\"}}").valid { return 5 }
         if codec.parse("{\"format\":1,\"package\":{\"name\":\"bad\",\"version\":\"1.0.0\"},\"executable\":{\"source\":\"main.ar\"},\"typo\":true}").valid { return 6 }
+        local locked = codec.parseLock("{\"format\":1,\"package\":{\"name\":\"sample-app\",\"version\":\"0.1.0\"},\"target\":\"x86_64-linux\",\"dependencies\":[{\"name\":\"Alpha\",\"version\":\"1.0.0\",\"source\":\"deps/Alpha.ar\",\"metadata\":\"deps/Alpha.o.vmeta\",\"compiler\":\"valen-interface-1\",\"target\":\"x86_64-linux\",\"abi\":\"valen-native-1\",\"interfaceFingerprint\":\"11\",\"implementationFingerprint\":\"12\",\"objectFingerprint\":\"13\"},{\"name\":\"Zulu\",\"version\":\"2.0.0\",\"source\":null,\"metadata\":\"deps/Zulu.o.vmeta\",\"compiler\":\"valen-interface-1\",\"target\":\"x86_64-linux\",\"abi\":\"valen-native-1\",\"interfaceFingerprint\":\"21\",\"implementationFingerprint\":\"22\",\"objectFingerprint\":\"23\"}]}")
+        if !locked.valid { return 7 }
+        if codec.verify(manifest, locked.lock!, "x86_64-linux") != null { return 8 }
+        manifest.version = "0.2.0"
+        if codec.verify(manifest, locked.lock!, "x86_64-linux") == null { return 9 }
         return 0
     }
 }}

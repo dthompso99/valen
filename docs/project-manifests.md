@@ -53,6 +53,14 @@ The native compiler shares the same format-1 schema boundary and can validate a 
 valen --validate-project valen.project.json
 ```
 
-This validates and normalizes manifest semantics without writing files. Native lock verification and manifest-driven build orchestration remain subsequent slices; the generation-zero `valen-project` command remains the build driver until those are complete.
+This validates and normalizes manifest semantics without writing files. Manifest-driven native build orchestration remains a subsequent slice; the generation-zero `valen-project` command remains the build driver until that is complete.
+
+The native compiler can also enforce the frozen manifest/lock graph without modifying either file:
+
+```sh
+valen --validate-project --locked valen.project.json
+```
+
+An explicit lockfile path may follow the manifest. Frozen validation checks package identity, normalized target, deterministic dependency order, declared source and metadata routes, compiler interface, ABI, and required fingerprints. Artifact contents are verified during the subsequent native build-routing slice.
 
 The lockfile sorts dependencies by name and records exact compiler-interface, target, ABI, interface, implementation, and object fingerprints. It contains no timestamps or absolute host paths. Registry and Git transport are intentionally separate future extensions; direct source-file compilation remains available without project metadata.
