@@ -8,7 +8,12 @@ export class AArch64Backend {
     generate(program, {optimizationLevel = 1, moduleId = null, includeRuntime = true} = {}) {
         if (![0, 1].includes(optimizationLevel)) throw new Error(`Unsupported optimization level '-O${optimizationLevel}'`);
         prepareIr(program, {optimize: optimizationLevel === 1, requireEntry: includeRuntime});
-        const supportedRuntimeSymbols = new Set(['valen_System_collectGarbage', 'valen_System_print',
+        const supportedRuntimeSymbols = new Set(['valen_System_collectGarbage', 'valen_System_gcTrackedBytes',
+            'valen_System_gcTrackedAllocatedBytes', 'valen_System_gcHeapObjects', 'valen_System_gcRoots',
+            'valen_System_gcPeakRoots', 'valen_System_gcCollections', 'valen_System_gcReclaimedObjects',
+            'valen_System_gcTrackedReclaimedBytes', 'valen_System_gcWeakReferencesCleared',
+            'valen_System_gcWeakReferencesRetained', 'valen_System_gcNativeHandlesOpen',
+            'valen_System_gcNativeHandlesFinalized', 'valen_System_print',
             'valen_System_write', 'valen_System_writeError', 'valen_System_exit', 'valen_System_openRead',
             'valen_System_openWrite', 'valen_System_read', 'valen_System_writeFile', 'valen_System_close',
             'valen_System_lastError', 'valen_System_arguments', 'valen_System_currentDirectory',
@@ -1042,6 +1047,13 @@ export class AArch64Backend {
 
     systemRuntime() {
         const lines = [];
+        for (const name of ['gcTrackedBytes', 'gcTrackedAllocatedBytes', 'gcHeapObjects', 'gcRoots', 'gcPeakRoots',
+            'gcCollections', 'gcReclaimedObjects', 'gcTrackedReclaimedBytes', 'gcWeakReferencesCleared',
+            'gcWeakReferencesRetained', 'gcNativeHandlesOpen', 'gcNativeHandlesFinalized']) {
+            const symbol = `valen_System_${name}`;
+            if (this.runtimeSymbols.has(symbol)) lines.push(`.globl ${symbol}`, `.type ${symbol}, %function`, `${symbol}:`,
+                '    mov x0, #0', '    ret', `.size ${symbol}, .-${symbol}`, '');
+        }
         if (this.runtimeSymbols.has('valen_System_collectGarbage')) lines.push(
             '.globl valen_System_collectGarbage', '.type valen_System_collectGarbage, %function',
             'valen_System_collectGarbage:', '    b valen_gc_collect',

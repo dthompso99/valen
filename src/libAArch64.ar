@@ -98,7 +98,7 @@ library AArch64 {{
             while externalIndex < self.program.externals.length { if self.program.externals[externalIndex].foreignLibrary != null { self.writer.line(".extern " + self.program.externals[externalIndex].runtimeName) }; externalIndex = externalIndex + 1 }
             local functionIndex:i64 = 0
             while functionIndex < self.program.functions.length { if self.emits(self.program.functions[functionIndex]) { self.generateFunction(self.program.functions[functionIndex]) }; functionIndex = functionIndex + 1 }
-            if self.includeRuntime { self.gcTypeFunctions(); self.gcArrayFunctions(); self.structuralTypeFunctions(); self.generateStart(); self.runtime(); self.typeData() }
+            if self.includeRuntime { self.gcTypeFunctions(); self.gcArrayFunctions(); self.structuralTypeFunctions(); self.generateStart(); self.runtime(); self.metricRuntime(); self.typeData() }
             else { if self.includeModuleMetadata { self.gcTypeFunctions(); self.gcArrayFunctions(); self.structuralTypeFunctions(); self.typeData() }; self.localTrapRuntime() }
             self.stringData(); self.writer.line(".section .note.GNU-stack,\"\",@progbits")
             return self.writer.build()
@@ -115,7 +115,7 @@ library AArch64 {{
         }
 
         supportsRuntime(name:string) -> bool {
-            if name == "valen_System_collectGarbage" || name == "valen_System_print" || name == "valen_System_write" || name == "valen_System_writeError" || name == "valen_System_exit" { return true }
+            if name == "valen_System_collectGarbage" || name == "valen_System_gcTrackedBytes" || name == "valen_System_gcTrackedAllocatedBytes" || name == "valen_System_gcHeapObjects" || name == "valen_System_gcRoots" || name == "valen_System_gcPeakRoots" || name == "valen_System_gcCollections" || name == "valen_System_gcReclaimedObjects" || name == "valen_System_gcTrackedReclaimedBytes" || name == "valen_System_gcWeakReferencesCleared" || name == "valen_System_gcWeakReferencesRetained" || name == "valen_System_gcNativeHandlesOpen" || name == "valen_System_gcNativeHandlesFinalized" || name == "valen_System_print" || name == "valen_System_write" || name == "valen_System_writeError" || name == "valen_System_exit" { return true }
             if name == "valen_System_openRead" || name == "valen_System_openWrite" || name == "valen_System_read" || name == "valen_System_writeFile" || name == "valen_System_close" { return true }
             if name == "valen_System_lastError" || name == "valen_System_arguments" || name == "valen_System_currentDirectory" || name == "valen_System_environmentVariable" { return true }
             if name == "valen_System_enableProcessArena" || name == "valen_System_writeBytes" || name == "valen_System_sync" || name == "valen_System_replaceFile" || name == "valen_System_removeFile" || name == "valen_System_makeExecutable" || name == "valen_System_link" || name == "valen_System_compileLlvm" { return true }
@@ -131,6 +131,15 @@ library AArch64 {{
         }
 
         hasRuntime(name:string) -> bool { local index:i64 = 0; while index < self.program.externals.length { if self.program.externals[index].runtimeName == name { return true }; index = index + 1 }; return false }
+        metricRuntime() -> void {
+            local names = ["gcTrackedBytes", "gcTrackedAllocatedBytes", "gcHeapObjects", "gcRoots", "gcPeakRoots", "gcCollections", "gcReclaimedObjects", "gcTrackedReclaimedBytes", "gcWeakReferencesCleared", "gcWeakReferencesRetained", "gcNativeHandlesOpen", "gcNativeHandlesFinalized"]
+            local index:i64 = 0
+            while index < names.length {
+                local symbol = "valen_System_" + names[index]
+                if self.hasRuntime(symbol) { self.writer.line(".globl " + symbol); self.writer.line(symbol + ":"); self.writer.line("    mov x0, #0"); self.writer.line("    ret") }
+                index = index + 1
+            }
+        }
         emits(function:Ir.Function) -> bool { if function.displayName == "Operations.ThreadOperation.runWorker" { return self.includeRuntime && self.threading }; local index:i64 = 0; while index < self.program.compiledModules.length { if function.modulePath == self.program.compiledModules[index] { return false }; index = index + 1 }; return self.emissionModule == null || function.modulePath == self.emissionModule! }
 
         layoutTypes() -> void {
