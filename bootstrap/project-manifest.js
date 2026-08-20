@@ -59,13 +59,14 @@ export class ProjectManifest {
         const seen = new Set();
         const parsedDependencies = dependencies.map((dependency, index) => {
             object(dependency, `Project dependency ${index}`);
-            fields(dependency, ['name', 'version', 'metadata'], `project dependency ${index}`);
+            fields(dependency, ['name', 'version', 'source', 'metadata'], `project dependency ${index}`);
             const dependencyName = string(dependency.name, `Project dependency ${index} name`);
             if (!packageName.test(dependencyName)) throw new Error(`Invalid project dependency name '${dependencyName}'`);
             if (seen.has(dependencyName)) throw new Error(`Duplicate project dependency '${dependencyName}'`);
             seen.add(dependencyName);
             const metadata = relativePath(dependency.metadata, `Project dependency '${dependencyName}' metadata`);
-            return {name: dependencyName, version: version(dependency.version, `Project dependency '${dependencyName}' version`), metadata};
+            const source = dependency.source == null ? null : relativePath(dependency.source, `Project dependency '${dependencyName}' source`);
+            return {name: dependencyName, version: version(dependency.version, `Project dependency '${dependencyName}' version`), source, metadata};
         }).sort((left, right) => left.name.localeCompare(right.name));
 
         return {format: PROJECT_MANIFEST_VERSION, package: {name, version: packageVersion},
@@ -88,7 +89,8 @@ export class ProjectLock {
             if (!objectPath || !fs.existsSync(objectPath)) throw new Error(`Project dependency '${dependency.name}' object is missing`);
             const actual = LibraryMetadata.create({...metadata, object: fs.readFileSync(objectPath)}).objectFingerprint;
             if (actual !== metadata.objectFingerprint) throw new Error(`Project dependency '${dependency.name}' object fingerprint does not match metadata`);
-            return {name: metadata.name, version: metadata.version, metadata: portablePath(path.relative(root, metadataPath)),
+            return {name: metadata.name, version: metadata.version, source: dependency.source,
+                metadata: portablePath(path.relative(root, metadataPath)),
                 compiler: metadata.compiler, target: metadata.target, abi: metadata.abi,
                 interfaceFingerprint: metadata.interfaceFingerprint,
                 implementationFingerprint: metadata.implementationFingerprint,

@@ -14,12 +14,12 @@ JSON is used for this bootstrap slice because both compiler implementations alre
     "optimization": 1
   },
   "dependencies": [
-    {"name": "Support", "version": "1.0.0", "metadata": "deps/Support.o.vmeta"}
+    {"name": "Support", "version": "1.0.0", "source": "deps/Support.ar", "metadata": "deps/Support.o.vmeta"}
   ]
 }
 ```
 
-Paths are relative to the manifest. Dependency metadata must describe an adjacent compiled object whose name, version, target, ABI, interface fingerprint, and object fingerprint validate successfully.
+Paths are relative to the manifest. Dependency metadata must describe adjacent compiled object and interface artifacts whose name, version, target, ABI, interface fingerprint, and object fingerprint validate successfully. The source supplies declarations for semantic analysis; its implementation is replaced by the validated object during linking.
 
 Generate or update the canonical `valen.lock`:
 
@@ -45,6 +45,6 @@ For a reproducible build that refuses to create or update a missing or stale loc
 node scripts/valen-project.mjs build --locked valen.project.json
 ```
 
-Manifest source, output, and dependency metadata paths are confined to the project root. Manifest-driven builds currently support dependency-free executables; compiled dependency routing remains **WIP**.
+Manifest source, output, dependency source, and dependency metadata paths are confined to the project root. Local compiled dependencies are resolved in deterministic manifest order and linked from the exact artifacts recorded by the lockfile.
 
-The lockfile sorts dependencies by name and records exact compiler-interface, target, ABI, interface, implementation, and object fingerprints. It contains no timestamps or absolute host paths. Registry resolution, Git dependencies, multiple targets, compiled dependency routing, and the self-hosted parser remain follow-up work in issue #104.
+The lockfile sorts dependencies by name and records exact compiler-interface, target, ABI, interface, implementation, and object fingerprints. It contains no timestamps or absolute host paths. Registry and Git transport are intentionally separate future extensions; direct source-file compilation remains available without project metadata.

@@ -6,6 +6,7 @@ import {spawnSync} from 'node:child_process';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {BuildIdentity} from '../build-identity.js';
+import {Compiler} from '../compiler.js';
 import {LibraryMetadata} from '../library-metadata.js';
 import {ProjectLock, ProjectManifest} from '../project-manifest.js';
 
@@ -61,6 +62,37 @@ test('project command builds the declared executable with locked reproducible id
         assert.notEqual(stale.status, 0);
         assert.match(stale.stderr, /lockfile is missing or stale/);
         assert.equal(fs.readFileSync(path.join(root, 'valen.lock'), 'utf8'), '{}\n');
+    } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
+
+test('project builds route locked local compiled dependencies', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-project-dependency-'));
+    try {
+        const dependencyRoot = path.join(root, 'deps');
+        fs.mkdirSync(path.join(root, 'src'), {recursive: true});
+        fs.mkdirSync(dependencyRoot);
+        const dependencySource = path.join(dependencyRoot, 'Support.ar');
+        const dependencyObject = path.join(dependencyRoot, 'Support.o');
+        fs.writeFileSync(dependencySource, 'library Support {{ value() -> i64 { return 7 } }}\n');
+        new Compiler().emitLibrary(dependencySource, dependencyObject, '1.0.0', {sourceRoot: dependencyRoot});
+        fs.writeFileSync(path.join(root, 'src/main.ar'), "import Support from 'Support.ar'\nentry {{ __() -> i64 { return Support.value() } }}\n");
+        const manifestPath = path.join(root, 'valen.project.json');
+        fs.writeFileSync(manifestPath, JSON.stringify({format: 1, package: {name: 'dependency-app', version: '0.1.0'},
+            executable: {source: 'src/main.ar', output: 'build/app'}, dependencies: [
+                {name: 'Support', version: '1.0.0', source: 'deps/Support.ar', metadata: 'deps/Support.o.vmeta'}
+            ]}, null, 2));
+
+        const command = path.join(projectRoot, 'scripts/valen-project.mjs');
+        const built = spawnSync(process.execPath, [command, 'build', manifestPath], {encoding: 'utf8', cwd: root});
+        assert.equal(built.status, 0, built.stderr);
+        assert.equal(spawnSync(path.join(root, 'build/app')).status, 7);
+        const lock = JSON.parse(fs.readFileSync(path.join(root, 'valen.lock'), 'utf8'));
+        assert.equal(lock.dependencies[0].source, 'deps/Support.ar');
+
+        fs.appendFileSync(dependencyObject, 'tampered');
+        const locked = spawnSync(process.execPath, [command, 'build', '--locked', manifestPath], {encoding: 'utf8', cwd: root});
+        assert.notEqual(locked.status, 0);
+        assert.match(locked.stderr, /object fingerprint does not match metadata/);
     } finally { fs.rmSync(root, {recursive: true, force: true}); }
 });
 

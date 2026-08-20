@@ -55,10 +55,12 @@ export class Compiler {
         return {objectPath, metadataPath: `${objectPath}.vmeta`, metadata};
     }
 
-    emitObject(sourcePath, objectPath, {assemblyPath = `${objectPath}.s`, sourceRoot, optimizationLevel = 1, runtimeMetrics = false, target: targetName} = {}) {
+    emitObject(sourcePath, objectPath, {assemblyPath = `${objectPath}.s`, sourceRoot, libraryPath, compiledArtifacts,
+        optimizationLevel = 1, runtimeMetrics = false, target: targetName} = {}) {
         const target = resolveTarget(targetName);
         const {Backend, Assembler} = targetTools(target);
-        const graph = new ModuleLoader({sourceRoot, target, sysroot: process.env.VALEN_SYSROOT ?? defaultSysroot(bootstrapRoot, target)}).load(sourcePath);
+        const graph = new ModuleLoader({sourceRoot, libraryPath, compiledArtifacts, target,
+            sysroot: process.env.VALEN_SYSROOT ?? defaultSysroot(bootstrapRoot, target)}).load(sourcePath);
         new ModuleInterfaceCache(process.env.VALEN_CACHE_PATH ?? process.env.ARGON_CACHE_PATH,
             process.env.VALEN_CACHE_TRACE != null || process.env.ARGON_CACHE_TRACE != null).prepare(graph);
         const ir = new IrGenerator().generate(new SemanticAnalyzer().analyzeModules(graph));
@@ -68,10 +70,12 @@ export class Compiler {
         return {ir, assembly, assemblyPath, objectPath, graph, target};
     }
 
-    compile(sourcePath, outputPath, {assemblyPath = `${outputPath}.s`, objectPath = `${outputPath}.o`, sourceRoot, linker = 'auto', optimizationLevel = 1, runtimeMetrics = false, target: targetName} = {}) {
+    compile(sourcePath, outputPath, {assemblyPath = `${outputPath}.s`, objectPath = `${outputPath}.o`, sourceRoot,
+        libraryPath, compiledArtifacts, linker = 'auto', optimizationLevel = 1, runtimeMetrics = false, target: targetName} = {}) {
         const target = resolveTarget(targetName);
         const {Backend, Assembler} = targetTools(target);
-        const emitted = this.emitObject(sourcePath, objectPath, {assemblyPath, sourceRoot, optimizationLevel, runtimeMetrics, target: target.name});
+        const emitted = this.emitObject(sourcePath, objectPath, {assemblyPath, sourceRoot, libraryPath, compiledArtifacts,
+            optimizationLevel, runtimeMetrics, target: target.name});
         if (!['auto', 'native', 'system'].includes(linker)) throw new Error(`Unsupported linker '${linker}'`);
         const {ir} = emitted;
         const internalThreadLibraries = target.name === 'aarch64-linux' && ir.externals.some(item => item.runtimeSymbol === 'valen_Operations_threadStart')

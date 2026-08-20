@@ -8,7 +8,7 @@ import {resolveTarget} from './target.js';
 
 export class ModuleLoader {
     constructor({sourceRoot, libraryPath = process.env.VALEN_LIBRARY_PATH ?? process.env.ARGON_LIBRARY_PATH,
-        sysroot = process.env.VALEN_SYSROOT, documents = new Map(), target} = {}) {
+        sysroot = process.env.VALEN_SYSROOT, documents = new Map(), compiledArtifacts = new Map(), target} = {}) {
         this.target = resolveTarget(target);
         this.sourceRoot = sourceRoot ? path.resolve(sourceRoot) : null;
         this.libraryPaths = (libraryPath ?? '').split(path.delimiter).filter(Boolean).map(entry => path.resolve(entry));
@@ -17,6 +17,7 @@ export class ModuleLoader {
         this.loading = [];
         this.diagnostics = [];
         this.documents = documents;
+        this.compiledArtifacts = compiledArtifacts;
     }
 
     load(entryPath) {
@@ -46,7 +47,7 @@ export class ModuleLoader {
 
         const module = {
             path: canonicalPath,
-            id: this.moduleId(canonicalPath),
+            id: this.moduleId(canonicalPath, owningRoot),
             source,
             program: new Parser().parse(source, canonicalPath),
             imports: new Map(),
@@ -151,23 +152,23 @@ export class ModuleLoader {
         }
     }
 
-    moduleId(filePath) {
+    moduleId(filePath, owningRoot = this.sourceRoot) {
         if (this.sysroot) {
             const sourceRoot = path.join(this.sysroot, 'source');
             if (this.contains(sourceRoot, filePath)) return `/${path.relative(sourceRoot, filePath).split(path.sep).join('/')}`;
         }
-        const relative = path.relative(this.sourceRoot, filePath).split(path.sep).join('/');
+        const relative = path.relative(owningRoot, filePath).split(path.sep).join('/');
         return `/${relative}`;
     }
 
     attachCompiledArtifact(module) {
-        if (!this.sysroot) return;
-        const sourceRoot = path.join(this.sysroot, 'source');
-        if (!this.contains(sourceRoot, module.path)) return;
-        const relative = path.relative(sourceRoot, module.path).replace(/\.ar$/, '');
-        const objectPath = path.join(this.sysroot, 'objects', `${relative}.o`);
-        const metadataPath = path.join(this.sysroot, 'metadata', `${relative}.o.vmeta`);
-        const interfacePath = path.join(this.sysroot, 'interfaces', `${relative}.vmi`);
+        const selected = this.compiledArtifacts.get(module.path);
+        const sourceRoot = this.sysroot ? path.join(this.sysroot, 'source') : null;
+        if (!selected && (!sourceRoot || !this.contains(sourceRoot, module.path))) return;
+        const relative = sourceRoot ? path.relative(sourceRoot, module.path).replace(/\.ar$/, '') : null;
+        const objectPath = selected?.objectPath ?? path.join(this.sysroot, 'objects', `${relative}.o`);
+        const metadataPath = selected?.metadataPath ?? path.join(this.sysroot, 'metadata', `${relative}.o.vmeta`);
+        const interfacePath = selected?.interfacePath ?? path.join(this.sysroot, 'interfaces', `${relative}.vmi`);
         if (![objectPath, metadataPath, interfacePath].every(candidate => fs.existsSync(candidate))) return;
         try {
             const libraries = module.program.libraries.filter(item => item.visibility !== 'private');
