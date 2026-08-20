@@ -46,6 +46,10 @@ function symbolDescription(symbol, node) {
     if (symbol.parameters) return `${symbol.kind.toLowerCase()} ${symbol.name}(${symbol.parameters.map(item => `${item.owning ? 'own ' : ''}${item.name}:${item.type}`).join(', ')}) -> ${symbol.returnType}`;
     return `${symbol.kind.toLowerCase()} ${symbol.name}${symbol.type ? `: ${ownership}${symbol.type}` : ''}`;
 }
+function symbolKey(symbol) {
+    const span = symbol?.declaration?.span;
+    return span ? `${symbol.kind}\0${span.source}\0${span.start}\0${span.end}` : null;
+}
 
 export class LanguageServer {
     constructor(send) {
@@ -64,7 +68,7 @@ export class LanguageServer {
         if (method === 'initialize') {
             const root = params.rootUri ? uriPath(params.rootUri) : params.rootPath;
             if (root) this.rootPath = root;
-            this.respond(id, {capabilities: {textDocumentSync: 1, hoverProvider: true, definitionProvider: true, documentSymbolProvider: true, codeActionProvider: true, documentFormattingProvider: true}});
+            this.respond(id, {capabilities: {textDocumentSync: 1, hoverProvider: true, definitionProvider: true, referencesProvider: true, documentSymbolProvider: true, codeActionProvider: true, documentFormattingProvider: true}});
         } else if (method === 'shutdown') this.respond(id, null);
         else if (method === 'exit') process.exit(0);
         else if (method === 'textDocument/didOpen') {
@@ -75,6 +79,7 @@ export class LanguageServer {
             const uri = params.textDocument.uri; this.documents.delete(uriPath(uri)); this.results.delete(uri); this.notify('textDocument/publishDiagnostics', {uri, diagnostics: []});
         } else if (method === 'textDocument/hover') this.respond(id, this.hover(params));
         else if (method === 'textDocument/definition') this.respond(id, this.definition(params));
+        else if (method === 'textDocument/references') this.respond(id, this.references(params));
         else if (method === 'textDocument/documentSymbol') this.respond(id, this.documentSymbols(params));
         else if (method === 'textDocument/codeAction') this.respond(id, this.codeActions(params));
         else if (method === 'textDocument/formatting') this.respond(id, this.formatDocument(params));
@@ -123,6 +128,31 @@ export class LanguageServer {
         const context = this.context(params), span = context?.node?.semanticSymbol?.declaration?.span;
         if (!span) return null;
         return {uri: fileUri(span.source), range: spanRange(span, this.sourceFor(span.source))};
+    }
+
+    references(params) {
+        const context = this.context(params);
+        const target = context?.node?.semanticSymbol;
+        const targetKey = symbolKey(target);
+        if (!targetKey) return [];
+        const declaration = target.declaration.span;
+        const includeDeclaration = params.context?.includeDeclaration === true;
+        const locations = new Map();
+        for (const entryPath of this.documents.keys()) {
+            let analysis;
+            try {
+                analysis = new SemanticAnalyzer().analyzeFile(entryPath, {sourceRoot: this.rootPath, documents: this.documents});
+            } catch {
+                continue;
+            }
+            for (const module of analysis.modules.values()) walk(module.program, node => {
+                if (symbolKey(node.semanticSymbol) !== targetKey) return;
+                if (!includeDeclaration && node.span.source === declaration.source && node.span.start === declaration.start && node.span.end === declaration.end) return;
+                const key = `${node.span.source}\0${node.span.start}\0${node.span.end}`;
+                locations.set(key, {uri: fileUri(node.span.source), range: spanRange(node.span, this.sourceFor(node.span.source, module.source))});
+            });
+        }
+        return [...locations.values()].sort((left, right) => left.uri.localeCompare(right.uri) || left.range.start.line - right.range.start.line || left.range.start.character - right.range.start.character);
     }
 
     documentSymbols(params) {
