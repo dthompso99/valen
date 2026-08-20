@@ -11,3 +11,6 @@
 /server.o
 /build
 /benchmarks/results/*.json
+/editors/vscode/node_modules/
+/editors/vscode/package-lock.json
+/editors/vscode/valen-language-support-0.1.0.vsix
