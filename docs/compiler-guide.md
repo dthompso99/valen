@@ -110,6 +110,9 @@ Generation-zero executable builds also write an adjacent `.vbuild` identity cont
 interface, target/ABI, optimization/backend/linker choices, instrumentation state, module and dependency
 fingerprints, optional project/lock fingerprints, and final executable fingerprint. Inspect it with
 `node bootstrap/compiler.js --inspect-build <output>.vbuild`. See [build identity](build-identity.md).
+Compare two identities with `--explain-build <previous.vbuild> <current.vbuild>` to obtain stable
+machine-readable rebuild reasons, including whether a dependency change affects only its implementation
+or requires importer rebuilds.
 
 Object emission and linking are separate policy choices. Direct ELF emission does not imply a
 freestanding executable: the emitted object may be linked without foreign libraries for the

@@ -128,6 +128,12 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
         fs.writeSync(1, BuildIdentity.serialize(BuildIdentity.inspect(args[1])));
         process.exit(0);
     }
+    if (args[0] === '--explain-build') {
+        if (!args[1] || !args[2] || args.length !== 3) throw new Error('Usage: --explain-build <previous.vbuild> <current.vbuild>');
+        const explanation = BuildIdentity.explain(BuildIdentity.inspect(args[1]), BuildIdentity.inspect(args[2]));
+        fs.writeSync(1, `${JSON.stringify(explanation, null, 2)}\n`);
+        process.exit(explanation.rebuild ? 1 : 0);
+    }
     const levelFlag = args.find(argument => /^-O/.test(argument));
     if (levelFlag && !['-O0', '-O1'].includes(levelFlag)) throw new Error(`Unsupported optimization level '${levelFlag}'`);
     const optimizationLevel = levelFlag === '-O0' ? 0 : 1;

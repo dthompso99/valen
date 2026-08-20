@@ -31,7 +31,13 @@ library BuildIdentity {{
                 local artifact = artifacts[index]
                 local module:ModuleLoading.Module? = null; local moduleIndex:i64 = 0
                 while moduleIndex < graph.modules.length { if interfaceBuilder.create(graph.modules[moduleIndex]).interfaceFingerprint == artifact.interfaceFingerprint { module = graph.modules[moduleIndex]; break }; moduleIndex = moduleIndex + 1 }
-                output.append("{\"implementationFingerprint\":"); output.append(Diagnostics.jsonString(self.hex(artifact.implementationFingerprint)))
+                local moduleId = artifact.modulePath
+                if module != null {
+                    local root = module!.owningRoot
+                    if module!.path.length > root.length && module!.path.slice(0, root.length) == root { moduleId = "/" + module!.path.slice(root.length + 1, module!.path.length - root.length - 1) }
+                }
+                output.append("{\"module\":"); output.append(Diagnostics.jsonString(moduleId))
+                output.append(",\"implementationFingerprint\":"); output.append(Diagnostics.jsonString(self.hex(artifact.implementationFingerprint)))
                 output.append(",\"interfaceFingerprint\":"); output.append(Diagnostics.jsonString(self.hex(artifact.interfaceFingerprint)))
                 output.append(",\"dependencies\":[")
                 local dependencies = new Array<string>(0)

@@ -59,3 +59,37 @@ test('compiled executable emits an inspectable adjacent build identity', () => {
         assert.match(tampered.stderr, /artifact fingerprint does not match/);
     } finally { fs.rmSync(root, {recursive: true, force: true}); }
 });
+
+test('build explanations distinguish implementation changes from public interface changes', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-identity-explain-'));
+    try {
+        writeProject(root);
+        const firstOutput = path.join(root, 'first');
+        new Compiler().compile(path.join(root, 'src/main.ar'), firstOutput, {sourceRoot: root});
+
+        fs.writeFileSync(path.join(root, 'src/helper.ar'), 'library Helper {{ value() -> i64 { return 1 } }}\n');
+        const bodyOutput = path.join(root, 'body');
+        new Compiler().compile(path.join(root, 'src/main.ar'), bodyOutput, {sourceRoot: root});
+        const body = BuildIdentity.explain(BuildIdentity.inspect(`${firstOutput}.vbuild`), BuildIdentity.inspect(`${bodyOutput}.vbuild`));
+        assert.equal(body.rebuild, true);
+        assert.deepEqual(body.reasons, [{code: 'module-implementation-changed', impact: 'module-only', count: 1}]);
+
+        fs.writeFileSync(path.join(root, 'src/helper.ar'), 'library Helper {{ value(extra:i64=0) -> i64 { return 1 + extra } }}\n');
+        const interfaceOutput = path.join(root, 'interface');
+        new Compiler().compile(path.join(root, 'src/main.ar'), interfaceOutput, {sourceRoot: root});
+        const explain = spawnSync(process.execPath, [path.join(projectRoot, 'bootstrap/compiler.js'), '--explain-build',
+            `${bodyOutput}.vbuild`, `${interfaceOutput}.vbuild`], {encoding: 'utf8'});
+        assert.equal(explain.status, 1, explain.stderr);
+        const interfaceChange = JSON.parse(explain.stdout);
+        assert.equal(interfaceChange.previousArtifactReusable, false);
+        assert.equal(interfaceChange.selection, 'current');
+        assert.deepEqual(interfaceChange.reasons, [
+            {code: 'module-interface-changed', impact: 'importers', count: 1}
+        ]);
+
+        const unchanged = spawnSync(process.execPath, [path.join(projectRoot, 'bootstrap/compiler.js'), '--explain-build',
+            `${interfaceOutput}.vbuild`, `${interfaceOutput}.vbuild`], {encoding: 'utf8'});
+        assert.equal(unchanged.status, 0, unchanged.stderr);
+        assert.deepEqual(JSON.parse(unchanged.stdout).reasons, []);
+    } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});

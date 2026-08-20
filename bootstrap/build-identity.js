@@ -16,7 +16,7 @@ export class BuildIdentity {
         foreignLibraries = [], artifact = null} = {}) {
         const modules = [...graph.modules.values()].map(module => {
             const artifact = ModuleInterface.create(module);
-            return {implementationFingerprint: artifact.implementationFingerprint,
+            return {module: module.id, implementationFingerprint: artifact.implementationFingerprint,
                 interfaceFingerprint: artifact.interfaceFingerprint,
                 dependencies: artifact.imports.map(item => item.name).sort()};
         }).sort((left, right) => left.interfaceFingerprint.localeCompare(right.interfaceFingerprint) ||
@@ -50,6 +50,48 @@ export class BuildIdentity {
             throw new Error('Valen build identity artifact fingerprint does not match');
         }
         return identity;
+    }
+
+    static explain(previous, current) {
+        const reasons = [];
+        const changed = (field, code, impact = 'artifact') => {
+            if (JSON.stringify(previous[field]) !== JSON.stringify(current[field])) reasons.push({code, impact});
+        };
+        changed('compilerInterface', 'compiler-interface-changed');
+        changed('target', 'target-changed');
+        changed('abi', 'abi-changed');
+        changed('optimization', 'optimization-changed');
+        changed('backend', 'backend-changed');
+        changed('linker', 'linker-changed');
+        changed('runtimeMetrics', 'instrumentation-changed');
+        changed('foreignLibraries', 'foreign-libraries-changed');
+        changed('projectFingerprint', 'project-changed');
+        changed('lockFingerprint', 'lock-changed');
+        changed('entryInterface', 'entry-interface-changed', 'importers');
+
+        const moduleKey = module => module.module ?? module.interfaceFingerprint;
+        const previousModules = new Map(previous.modules.map(module => [moduleKey(module), module]));
+        const currentModules = new Map(current.modules.map(module => [moduleKey(module), module]));
+        let implementationChanges = 0;
+        let interfaceChanges = 0;
+        let dependencyChanges = 0;
+        for (const [key, module] of currentModules) {
+            const old = previousModules.get(key);
+            if (!old) continue;
+            if (old.interfaceFingerprint !== module.interfaceFingerprint) interfaceChanges++;
+            else if (old.implementationFingerprint !== module.implementationFingerprint) implementationChanges++;
+            if (JSON.stringify(old.dependencies) !== JSON.stringify(module.dependencies)) dependencyChanges++;
+        }
+        if (implementationChanges) reasons.push({code: 'module-implementation-changed', impact: 'module-only', count: implementationChanges});
+        if (interfaceChanges) reasons.push({code: 'module-interface-changed', impact: 'importers', count: interfaceChanges});
+        if (dependencyChanges) reasons.push({code: 'module-dependencies-changed', impact: 'importers', count: dependencyChanges});
+        const removedModules = [...previousModules.keys()].filter(item => !currentModules.has(item)).length;
+        const addedModules = [...currentModules.keys()].filter(item => !previousModules.has(item)).length;
+        if (removedModules || addedModules) reasons.push({code: 'module-graph-changed', impact: 'importers', removed: removedModules, added: addedModules});
+
+        const rebuild = reasons.length > 0;
+        return {format: 1, previousBuild: previous.id, currentBuild: current.id, rebuild,
+            previousArtifactReusable: !rebuild, selection: rebuild ? 'current' : 'previous', reasons};
     }
 
     static write(outputPath, identity) { fs.writeFileSync(`${outputPath}.vbuild`, BuildIdentity.serialize(identity)); }
