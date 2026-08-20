@@ -1342,6 +1342,30 @@ test('IR optimization bypasses jump-only blocks and folds identical branch targe
     assert.deepEqual(unoptimized.blocks.map(block => block.label), ['entry', 'left', 'right', 'exit']);
 });
 
+test('IR optimization discovers predecessors and splits critical edges deterministically', () => {
+    const condition = {kind: 'parameter', name: 'condition', type: 'bool'};
+    const create = () => ({name: 'entry.__', owner: 'entry', parameters: [condition], returnType: 'void', blocks: [
+        {label: 'entry', instructions: [{op: 'branch', condition, thenTarget: 'left', elseTarget: 'right'}]},
+        {label: 'left', instructions: [{op: 'branch', condition, thenTarget: 'join', elseTarget: 'left_exit'}]},
+        {label: 'right', instructions: [{op: 'jump', target: 'join'}]},
+        {label: 'join', instructions: [{op: 'return'}]},
+        {label: 'left_exit', instructions: [{op: 'return'}]}
+    ]});
+    const canonicalizer = new IrCanonicalizer();
+    const optimized = create();
+    assert.deepEqual(canonicalizer.predecessors(optimized).get('join'), ['left', 'right']);
+    canonicalizer.canonicalizeFunction(optimized, true);
+    const left = optimized.blocks.find(block => block.label === 'left');
+    assert.equal(left.instructions[0].thenTarget, 'critical_edge_1');
+    assert.deepEqual(optimized.blocks.find(block => block.label === 'critical_edge_0').instructions, [{op: 'jump', target: 'join'}]);
+    assert.deepEqual(optimized.blocks.find(block => block.label === 'critical_edge_1').instructions, [{op: 'jump', target: 'join'}]);
+    assert.deepEqual(canonicalizer.predecessors(optimized).get('join'), ['critical_edge_0', 'critical_edge_1']);
+
+    const unoptimized = create();
+    canonicalizer.canonicalizeFunction(unoptimized, false);
+    assert.ok(!unoptimized.blocks.some(block => block.label.startsWith('critical_edge_')));
+});
+
 test('IR optimization propagates block-local primitive values without crossing control flow', () => {
     const value = {kind: 'temporary', name: '%0', type: 'i64'};
     const loaded = {kind: 'temporary', name: '%1', type: 'i64'};

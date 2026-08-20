@@ -33,6 +33,7 @@ export class IrCanonicalizer {
             this.foldConstants(fn);
             this.simplifyControlFlow(fn);
             this.removeUnreachable(fn);
+            this.splitCriticalEdges(fn);
             this.propagateLocalValues(fn);
             if (program) {
                 this.devirtualizeExactCalls(fn, program);
@@ -42,6 +43,39 @@ export class IrCanonicalizer {
             if (program && scalarReplacement) this.replaceLocalObjects(fn, program);
             this.removeDeadValues(fn);
         }
+    }
+
+    predecessors(fn) {
+        const result = new Map(fn.blocks.map(block => [block.label, []]));
+        for (const block of fn.blocks) {
+            const end = block.instructions.at(-1);
+            if (end?.op === 'jump' && result.has(end.target)) result.get(end.target).push(block.label);
+            if (end?.op === 'branch') {
+                if (result.has(end.thenTarget)) result.get(end.thenTarget).push(block.label);
+                if (result.has(end.elseTarget)) result.get(end.elseTarget).push(block.label);
+            }
+        }
+        return result;
+    }
+
+    splitCriticalEdges(fn) {
+        const predecessors = this.predecessors(fn);
+        const labels = new Set(fn.blocks.map(block => block.label));
+        const added = [];
+        let sequence = 0;
+        const fresh = () => { let label; do label = `critical_edge_${sequence++}`; while (labels.has(label)); labels.add(label); return label; };
+        for (const block of [...fn.blocks]) {
+            const end = block.instructions.at(-1);
+            if (end?.op !== 'branch') continue;
+            for (const key of ['thenTarget', 'elseTarget']) {
+                const target = end[key];
+                if ((predecessors.get(target)?.length ?? 0) < 2) continue;
+                const label = fresh();
+                end[key] = label;
+                added.push({label, instructions: [{op: 'jump', target}]});
+            }
+        }
+        fn.blocks.push(...added);
     }
 
     devirtualizeExactCalls(fn, program) {

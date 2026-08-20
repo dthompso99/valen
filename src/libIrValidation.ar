@@ -62,6 +62,7 @@ library IrValidation {{
                     self.foldConstants(functionNode)
                     self.simplifyControlFlow(functionNode)
                     self.removeUnreachable(functionNode)
+                    self.splitCriticalEdges(functionNode)
                     self.propagateLocalValues(functionNode)
                     self.devirtualizeExactCalls(program, functionNode)
                     self.inlineLeafCalls(program, functionNode)
@@ -71,6 +72,53 @@ library IrValidation {{
                 }
                 functionIndex = functionIndex + 1
             }
+        }
+
+        predecessorCount(functionNode:Ir.Function, label:string) -> i64 {
+            local count:i64 = 0
+            local blockIndex:i64 = 0
+            while blockIndex < functionNode.blocks.length {
+                local block = functionNode.blocks[blockIndex]
+                if block.instructions.length > 0 {
+                    local end = block.instructions[block.instructions.length - 1]
+                    if end.op == "jump" { if end.target! == label { count = count + 1 } }
+                    if end.op == "branch" { if end.target! == label { count = count + 1 }; if end.alternateTarget! == label { count = count + 1 } }
+                }
+                blockIndex = blockIndex + 1
+            }
+            return count
+        }
+
+        splitCriticalEdges(functionNode:Ir.Function) -> void {
+            local originalCount = functionNode.blocks.length
+            local sequence:i64 = 0
+            local blockIndex:i64 = 0
+            while blockIndex < originalCount {
+                local block = functionNode.blocks[blockIndex]
+                if block.instructions.length > 0 {
+                    local end = block.instructions[block.instructions.length - 1]
+                    if end.op == "branch" {
+                        if self.predecessorCount(functionNode, end.target!) > 1 {
+                            local target = end.target!
+                            local label = self.criticalEdgeLabel(functionNode, sequence); sequence = sequence + 1
+                            local edge = new Ir.Block(label); local jump = new Ir.Instruction("jump"); jump.target = target; edge.instructions.append(jump); functionNode.blocks.append(edge); end.target = label
+                        }
+                        if self.predecessorCount(functionNode, end.alternateTarget!) > 1 {
+                            local target = end.alternateTarget!
+                            local label = self.criticalEdgeLabel(functionNode, sequence); sequence = sequence + 1
+                            local edge = new Ir.Block(label); local jump = new Ir.Instruction("jump"); jump.target = target; edge.instructions.append(jump); functionNode.blocks.append(edge); end.alternateTarget = label
+                        }
+                    }
+                }
+                blockIndex = blockIndex + 1
+            }
+        }
+
+        criticalEdgeLabel(functionNode:Ir.Function, start:i64) -> string {
+            local sequence = start
+            local label = "critical_edge_" + sequence.toString()
+            while self.findBlock(functionNode, label) != null { sequence = sequence + 1; label = "critical_edge_" + sequence.toString() }
+            return label
         }
 
         devirtualizeExactCalls(program:Ir.Program, functionNode:Ir.Function) -> void {
