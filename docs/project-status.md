@@ -86,7 +86,7 @@ and embedded targets.
 - The integrated ELF linker handles x86-64 and AArch64 branch relocations and emits page-size-neutral
   AArch64 executables with 64 KiB segment alignment; `--linker system` remains available for foreign libraries.
 - Cold freestanding builds emit versioned module interfaces and dependency-fingerprinted module objects, lower implementations in bounded chunks, and retain importers when only a dependency body changes.
-- Repeatable compiler and generated-code benchmarks report compile time, memory, executable size, and runtime speed; expanding the workload corpus remains **WIP**.
+- Repeatable cross-language workloads cover integer loops, object dispatch, allocation/GC, string builders, collections, deterministic file processing, and cold startup; a separate manual service harness reports HTTP throughput, latency percentiles, and steady-state RSS.
 - The self-hosted x86-64 backend indexes hot compiler lookups and streams common assembly fragments directly into its builder to avoid repeated linear scans and temporary concatenated strings.
 
 ## Maturity

@@ -1,0 +1,1 @@
+import java.io.*;public final class FileProcessing{public static void main(String[]a)throws Exception{long s=0;byte[]b=new byte[4096];try(var f=new FileInputStream(a[0])){for(int n;(n=f.read(b))>0;)for(int i=0;i<n;i++)s+=b[i]&255;}System.out.println(s);}}

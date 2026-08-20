@@ -1,0 +1,1 @@
+use std::{env,fs::File,io::Read};fn main(){let mut f=File::open(env::args().nth(1).unwrap()).unwrap();let mut b=[0u8;4096];let mut s=0u64;loop{let n=f.read(&mut b).unwrap();if n==0{break}for x in &b[..n]{s+=*x as u64}}println!("{s}");}

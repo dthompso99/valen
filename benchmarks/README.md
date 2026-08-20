@@ -20,6 +20,7 @@ Select languages, change the measured repetition count, or preserve a machine-re
 ```sh
 node benchmarks/run.mjs --languages valen,valen-llvm,c,cpp,rust,go
 node benchmarks/run.mjs --workloads integer-loop,object-dispatch
+node benchmarks/run.mjs --valen /path/to/valen
 node benchmarks/run.mjs --repetitions 10
 node benchmarks/run.mjs --output benchmarks/results/local.json
 ```
@@ -59,6 +60,26 @@ checksum, and performs a final Valen collection. It measures allocation and recl
 escape/scalar-replacement differences: optimizing toolchains may prove that a box never escapes and remove its
 physical allocation, which is itself an important compiler capability rather than a benchmark error.
 
+`collections` inserts and replaces 10,000 entries across 4,096 string keys, then performs deterministic lookup
+and removal passes. It exercises key construction, hashing, collision lookup, replacement, and ownership-aware
+removal. Valen uses the standard `StringMap`; languages with a standard hash map use their idiomatic equivalent.
+
+`file-processing` streams a generated deterministic ASCII fixture, sums every byte, and validates the checksum.
+The runner passes the temporary fixture path to every executable. `cold-start` prints one value and exits, making
+process launch, minimum working set, artifact size, and runtime dependencies the measured behavior.
+
+The socket-based service laboratory is separate from the one-shot workload runner:
+
+```sh
+node benchmarks/http.mjs --servers valen,valen-llvm,node --requests 10000 --concurrency 64
+node benchmarks/http.mjs --valen /path/to/valen
+node benchmarks/http.mjs --output benchmarks/results/http-local.json
+```
+
+It compiles the Clippy service for native and LLVM Valen, compares it with a minimal Node HTTP service, performs
+an unmeasured warmup, and reports throughput, p50/p95/p99 latency, and RSS before/after sustained traffic. It is
+manual-only because local socket access, scheduler load, and host networking materially affect results.
+
 Use `--workloads` to select a comma-separated subset. Reports identify every row by workload, and the JSON
 configuration records each workload's iteration count. All implementations of a workload must produce the same
 deterministic output before any timing is accepted.
@@ -88,5 +109,5 @@ required runtimes.
 - Do not collapse unlike metrics into a single performance score.
 - Review workload changes as benchmark-definition changes.
 
-Expansion into object dispatch, allocation and garbage collection, strings, collections, file processing,
-startup, and sustained HTTP service behavior is tracked in [Gitea #94](https://gitea.hallrd.click/dthompson/valen/issues/94).
+The corpus expansion history and workload rationale are recorded in
+[Gitea #94](https://gitea.hallrd.click/dthompson/valen/issues/94).

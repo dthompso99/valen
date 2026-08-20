@@ -1,0 +1,1 @@
+import fs from'node:fs';const m=new Map,a=[];for(let i=0;i<10000;i++){m.set('k'+(i&4095),i);a.push(i)}let s=0;for(let i=0;i<4096;i++){const k='k'+i;s+=m.get(k);if((i&1)===0){s+=m.get(k);m.delete(k)}}for(const v of a)s+=v;while(a.length>5000)s+=a.pop();fs.writeSync(1,`${s}\n`);

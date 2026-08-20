@@ -1,0 +1,1 @@
+use std::collections::HashMap;fn main(){let mut m=HashMap::new();let mut a=Vec::new();for i in 0..10_000i64{m.insert(format!("k{}",i&4095),i);a.push(i);}let mut s=0i64;for i in 0..4096i64{let k=format!("k{i}");s+=m[&k];if i&1==0{s+=m.remove(&k).unwrap();}}s+=a.iter().sum::<i64>();while a.len()>5000{s+=a.pop().unwrap();}println!("{s}");}

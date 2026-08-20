@@ -18,12 +18,12 @@ export class IrValidationError extends Error {
 }
 
 export class IrCanonicalizer {
-    run(program, {optimize = true} = {}) {
-        for (const fn of program.functions) this.canonicalizeFunction(fn, optimize);
+    run(program, {optimize = true, scalarReplacement = true} = {}) {
+        for (const fn of program.functions) this.canonicalizeFunction(fn, optimize, program, scalarReplacement);
         return program;
     }
 
-    canonicalizeFunction(fn, optimize = true) {
+    canonicalizeFunction(fn, optimize = true, program = null, scalarReplacement = true) {
         for (const block of fn.blocks) {
             const terminal = block.instructions.findIndex(instruction => terminators.has(instruction.op));
             if (terminal >= 0) block.instructions.length = terminal + 1;
@@ -34,7 +34,85 @@ export class IrCanonicalizer {
             this.simplifyControlFlow(fn);
             this.removeUnreachable(fn);
             this.propagateLocalValues(fn);
+            if (program && scalarReplacement) this.replaceLocalObjects(fn, program);
             this.removeDeadValues(fn);
+        }
+    }
+
+    replaceLocalObjects(fn, program) {
+        const primitive = type => ['bool', 'u8', 'i8', 'u16', 'i16', 'u32', 'i32', 'u64', 'i64', 'f32', 'f64'].includes(type);
+        const types = new Map(program.types.map(type => [type.name, type]));
+        const functions = new Map(program.functions.map(item => [item.name, item]));
+        const same = (value, name, kind = 'temporary') => value?.kind === kind && value.name === name;
+        for (const block of fn.blocks) {
+            let changed = true;
+            while (changed) {
+                changed = false;
+                const instructions = block.instructions;
+                for (let allocationIndex = 0; allocationIndex < instructions.length; allocationIndex++) {
+                    const allocation = instructions[allocationIndex];
+                    if (allocation.op !== 'allocate' || !allocation.result) continue;
+                    const type = types.get(allocation.type ?? allocation.objectType);
+                    const constructor = type ? functions.get(type.initializer ?? `${type.name}.__`) : null;
+                    if (!type || type.base || !constructor || type.virtualMethods?.length || type.contracts?.some(contract => !contract.isSelf) ||
+                        type.fields.some(field => field.ownership !== 'value' || !primitive(field.type))) continue;
+                    const constructorInstructions = constructor.blocks.flatMap(item => item.instructions);
+                    if (constructor.blocks.length !== 1 || constructorInstructions.some(item => item.op !== 'store_field' && item.op !== 'return')) continue;
+                    const fields = new Map();
+                    let validConstructor = true;
+                    for (const item of constructorInstructions) if (item.op === 'store_field') {
+                        const parameterIndex = constructor.parameters.findIndex(parameter => parameter.name === item.value?.name);
+                        if (!same(item.object, constructor.parameters[0]?.name, 'parameter') || item.value?.kind !== 'parameter' || parameterIndex < 1) validConstructor = false;
+                        else fields.set(item.field, parameterIndex);
+                    }
+                    if (!validConstructor || fields.size !== type.fields.length) continue;
+
+                    const remove = new Set([allocationIndex]);
+                    const objectTemporaries = new Set([allocation.result]);
+                    const objectLocals = new Set();
+                    const aliases = new Map();
+                    let call = null;
+                    let escaped = false;
+                    for (let index = 0; index < instructions.length && !escaped; index++) {
+                        if (index === allocationIndex) continue;
+                        const item = instructions[index];
+                        if (item.op === 'call' && item.target === constructor.name && same(item.arguments?.[0], allocation.result)) {
+                            if (call) escaped = true;
+                            else { call = item; remove.add(index); }
+                            continue;
+                        }
+                        if (item.op === 'declare_local' && same(item.value, allocation.result)) { objectLocals.add(item.name); remove.add(index); continue; }
+                        if (item.op === 'load_local' && objectLocals.has(item.name)) { objectTemporaries.add(item.result); remove.add(index); continue; }
+                        if (item.op === 'load_field' && objectTemporaries.has(item.object?.name) && fields.has(item.field)) {
+                            aliases.set(item.result, fields.get(item.field)); remove.add(index); continue;
+                        }
+                        if (item.op === 'destroy_object' && (item.value?.kind === 'local' && objectLocals.has(item.value.name) ||
+                            item.value?.kind === 'temporary' && objectTemporaries.has(item.value.name))) { remove.add(index); continue; }
+                        const usesObject = new IrValidator().values(item).some(value =>
+                            value.kind === 'temporary' && objectTemporaries.has(value.name) || value.kind === 'local' && objectLocals.has(value.name));
+                        if (usesObject || (['store_local', 'load_local'].includes(item.op) && objectLocals.has(item.name))) escaped = true;
+                    }
+                    for (const otherBlock of fn.blocks) if (otherBlock !== block) for (const item of otherBlock.instructions) {
+                        const usesObject = new IrValidator().values(item).some(value =>
+                            value.kind === 'temporary' && objectTemporaries.has(value.name) || value.kind === 'local' && objectLocals.has(value.name));
+                        if (usesObject || (['store_local', 'load_local'].includes(item.op) && objectLocals.has(item.name))) escaped = true;
+                    }
+                    if (escaped || !call || aliases.size === 0) continue;
+                    const replacements = new Map([...aliases].map(([result, parameterIndex]) => [result, call.arguments[parameterIndex]]));
+                    const replace = value => {
+                        if (!value || typeof value !== 'object') return value;
+                        if (value.kind === 'temporary' && replacements.has(value.name)) return replacements.get(value.name);
+                        if (value.kind) return value;
+                        if (Array.isArray(value)) return value.map(replace);
+                        for (const [key, child] of Object.entries(value)) if (key !== 'result') value[key] = replace(child);
+                        return value;
+                    };
+                    for (const item of instructions) for (const [key, value] of Object.entries(item)) if (key !== 'result') item[key] = replace(value);
+                    block.instructions = instructions.filter((_, index) => !remove.has(index));
+                    changed = true;
+                    break;
+                }
+            }
         }
     }
 
@@ -328,7 +406,7 @@ export class IrValidator {
     }
 }
 
-export function prepareIr(program, {optimize = true, requireEntry = true} = {}) {
-    new IrCanonicalizer().run(program, {optimize});
+export function prepareIr(program, {optimize = true, requireEntry = true, scalarReplacement = true} = {}) {
+    new IrCanonicalizer().run(program, {optimize, scalarReplacement});
     return new IrValidator().validate(program, {requireEntry});
 }

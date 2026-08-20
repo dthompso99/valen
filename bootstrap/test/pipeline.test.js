@@ -1358,6 +1358,49 @@ test('IR optimization propagates block-local primitive values without crossing c
     assert.equal(fn.blocks[0].instructions.at(-1).value.name, '%0');
 });
 
+test('IR optimization scalar-replaces non-escaping primitive objects', () => {
+    const temporary = (name, type) => ({kind: 'temporary', name, type});
+    const parameter = (name, type) => ({kind: 'parameter', name, type});
+    const box = {name: 'Box', initializer: 'Box.__', fields: [{name: 'value', qualifiedName: 'Box.value', type: 'i64', ownership: 'value'}], virtualMethods: [], contracts: [{name: 'Box', isSelf: true}]};
+    const constructor = {name: 'Box.__', owner: 'Box', parameters: [{name: 'self', type: 'Box'}, {name: 'value', type: 'i64'}], returnType: 'void', blocks: [{label: 'entry', instructions: [
+        {op: 'store_field', object: parameter('self', 'Box'), value: parameter('value', 'i64'), field: 'Box.value'}, {op: 'return'}
+    ]}]};
+    const fn = {name: 'entry.__', owner: 'entry', parameters: [], returnType: 'i64', blocks: [{label: 'entry', instructions: [
+        {op: 'constant', result: '%0', type: 'i64', value: '7'},
+        {op: 'allocate', result: '%1', type: 'Box'},
+        {op: 'call', target: 'Box.__', arguments: [temporary('%1', 'Box'), temporary('%0', 'i64')]},
+        {op: 'declare_local', name: 'box#0', type: 'Box', value: temporary('%1', 'Box')},
+        {op: 'load_local', result: '%2', type: 'Box', name: 'box#0'},
+        {op: 'load_field', result: '%3', type: 'i64', object: temporary('%2', 'Box'), field: 'Box.value'},
+        {op: 'destroy_object', value: {kind: 'local', name: 'box#0', type: 'Box'}, type: 'Box'},
+        {op: 'return', value: temporary('%3', 'i64')}
+    ]}]};
+    const program = {types: [box, {name: 'entry', fields: [], virtualMethods: [], contracts: []}], functions: [constructor, fn], externals: [], entry: fn.name};
+    const instrumented = structuredClone(program);
+    new IrCanonicalizer().run(program);
+    assert.deepEqual(fn.blocks[0].instructions.map(instruction => instruction.op), ['constant', 'return']);
+    assert.equal(fn.blocks[0].instructions[1].value.name, '%0');
+    new IrCanonicalizer().run(instrumented, {scalarReplacement: false});
+    assert.ok(instrumented.functions[1].blocks[0].instructions.some(instruction => instruction.op === 'allocate'));
+
+    const crossBlock = structuredClone(instrumented.functions[1]);
+    crossBlock.blocks[0].instructions = crossBlock.blocks[0].instructions.slice(0, 4).concat({op: 'jump', target: 'exit'});
+    crossBlock.blocks.push({label: 'exit', instructions: [
+        {op: 'load_local', result: '%4', type: 'Box', name: 'box#0'},
+        {op: 'return', value: temporary('%4', 'Box')}
+    ]});
+    new IrCanonicalizer().canonicalizeFunction(crossBlock, true, program);
+    assert.ok(crossBlock.blocks[0].instructions.some(instruction => instruction.op === 'allocate'));
+
+    const escaping = structuredClone(fn);
+    escaping.blocks[0].instructions = [
+        {op: 'allocate', result: '%1', type: 'Box'},
+        {op: 'return', value: temporary('%1', 'Box')}
+    ];
+    new IrCanonicalizer().canonicalizeFunction(escaping, true, program);
+    assert.ok(escaping.blocks[0].instructions.some(instruction => instruction.op === 'allocate'));
+});
+
 test('IR validation rejects malformed control flow and calls before assembly', () => {
     const fn = {name: 'entry.__', owner: 'entry', parameters: [{name: 'self', type: 'entry'}], returnType: 'void', blocks: [
         {label: 'entry', instructions: [

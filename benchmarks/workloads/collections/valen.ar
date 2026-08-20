@@ -1,0 +1,4 @@
+import System from 'libSystem.ar'
+import StringMap from 'std/libStringMap.ar'
+Value {{ member number:i64; __(number:i64)->void{self.number=number} }}
+entry {{ __()->i32{local values=new StringMap<Value>();local numbers=new Array<i64>(0);local i:i64=0;while i<10000{values.set("k"+((i&4095).toString()),new Value(i));numbers.append(i);i=i+1};local sum:i64=0;i=0;while i<4096{local key="k"+i.toString();sum=sum+values.get(key)!.number;if(i&1)==0{sum=sum+values.remove(key)!.number};i=i+1};i=0;while i<numbers.length{sum=sum+numbers[i];i=i+1};while numbers.length>5000{sum=sum+numbers.remove(numbers.length-1)};System.print(sum);return 0} }}

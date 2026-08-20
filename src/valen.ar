@@ -257,7 +257,7 @@ entry {{
             ir = generator.generate()
         }
         local irPass = new IrValidation.Pass()
-        local irErrors = irPass.prepare(ir, optimizationLevel == 1, !emitLibrary)
+        local irErrors = irPass.prepare(ir, optimizationLevel == 1, !emitLibrary, !runtimeMetrics)
         if irErrors.length > 0 {
             for error in irErrors { System.writeError("valen: invalid IR: ${error}\n") }
             return 70
@@ -631,7 +631,7 @@ entry {{
                         local moduleIr = ir!
                         if analysis != null { local moduleGenerator = new Ir.Generator(analysis!, module.path); moduleIr = moduleGenerator.generate() }
                         local modulePass = new IrValidation.Pass()
-                        local moduleErrors = modulePass.prepare(moduleIr, optimizationLevel == 1, includeRuntime)
+                        local moduleErrors = modulePass.prepare(moduleIr, optimizationLevel == 1, includeRuntime, !runtimeMetrics)
                         if moduleErrors.length > 0 {
                             for error in moduleErrors { System.writeError("valen: invalid module IR: ${error}\n") }
                             return 70

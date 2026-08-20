@@ -1,0 +1,2 @@
+import System from 'libSystem.ar'
+entry {{ __()->i32{local args=System.arguments();local file=System.openRead(args[1]);if file==null{return 1};local sum:i64=0;local chunk=System.read(file!,256);while chunk!=null&&chunk!.length>0{local i:i64=0;while i<chunk!.length{sum=sum+(chunk![i] as i64);i=i+1};chunk=System.read(file!,256)};System.close(file!);System.print(sum);return 0} }}

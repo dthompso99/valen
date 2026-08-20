@@ -15,7 +15,7 @@ const option = name => {
     return index < 0 ? null : process.argv[index + 1];
 };
 const requested = new Set((option('--languages') ?? 'valen,valen-llvm,c,cpp,rust,go,java,node').split(',').filter(Boolean));
-const requestedWorkloads = (option('--workloads') ?? 'integer-loop,object-dispatch,string-builders,allocation-gc').split(',').filter(Boolean);
+const requestedWorkloads = (option('--workloads') ?? 'integer-loop,object-dispatch,string-builders,allocation-gc,collections,file-processing,cold-start').split(',').filter(Boolean);
 const repetitions = Number(option('--repetitions') ?? 5);
 const outputPath = option('--output');
 const keep = process.argv.includes('--keep');
@@ -29,14 +29,21 @@ const version = (command, args = ['--version']) => {
 const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
 const memory = kib => kib == null ? 'unavailable' : kib < 1024 ? `${kib} KiB` : `${(kib / 1024).toFixed(1)} MiB`;
 const environment = {...process.env, VALEN_LIBRARY_PATH: path.join(root, 'lib')};
-const valenCompiler = path.join(root, 'valen');
+const valenCompiler = path.resolve(option('--valen') ?? path.join(root, 'valen'));
 const fileFingerprint = filePath => createHash('sha256').update(fs.readFileSync(filePath)).digest('hex').slice(0, 12);
 const artifactPath = (workload, language) => path.join(temporary, `${workload}-${language}`);
+const fileInput = path.join(temporary, 'deterministic-input.txt');
+const fileContent = 'Valen benchmark line 0123456789\n'.repeat(2048);
+fs.writeFileSync(fileInput, fileContent);
+const fileChecksum = Buffer.from(fileContent).reduce((sum, byte) => sum + byte, 0);
 const workloads = {
     'integer-loop': {expectedOutput: '124999999686\n', iterations: 1000000000, javaClass: 'IntegerLoop'},
-    'object-dispatch': {expectedOutput: '1426395009\n', iterations: 50000000, javaClass: 'ObjectDispatch'},
-    'string-builders': {expectedOutput: '650000\n', iterations: 50000, javaClass: 'StringBuilders'},
-    'allocation-gc': {expectedOutput: '2146983647\n', iterations: 500000, javaClass: 'AllocationGc'}
+    'object-dispatch': {expectedOutput: '1426395009\n', iterations: 10000000, javaClass: 'ObjectDispatch'},
+    'string-builders': {expectedOutput: '610000\n', iterations: 10000, javaClass: 'StringBuilders'},
+    'allocation-gc': {expectedOutput: '2146983647\n', iterations: 100000, javaClass: 'AllocationGc'},
+    collections: {expectedOutput: '136345492\n', iterations: 10000, javaClass: 'CollectionsWorkload'},
+    'file-processing': {expectedOutput: `${fileChecksum}\n`, iterations: fileContent.length, javaClass: 'FileProcessing', runtimeArgs: [fileInput]},
+    'cold-start': {expectedOutput: '0\n', iterations: 1, javaClass: 'ColdStart'}
 };
 for (const name of requestedWorkloads) if (!workloads[name]) throw new Error(`Unknown workload '${name}'`);
 
@@ -153,6 +160,7 @@ try {
             const command = language.compile(source, workloadName);
             const compilation = await measure(command.command, command.args);
             const runtime = language.runtime(source, workloadName);
+            runtime.args.push(...(workloads[workloadName].runtimeArgs ?? []));
             const execution = await repeated(runtime, workloads[workloadName].expectedOutput);
             const artifact = language.artifact(source, workloadName);
             const dynamic = ['valen', 'valen-llvm', 'c', 'cpp', 'rust', 'go'].includes(name)

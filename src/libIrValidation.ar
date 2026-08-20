@@ -24,12 +24,12 @@ library IrValidation {{
     }}
 
     Pass {{
-        prepare(program:Ir.Program, optimize:bool=true, requireEntry:bool=true) -> Array<string> {
-            self.canonicalize(program, optimize)
+        prepare(program:Ir.Program, optimize:bool=true, requireEntry:bool=true, scalarReplacement:bool=true) -> Array<string> {
+            self.canonicalize(program, optimize, scalarReplacement)
             return self.validate(program, requireEntry)
         }
 
-        canonicalize(program:Ir.Program, optimize:bool=true) -> void {
+        canonicalize(program:Ir.Program, optimize:bool=true, scalarReplacement:bool=true) -> void {
             local functionIndex:i64 = 0
             while functionIndex < program.functions.length {
                 local functionNode = program.functions[functionIndex]
@@ -56,11 +56,138 @@ library IrValidation {{
                     self.simplifyControlFlow(functionNode)
                     self.removeUnreachable(functionNode)
                     self.propagateLocalValues(functionNode)
+                    if scalarReplacement { self.replaceLocalObjects(program, functionNode) }
                     self.removeDeadValues(functionNode)
                 }
                 functionIndex = functionIndex + 1
             }
         }
+
+        replaceLocalObjects(program:Ir.Program, functionNode:Ir.Function) -> void {
+            local blockIndex:i64 = 0
+            while blockIndex < functionNode.blocks.length {
+                local changed:bool = true
+                while changed {
+                    changed = false
+                    local allocationIndex:i64 = 0
+                    while allocationIndex < functionNode.blocks[blockIndex].instructions.length && !changed {
+                        if self.replaceLocalObject(program, functionNode, functionNode.blocks[blockIndex], allocationIndex) { changed = true }
+                        allocationIndex = allocationIndex + 1
+                    }
+                }
+                blockIndex = blockIndex + 1
+            }
+        }
+
+        replaceLocalObject(program:Ir.Program, functionNode:Ir.Function, block:Ir.Block, allocationIndex:i64) -> bool {
+            local allocation = block.instructions[allocationIndex]
+            if allocation.op != "allocate" || allocation.result == null { return false }
+            local typeNode = self.findType(program, allocation.result!.typeName)
+            if typeNode == null || typeNode!.baseName != null || typeNode!.virtualMethods.length > 0 { return false }
+            local fieldIndex:i64 = 0
+            while fieldIndex < typeNode!.fields.length {
+                if typeNode!.fields[fieldIndex].ownership != "value" || !self.scalarPrimitive(typeNode!.fields[fieldIndex].typeName) { return false }
+                fieldIndex = fieldIndex + 1
+            }
+            local constructorName = typeNode!.name + ".__"
+            if typeNode!.initializer != null { constructorName = typeNode!.initializer! }
+            local constructor = self.findDefinedFunction(program, constructorName)
+            if constructor == null || constructor!.blocks.length != 1 { return false }
+            local constructorInstructionIndex:i64 = 0
+            while constructorInstructionIndex < constructor!.blocks[0].instructions.length {
+                local item = constructor!.blocks[0].instructions[constructorInstructionIndex]
+                if item.op != "store_field" && item.op != "return" { return false }
+                if item.op == "store_field" {
+                    if item.first == null || item.second == null || item.first!.kind != "parameter" || item.first!.name != constructor!.parameters[0].name || item.second!.kind != "parameter" || self.constructorParameter(constructor!, item.second!.name) < 1 { return false }
+                }
+                constructorInstructionIndex = constructorInstructionIndex + 1
+            }
+            fieldIndex = 0
+            while fieldIndex < typeNode!.fields.length { if self.constructorFieldParameter(constructor!, typeNode!.fields[fieldIndex].qualifiedName) < 1 { return false }; fieldIndex = fieldIndex + 1 }
+
+            local removed = new Array<bool>(block.instructions.length)
+            removed[allocationIndex] = true
+            local objectTemporaries = new Array<string>(0); objectTemporaries.append(allocation.result!.name)
+            local objectLocals = new Array<string>(0)
+            local aliases = new Array<PropagatedValue>(0)
+            local constructorArguments = new Array<ref Ir.Value>(0)
+            local foundConstructor:bool = false
+            local escaped:bool = false
+            local instructionIndex:i64 = 0
+            while instructionIndex < block.instructions.length && !escaped {
+                if instructionIndex != allocationIndex {
+                    local instruction = block.instructions[instructionIndex]
+                    if instruction.op == "call" && instruction.target != null && instruction.target! == constructor!.name && instruction.arguments.length > 0 && self.namedValue(instruction.arguments[0], "temporary", allocation.result!.name) {
+                        if foundConstructor { escaped = true } else { foundConstructor = true; constructorArguments = instruction.arguments; removed[instructionIndex] = true }
+                    } else if instruction.op == "declare_local" && self.namedValue(instruction.first, "temporary", allocation.result!.name) {
+                        objectLocals.append(instruction.name!); removed[instructionIndex] = true
+                    } else if instruction.op == "load_local" && instruction.name != null && self.contains(objectLocals, instruction.name!) {
+                        objectTemporaries.append(instruction.result!.name); removed[instructionIndex] = true
+                    } else if instruction.op == "load_field" && instruction.first != null && self.contains(objectTemporaries, instruction.first!.name) {
+                        local parameterIndex = self.constructorFieldParameter(constructor!, instruction.name!)
+                        if !foundConstructor || parameterIndex < 1 || parameterIndex >= constructorArguments.length { escaped = true }
+                        else { self.setPropagated(aliases, instruction.result!.name, constructorArguments[parameterIndex]); removed[instructionIndex] = true }
+                    } else if instruction.op == "destroy_object" && instruction.first != null && ((instruction.first!.kind == "local" && self.contains(objectLocals, instruction.first!.name)) || (instruction.first!.kind == "temporary" && self.contains(objectTemporaries, instruction.first!.name))) {
+                        removed[instructionIndex] = true
+                    } else if self.instructionUsesNamed(instruction, objectTemporaries, objectLocals) || ((instruction.op == "load_local" || instruction.op == "store_local") && instruction.name != null && self.contains(objectLocals, instruction.name!)) { escaped = true }
+                }
+                instructionIndex = instructionIndex + 1
+            }
+            local otherBlockIndex:i64 = 0
+            while otherBlockIndex < functionNode.blocks.length && !escaped {
+                if functionNode.blocks[otherBlockIndex].label != block.label {
+                    local otherInstructionIndex:i64 = 0
+                    while otherInstructionIndex < functionNode.blocks[otherBlockIndex].instructions.length && !escaped {
+                        local otherInstruction = functionNode.blocks[otherBlockIndex].instructions[otherInstructionIndex]
+                        if self.instructionUsesNamed(otherInstruction, objectTemporaries, objectLocals) || ((otherInstruction.op == "load_local" || otherInstruction.op == "store_local") && otherInstruction.name != null && self.contains(objectLocals, otherInstruction.name!)) { escaped = true }
+                        otherInstructionIndex = otherInstructionIndex + 1
+                    }
+                }
+                otherBlockIndex = otherBlockIndex + 1
+            }
+            if escaped || !foundConstructor || aliases.length == 0 { return false }
+            local retained = new Array<ref Ir.Instruction>(0)
+            instructionIndex = 0
+            while instructionIndex < block.instructions.length {
+                local instruction = block.instructions[instructionIndex]
+                instruction.first = self.resolvePropagated(instruction.first, aliases); instruction.second = self.resolvePropagated(instruction.second, aliases); instruction.third = self.resolvePropagated(instruction.third, aliases)
+                local argumentIndex:i64 = 0
+                while argumentIndex < instruction.arguments.length { instruction.arguments[argumentIndex] = self.resolvePropagated(instruction.arguments[argumentIndex], aliases)!; argumentIndex = argumentIndex + 1 }
+                if !removed[instructionIndex] { retained.append(instruction) }
+                instructionIndex = instructionIndex + 1
+            }
+            block.instructions = retained
+            return true
+        }
+
+        constructorParameter(constructor:Ir.Function, name:string) -> i64 {
+            local index:i64 = 0
+            while index < constructor.parameters.length { if constructor.parameters[index].name == name { return index }; index = index + 1 }
+            return -1
+        }
+        constructorFieldParameter(constructor:Ir.Function, fieldName:string) -> i64 {
+            local index:i64 = 0
+            while index < constructor.blocks[0].instructions.length {
+                local instruction = constructor.blocks[0].instructions[index]
+                if instruction.op == "store_field" && instruction.name != null && instruction.name! == fieldName && instruction.second != null { return self.constructorParameter(constructor, instruction.second!.name) }
+                index = index + 1
+            }
+            return -1
+        }
+        instructionUsesNamed(instruction:Ir.Instruction, temporaries:Array<string>, locals:Array<string>) -> bool {
+            if self.valueNamedIn(instruction.first, temporaries, locals) || self.valueNamedIn(instruction.second, temporaries, locals) || self.valueNamedIn(instruction.third, temporaries, locals) { return true }
+            local index:i64 = 0
+            while index < instruction.arguments.length { if self.valueNamedIn(instruction.arguments[index], temporaries, locals) { return true }; index = index + 1 }
+            return false
+        }
+        valueNamedIn(value:Ir.Value?, temporaries:Array<string>, locals:Array<string>) -> bool {
+            if value == null { return false }
+            if value!.kind == "temporary" { return self.contains(temporaries, value!.name) }
+            if value!.kind == "local" { return self.contains(locals, value!.name) }
+            return false
+        }
+        namedValue(value:Ir.Value?, kind:string, name:string) -> bool { return value != null && value!.kind == kind && value!.name == name }
+        scalarPrimitive(typeName:string) -> bool { return self.foldableInteger(typeName) || typeName == "u64" || typeName == "f32" || typeName == "f64" }
 
         propagateLocalValues(functionNode:Ir.Function) -> void {
             local useLocations = self.temporaryUseLocations(functionNode)
@@ -501,6 +628,11 @@ library IrValidation {{
         }
 
         findFunction(program:Ir.Program, name:string) -> bool { return self.findDefinedFunction(program, name) != null || self.findDeclaredFunction(program, name) != null || self.findExternal(program, name) != null }
+        findType(program:Ir.Program, name:string) -> ref Ir.Type? {
+            local index:i64 = 0
+            while index < program.types.length { if program.types[index].name == name { return program.types[index] }; index = index + 1 }
+            return null
+        }
         hasType(program:Ir.Program, name:string) -> bool {
             local index:i64 = 0
             while index < program.types.length { if program.types[index].name == name { return true }; index = index + 1 }

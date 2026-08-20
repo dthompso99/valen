@@ -1,0 +1,2 @@
+import System from 'libSystem.ar'
+entry {{ __()->i32{System.print(0);return 0} }}

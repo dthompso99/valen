@@ -7,7 +7,7 @@ export class X86_64Backend {
         if (![0, 1].includes(optimizationLevel)) throw new Error(`Unsupported optimization level '-O${optimizationLevel}'`);
         this.optimize = optimizationLevel === 1;
         this.runtimeMetrics = runtimeMetrics;
-        prepareIr(program, {optimize: this.optimize, requireEntry: includeRuntime});
+        prepareIr(program, {optimize: this.optimize, requireEntry: includeRuntime, scalarReplacement: !runtimeMetrics});
         this.program = program;
         this.emittedTypes = moduleId === null ? program.types : program.types.filter(type => type.moduleId === moduleId);
         this.functionSymbols = new Map();
