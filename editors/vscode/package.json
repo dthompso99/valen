@@ -1,0 +1,75 @@
+{
+  "name": "valen-language-support",
+  "displayName": "Valen Language Support",
+  "description": "Syntax highlighting and language-server support for Valen.",
+  "version": "0.1.0",
+  "publisher": "valen-lang",
+  "license": "ISC",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters",
+    "Linters"
+  ],
+  "keywords": [
+    "valen",
+    "language server"
+  ],
+  "activationEvents": [
+    "onLanguage:valen"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "valen",
+        "aliases": [
+          "Valen",
+          "valen"
+        ],
+        "extensions": [
+          ".ar"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "valen",
+        "scopeName": "source.valen",
+        "path": "./syntaxes/valen.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Valen",
+      "properties": {
+        "valen.server.nodePath": {
+          "type": "string",
+          "default": "node",
+          "description": "Node.js executable used to launch the bootstrap Valen language server."
+        },
+        "valen.server.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to valen-lsp.mjs. Empty uses scripts/valen-lsp.mjs from this repository checkout."
+        },
+        "valen.libraryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional library search path passed to the Valen language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node test/manifest.test.cjs"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0"
+  }
+}

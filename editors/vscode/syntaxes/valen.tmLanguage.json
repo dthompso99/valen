@@ -1,0 +1,44 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Valen",
+  "scopeName": "source.valen",
+  "patterns": [
+    {"include": "#comments"},
+    {"include": "#strings"},
+    {"include": "#numbers"},
+    {"include": "#keywords"},
+    {"include": "#types"}
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {"name": "comment.line.double-slash.valen", "match": "//.*$"}
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {"name": "string.quoted.double.valen", "begin": "\"", "end": "\"", "patterns": [{"name": "constant.character.escape.valen", "match": "\\\\."}]},
+        {"name": "string.quoted.single.valen", "begin": "'", "end": "'", "patterns": [{"name": "constant.character.escape.valen", "match": "\\\\."}]}
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {"name": "constant.numeric.valen", "match": "\\b[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\\b"}
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {"name": "keyword.control.valen", "match": "\\b(?:break|case|continue|else|for|if|in|match|return|while)\\b"},
+        {"name": "keyword.declaration.valen", "match": "\\b(?:enum|from|import|library|local|member|test)\\b"},
+        {"name": "storage.modifier.valen", "match": "\\b(?:copy|delete|implements|inherits|native|own|private|public|ref|unsafe|weak)\\b"},
+        {"name": "keyword.operator.valen", "match": "\\b(?:as|is|new)\\b"},
+        {"name": "constant.language.valen", "match": "\\b(?:false|null|true)\\b"}
+      ]
+    },
+    "types": {
+      "patterns": [
+        {"name": "support.type.primitive.valen", "match": "\\b(?:bool|f32|f64|i8|i16|i32|i64|string|u8|u16|u32|u64|void)\\b"}
+      ]
+    }
+  }
+}

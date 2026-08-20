@@ -27,4 +27,6 @@ The server reuses the compiler's parser, module loader, semantic analyzer, and s
 
 ## Scope
 
-This implementation intentionally avoids editor-specific packaging. Issue #66 tracks the optional VS Code extension that can launch this server and associate it with `.ar` files. Deprecated-item highlighting requires a future language-level deprecation model. Finer-grained incremental analysis remains measurement-gated and can be added without changing the protocol boundary.
+The development VS Code extension in `editors/vscode` associates `.ar` files, provides baseline TextMate syntax highlighting, and launches this server. Its semantic editor features remain compiler-owned through LSP rather than being reimplemented in the extension. The extension accepts alternate server and library paths for development; issue #110 tracks replacing the bundled Node.js bootstrap server with a distributable native Valen implementation.
+
+Deprecated-item highlighting requires a future language-level deprecation model. Finer-grained incremental analysis remains measurement-gated and can be added without changing the protocol boundary.

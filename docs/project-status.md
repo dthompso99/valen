@@ -72,7 +72,7 @@ and embedded targets.
 - Generation 1 and generation 2 produce equivalent normalized IR across the shared conformance corpus.
 - Generation 1 and generation 2 report identical diagnostics for the shared invalid-program corpus.
 - JavaScript generation 0 is intentionally retained as the stable path from zero; generated native compilers run without JavaScript.
-- The editor-neutral language server provides live diagnostics, quick fixes, hover, go-to-definition, document symbols, and deterministic document formatting; editor packaging remains **WIP**.
+- The editor-neutral language server provides live diagnostics, quick fixes, hover, go-to-definition, references, rename, completion, semantic highlighting, document symbols, and deterministic document formatting. A development VS Code extension in `editors/vscode` associates `.ar` files and launches the server; a native distributable server remains **WIP**.
 - Diagnostics use a first-class `DiagnosticSeverity` enum with exhaustive rendering, primary and secondary source labels, explanatory notes, and precise replacement hints with generation parity.
 - The self-hosted tokenizer and parser exchange first-class `TokenKind` values while preserving source lexemes as strings.
 - Compiled libraries are emitted as relocatable objects with SemVer `.vmeta` manifests containing compiler-interface, target, ABI, dependency-interface, and integrity fingerprints. The toolchain packages and resolves a versioned x86-64 sysroot containing source, `.vmi`, `.vmeta`, and static `.o` artifacts; source-free interface hydration, registry resolution, and lockfiles remain **WIP** package tooling.
