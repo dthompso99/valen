@@ -1,0 +1,4 @@
+{
+  "version": 1,
+  "inputs": ["empty.ar", "minimal.ar", "interpolation.ar", "malformed.ar"]
+}

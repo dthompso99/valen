@@ -1,0 +1,3 @@
+entry {{
+    __() -> void { local value = "nested ${1 + (2 * 3)}" }
+}}
