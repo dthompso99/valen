@@ -98,6 +98,7 @@ test('language server finds references across modules and unsaved overlays', () 
     const report = `import Math from './math.ar'\nentry {{ __() -> i32 { local total = Math.value(); return 0 } }}\n`;
     server.handle({jsonrpc: '2.0', id: 1, method: 'initialize', params: {rootUri: pathToFileURL(directory).href}});
     assert.equal(sent.at(-1).result.capabilities.referencesProvider, true);
+    assert.deepEqual(sent.at(-1).result.capabilities.completionProvider.triggerCharacters, ['.']);
     assert.equal(sent.at(-1).result.capabilities.semanticTokensProvider.full, true);
     server.handle({jsonrpc: '2.0', method: 'textDocument/didOpen', params: {textDocument: {uri: libraryUri, text: library}}});
     server.handle({jsonrpc: '2.0', method: 'textDocument/didOpen', params: {textDocument: {uri: mainUri, text: main}}});
@@ -122,6 +123,33 @@ test('language server finds references across modules and unsaved overlays', () 
     assert.ok(tokenTypes.includes('namespace'), 'imported library reference was not classified');
     assert.ok(tokenTypes.includes('function'), 'imported library method was not classified');
     assert.ok(tokenTypes.includes('variable'), 'local declaration was not classified');
+    server.handle({jsonrpc: '2.0', id: 9, method: 'textDocument/completion', params: {textDocument: {uri: mainUri}, position: positionOf(main, 'Math.value')}});
+    assert.ok(sent.at(-1).result.some(item => item.label === 'Math' && item.kind === 9), 'import completion was not offered');
+    fs.rmSync(directory, {recursive: true});
+});
+
+test('language server completes locals, parameters, types, members, and enum cases contextually', () => {
+    const sent = [], directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-lsp-completion-'));
+    const filePath = path.join(directory, 'completion.ar'), uri = pathToFileURL(filePath).href;
+    const source = `enum Mode {{ Ready, Waiting }}\nEngine {{ member status:Mode; inspect(limit:i64) -> void { local current = limit; self.ins } private secret() -> void {} }}\nentry {{ __() -> i32 { local engine = new Engine(); engine.ins; engine.sec; local selected = Mode.Rea; return 0 } }}\n`;
+    const server = new LanguageServer(message => sent.push(message));
+    server.handle({jsonrpc: '2.0', id: 1, method: 'initialize', params: {rootUri: pathToFileURL(directory).href}});
+    server.handle({jsonrpc: '2.0', method: 'textDocument/didOpen', params: {textDocument: {uri, text: source}}});
+    const complete = (id, text, occurrence = 0) => {
+        const position = positionOf(source, text, occurrence); position.character += text.length;
+        server.handle({jsonrpc: '2.0', id, method: 'textDocument/completion', params: {textDocument: {uri}, position}});
+        return sent.at(-1).result;
+    };
+    assert.deepEqual(complete(2, 'engine.ins').map(item => item.label), ['inspect']);
+    assert.deepEqual(complete(3, 'Mode.Rea').map(item => item.label), ['Ready']);
+    assert.deepEqual(complete(4, 'self.ins').map(item => item.label), ['inspect']);
+    assert.deepEqual(complete(6, 'engine.sec'), []);
+    server.handle({jsonrpc: '2.0', id: 5, method: 'textDocument/completion', params: {textDocument: {uri}, position: positionOf(source, 'self.ins')}});
+    const names = sent.at(-1).result;
+    assert.ok(names.some(item => item.label === 'current'));
+    assert.ok(names.some(item => item.label === 'limit'));
+    assert.ok(names.some(item => item.label === 'Mode'));
+    assert.ok(names.some(item => item.label === 'i64'));
     fs.rmSync(directory, {recursive: true});
 });
 

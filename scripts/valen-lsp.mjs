@@ -10,6 +10,7 @@ const severity = {error: 1, warning: 2, note: 3};
 const semanticTokenTypes = ['namespace', 'type', 'class', 'enum', 'enumMember', 'function', 'method', 'property', 'variable', 'parameter', 'keyword', 'modifier'];
 const semanticTokenModifiers = ['declaration', 'readonly', 'native', 'unsafe', 'ownership', 'deprecated'];
 const ownershipKeywords = new Set(['OWN', 'REF', 'WEAK', 'COPY', 'DELETE']);
+const builtinTypes = ['bool', 'f32', 'f64', 'i8', 'i16', 'i32', 'i64', 'string', 'StringBuilder', 'u8', 'u16', 'u32', 'u64', 'void'];
 
 function uriPath(uri) { return fileURLToPath(uri); }
 function fileUri(filePath) { return pathToFileURL(filePath).href; }
@@ -87,6 +88,18 @@ function semanticType(symbol) {
     if (symbol.kind === 'BuiltinType' || symbol.kind === 'ArrayType' || symbol.kind === 'StringBuilderType') return 'type';
     return null;
 }
+function completionKind(symbol) {
+    if (!symbol) return 1;
+    if (symbol.kind === 'Method') return symbol.owner?.kind === 'Library' ? 3 : 2;
+    if (symbol.kind === 'Field') return 5;
+    if (symbol.kind === 'Local' || symbol.kind === 'Parameter' || symbol.kind === 'Self') return 6;
+    if (symbol.kind === 'Object') return 7;
+    if (symbol.kind === 'Library' || symbol.kind === 'Import') return 9;
+    if (symbol.kind === 'Enum') return 13;
+    if (symbol.kind === 'EnumCase') return 20;
+    if (symbol.kind === 'BuiltinType') return 25;
+    return 1;
+}
 
 export class LanguageServer {
     constructor(send) {
@@ -105,7 +118,7 @@ export class LanguageServer {
         if (method === 'initialize') {
             const root = params.rootUri ? uriPath(params.rootUri) : params.rootPath;
             if (root) this.rootPath = root;
-            this.respond(id, {capabilities: {textDocumentSync: 1, hoverProvider: true, definitionProvider: true, referencesProvider: true, renameProvider: {prepareProvider: true}, semanticTokensProvider: {legend: {tokenTypes: semanticTokenTypes, tokenModifiers: semanticTokenModifiers}, full: true}, documentSymbolProvider: true, codeActionProvider: true, documentFormattingProvider: true}});
+            this.respond(id, {capabilities: {textDocumentSync: 1, hoverProvider: true, definitionProvider: true, referencesProvider: true, renameProvider: {prepareProvider: true}, completionProvider: {triggerCharacters: ['.']}, semanticTokensProvider: {legend: {tokenTypes: semanticTokenTypes, tokenModifiers: semanticTokenModifiers}, full: true}, documentSymbolProvider: true, codeActionProvider: true, documentFormattingProvider: true}});
         } else if (method === 'shutdown') this.respond(id, null);
         else if (method === 'exit') process.exit(0);
         else if (method === 'textDocument/didOpen') {
@@ -117,6 +130,7 @@ export class LanguageServer {
         } else if (method === 'textDocument/hover') this.respond(id, this.hover(params));
         else if (method === 'textDocument/definition') this.respond(id, this.definition(params));
         else if (method === 'textDocument/references') this.respond(id, this.references(params));
+        else if (method === 'textDocument/completion') this.respond(id, this.completion(params));
         else if (method === 'textDocument/prepareRename') this.respond(id, this.prepareRename(params));
         else if (method === 'textDocument/rename') {
             const renamed = this.rename(params);
@@ -189,6 +203,71 @@ export class LanguageServer {
             locations.set(key, {uri: fileUri(span.source), range: spanRange(span, source)});
         }
         return [...locations.values()].sort((left, right) => left.uri.localeCompare(right.uri) || left.range.start.line - right.range.start.line || left.range.start.character - right.range.start.character);
+    }
+
+    completion(params) {
+        const context = this.context(params);
+        if (!context) return [];
+        const offset = offsetAt(context.result.source, params.position);
+        const before = context.result.source.slice(0, offset);
+        const prefix = before.match(/[A-Za-z_][A-Za-z0-9_]*$/)?.[0] ?? '';
+        const member = before.slice(0, before.length - prefix.length).endsWith('.');
+        const candidates = new Map();
+        const add = (symbol, allowPrivate = false) => {
+            if (!symbol?.name || symbol.visibility === 'private' && !allowPrivate) return;
+            if (prefix && !symbol.name.startsWith(prefix)) return;
+            const item = {label: symbol.name, kind: completionKind(symbol), detail: symbolDescription(symbol, symbol.declaration ?? {})};
+            candidates.set(`${item.label}\0${item.kind}\0${item.detail}`, item);
+        };
+        if (member) {
+            const expression = context.node?.kind === 'MemberExpression' ? context.node : null;
+            const owner = this.completionOwner(context.result.analysis, expression?.object?.semanticSymbol);
+            const currentOwner = this.enclosingNode(context.result.program, offset, 'MethodDeclaration')?.semanticSymbol?.owner;
+            for (let current = owner; current; current = current.base) {
+                for (const symbol of current.fields?.values?.() ?? []) add(symbol, currentOwner === symbol.owner);
+                for (const overloads of current.methodOverloads?.values?.() ?? []) for (const symbol of overloads) add(symbol, currentOwner === symbol.owner);
+                for (const symbol of current.objects?.values?.() ?? []) add(symbol, currentOwner === symbol.parent);
+            }
+        } else {
+            const filePath = uriPath(context.uri);
+            for (const name of builtinTypes) add({kind: 'BuiltinType', name, type: name});
+            walk(context.result.program, node => {
+                const symbol = node.semanticSymbol;
+                if (!symbol || node.span.source !== filePath) return;
+                if (symbol.kind === 'Library' || symbol.kind === 'Object' || symbol.kind === 'Enum') add(symbol, true);
+            });
+            const method = this.enclosingNode(context.result.program, offset, 'MethodDeclaration');
+            if (method) {
+                add({kind: 'Self', name: 'self', type: method.semanticSymbol?.owner?.type});
+                for (const parameter of method.semanticSymbol?.parameters ?? []) add(parameter);
+                walk(method, node => { if (node.kind === 'LocalDeclaration' && node.span.start < offset) add(node.semanticSymbol); });
+                const owner = method.semanticSymbol?.owner;
+                for (const symbol of owner?.fields?.values?.() ?? []) add(symbol, true);
+                for (const overloads of owner?.methodOverloads?.values?.() ?? []) for (const symbol of overloads) add(symbol, true);
+            }
+        }
+        return [...candidates.values()].sort((left, right) => left.label.localeCompare(right.label) || left.kind - right.kind || left.detail.localeCompare(right.detail));
+    }
+
+    completionOwner(analysis, receiver) {
+        if (!receiver) return null;
+        if (receiver.kind === 'Library' || receiver.kind === 'Object' || receiver.kind === 'Enum') return receiver;
+        const type = receiver.type?.replace(/\?$/, '');
+        if (!type) return null;
+        let found = null;
+        for (const module of analysis?.modules?.values?.() ?? []) walk(module.program, node => {
+            const symbol = node.semanticSymbol;
+            if (!found && (symbol?.kind === 'Object' || symbol?.kind === 'Enum') && symbol.type === type) found = symbol;
+        });
+        return found;
+    }
+
+    enclosingNode(program, offset, kind) {
+        let found = null;
+        walk(program, node => {
+            if (node.kind === kind && node.span.start <= offset && offset <= node.span.end && (!found || node.span.end - node.span.start < found.span.end - found.span.start)) found = node;
+        });
+        return found;
     }
 
     referenceNodes(targetKey) {

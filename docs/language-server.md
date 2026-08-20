@@ -19,6 +19,7 @@ The server communicates through standard `Content-Length` framed JSON-RPC on std
 - Go-to-definition across modules
 - Find references across open modules and unsaved overlays
 - Safe semantic rename with collision detection and workspace-root enforcement
+- Contextual completion for visible names, locals, parameters, types, imported libraries, object members, and enum cases
 - Semantic highlighting for declarations, references, types, ownership modifiers, and native/unsafe boundaries
 - Hierarchical document symbols for objects, libraries, methods, and fields
 
@@ -26,4 +27,4 @@ The server reuses the compiler's parser, module loader, semantic analyzer, and s
 
 ## Scope
 
-This first implementation intentionally avoids editor-specific packaging. Issue #66 tracks the optional VS Code extension that can launch this server and associate it with `.ar` files. Future work may add completion, deprecated-item highlighting, and finer-grained incremental analysis without changing the protocol boundary.
+This implementation intentionally avoids editor-specific packaging. Issue #66 tracks the optional VS Code extension that can launch this server and associate it with `.ar` files. Deprecated-item highlighting requires a future language-level deprecation model. Finer-grained incremental analysis remains measurement-gated and can be added without changing the protocol boundary.
