@@ -195,6 +195,19 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             assert.match(unsupported.stderr, /supported targets: x86_64-linux, aarch64-linux/);
         });
 
+        await t.test('LLVM backend emits relocatable objects', () => {
+            const source = path.join(projectRoot, 'bootstrap/test/fixtures/runtime-foundation.ar');
+            const object = path.join(directory, 'llvm-output.o');
+            const emitted = spawnSync(compilerPath,
+                ['--backend', 'llvm', '--emit-object', source, '-o', object],
+                {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(emitted.status, 0, emitted.stderr);
+            const header = spawnSync('readelf', ['-h', object], {encoding: 'utf8'});
+            assert.equal(header.status, 0, header.stderr);
+            assert.match(header.stdout, /Type:\s+REL/);
+            assert.match(header.stdout, /Machine:\s+Advanced Micro Devices X86-64/);
+        });
+
         await t.test('native compiler parses and validates project manifests', () => {
             const manifest = path.join(directory, 'valen.project.json');
             fs.writeFileSync(manifest, JSON.stringify({format: 1, package: {name: 'native-app', version: '0.1.0'},

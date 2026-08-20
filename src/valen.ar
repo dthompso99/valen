@@ -175,7 +175,7 @@ entry {{
         }
         targetName = target!.name
         if backendName == "llvm" && targetName != "x86_64-linux" { System.writeError("valen: LLVM backend currently supports only x86_64-linux\n"); return 64 }
-        if backendName == "llvm" && (emitObjectOnly || emitLibrary) { System.writeError("valen: LLVM backend does not yet support --emit-object or --emit-library\n"); return 64 }
+        if backendName == "llvm" && emitLibrary { System.writeError("valen: LLVM backend does not yet support --emit-library\n"); return 64 }
         if emitLibrary && libraryVersion == null { System.writeError("valen: --emit-library requires --library-version <major.minor.patch>\n"); return 64 }
 
         local cwd = System.currentDirectory()
@@ -279,11 +279,13 @@ entry {{
             local llvmPath = outputPath! + ".ll"
             if !self.writeAssembly(llvmPath, llvm) { return 74 }
             local llvmObjectPath = outputPath! + ".llvm.o"
+            if emitObjectOnly { llvmObjectPath = outputPath! }
             local llvmResult = System.compileLlvm(llvmPath, llvmObjectPath, optimizationLevel, true)
             if llvmResult != 0 {
                 System.writeError("valen: LLVM toolchain exited with status "); System.writeError(llvmResult.toString()); System.writeError("; expected /usr/bin/clang\n")
                 return 69
             }
+            if emitObjectOnly { return 0 }
             local runtimeBackend = new X86_64.Backend(ir, optimizationLevel, "<llvm-runtime>", true, false, runtimeMetrics)
             local runtimeErrors = runtimeBackend.validateRuntime()
             if runtimeErrors.length > 0 { for error in runtimeErrors { System.writeError("valen: target: ${error}\n") }; return 69 }
