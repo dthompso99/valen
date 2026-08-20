@@ -274,7 +274,7 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             assert.equal(spawnSync(nativeConsumer).status, 7, 'native executable did not consume the LLVM compiled library');
 
             const recordsSource = path.join(sourceRoot, 'Records.ar');
-            fs.writeFileSync(recordsSource, 'library Records {{ Record {{ member value:i64; __(value:i64) -> void { self.value = value }; get() -> i64 { return self.value } }}; create(value:i64) -> Record { return new Record(value) } }}\n');
+            fs.writeFileSync(recordsSource, 'library Records {{ Record {{ member value:i64; member label:string; member score:f64; __(value:i64, label:string, score:f64) -> void { self.value = value; self.label = label; self.score = score }; get() -> i64 { return self.value }; name() -> string { return self.label } }}; create(value:i64) -> Record { return new Record(value, "record", 1.5) } }}\n');
             const recordsObject = path.join(objects, 'Records.o');
             const recordsLibrary = spawnSync(compilerPath,
                 ['--source-root', sourceRoot, '--backend', 'llvm', '--library-version', '1.0.0', '--emit-library', recordsSource, '-o', recordsObject],
@@ -283,7 +283,7 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             fs.copyFileSync(`${recordsObject}.vmeta`, path.join(metadata, 'Records.o.vmeta'));
             fs.copyFileSync(`${recordsObject}.vmi`, path.join(interfaces, 'Records.vmi'));
             const recordsMain = path.join(objectProjectRoot, 'records-main.ar');
-            fs.writeFileSync(recordsMain, "import Records from 'Records.ar'\nentry {{ __() -> i64 { local value = Records.create(7); return value.get() } }}\n");
+            fs.writeFileSync(recordsMain, "import Records from 'Records.ar'\nentry {{ __() -> i64 { local value = Records.create(7); if value.name() == \"record\" { return value.get() }; return 1 } }}\n");
             const recordsConsumer = path.join(objectProjectRoot, 'records-consumer');
             const recordsLinked = spawnSync(compilerPath,
                 ['--source-root', objectProjectRoot, recordsMain, '-o', recordsConsumer],
@@ -292,12 +292,12 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             assert.equal(spawnSync(recordsConsumer).status, 7, 'native executable did not consume LLVM object metadata');
 
             const ownedSource = path.join(sourceRoot, 'OwnedReference.ar');
-            fs.writeFileSync(ownedSource, 'library OwnedReference {{ Item {{ member value:string }} }}\n');
+            fs.writeFileSync(ownedSource, 'library OwnedReference {{ Item {{}}; Holder {{ member value:Item; __(value:Item) -> void { self.value = value } }} }}\n');
             const unsupported = spawnSync(compilerPath,
                 ['--source-root', sourceRoot, '--backend', 'llvm', '--library-version', '1.0.0', '--emit-library', ownedSource, '-o', path.join(directory, 'OwnedReference.o')],
                 {encoding: 'utf8', env: environment, cwd: projectRoot});
             assert.equal(unsupported.status, 69);
-            assert.match(unsupported.stderr, /cannot yet own reference or floating-point object fields/);
+            assert.match(unsupported.stderr, /cannot yet own object or array reference fields/);
         });
 
         await t.test('native compiler parses and validates project manifests', () => {

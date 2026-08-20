@@ -404,8 +404,10 @@ entry {{
                 if typeNode.baseName != null { return "cannot yet own inherited object metadata from '" + typeNode.baseName! + "'" }
                 local fieldIndex:i64 = 0
                 while fieldIndex < typeNode.fields.length {
-                    local fieldType = typeNode.fields[fieldIndex].typeName
-                    if fieldType != "bool" && fieldType != "i8" && fieldType != "u8" && fieldType != "i16" && fieldType != "u16" && fieldType != "i32" && fieldType != "u32" && fieldType != "i64" && fieldType != "u64" { return "cannot yet own reference or floating-point object fields" }
+                    local field = typeNode.fields[fieldIndex]
+                    local fieldType = field.typeName
+                    if field.ownership == "member-weak" { return "cannot yet own weak object fields" }
+                    if fieldType != "bool" && fieldType != "i8" && fieldType != "u8" && fieldType != "i16" && fieldType != "u16" && fieldType != "i32" && fieldType != "u32" && fieldType != "i64" && fieldType != "u64" && fieldType != "f32" && fieldType != "f64" && fieldType != "string" { return "cannot yet own object or array reference fields" }
                     fieldIndex = fieldIndex + 1
                 }
             }

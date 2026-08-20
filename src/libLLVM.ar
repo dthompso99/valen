@@ -199,6 +199,18 @@ library LLVM {{
             self.writer.line(self.typeGlobal(typeNode.name) + " = global " + descriptorType + " } " + descriptorValue + " }")
             self.writer.line("define void " + self.gcTraceGlobal(typeNode.name) + "(ptr %object) {")
             self.writer.line("entry:")
+            local traceIndex:i64 = 0
+            while traceIndex < typeNode.fields.length {
+                local traceField = typeNode.fields[traceIndex]
+                if traceField.typeName == "string" && traceField.ownership != "member-weak" {
+                    local traceAddress = "%\"trace.address." + traceIndex.toString() + "\""
+                    local traceValue = "%\"trace.value." + traceIndex.toString() + "\""
+                    self.writer.line("    " + traceAddress + " = getelementptr i8, ptr %object, i64 " + self.fieldOffset(traceField).toString())
+                    self.writer.line("    " + traceValue + " = load ptr, ptr " + traceAddress)
+                    self.writer.line("    call void @\"valen_gc_mark\"(ptr " + traceValue + ")")
+                }
+                traceIndex = traceIndex + 1
+            }
             self.writer.line("    ret void")
             self.writer.line("}")
             self.writer.line("define void " + self.gcWeakGlobal(typeNode.name) + "(ptr %object) {")
@@ -221,7 +233,9 @@ library LLVM {{
                 self.writer.line("    " + rightAddress + " = getelementptr i8, ptr %right, i64 " + offset.toString())
                 self.writer.line("    " + leftValue + " = load " + self.llvmType(field.typeName) + ", ptr " + leftAddress)
                 self.writer.line("    " + rightValue + " = load " + self.llvmType(field.typeName) + ", ptr " + rightAddress)
-                self.writer.line("    " + compared + " = icmp eq " + self.llvmType(field.typeName) + " " + leftValue + ", " + rightValue)
+                if field.typeName == "string" { self.writer.line("    " + compared + " = call i1 @\"valen_string_equal_context\"(ptr " + leftValue + ", ptr " + rightValue + ", ptr %context)") }
+                else if field.typeName == "f32" || field.typeName == "f64" { self.writer.line("    " + compared + " = fcmp oeq " + self.llvmType(field.typeName) + " " + leftValue + ", " + rightValue) }
+                else { self.writer.line("    " + compared + " = icmp eq " + self.llvmType(field.typeName) + " " + leftValue + ", " + rightValue) }
                 if fieldIndex > 0 {
                     local combined = "%\"equal.combined." + fieldIndex.toString() + "\""
                     self.writer.line("    " + combined + " = and i1 " + previous + ", " + compared)
@@ -242,7 +256,18 @@ library LLVM {{
                 local bits = loaded
                 self.writer.line("    " + address + " = getelementptr i8, ptr %object, i64 " + self.fieldOffset(field).toString())
                 self.writer.line("    " + loaded + " = load " + self.llvmType(field.typeName) + ", ptr " + address)
-                if self.llvmType(field.typeName) != "i64" {
+                if field.typeName == "string" {
+                    bits = "%\"hash.bits." + fieldIndex.toString() + "\""
+                    self.writer.line("    " + bits + " = call i64 @\"valen_string_hash_context\"(ptr " + loaded + ", ptr %context)")
+                } else if field.typeName == "f64" {
+                    bits = "%\"hash.bits." + fieldIndex.toString() + "\""
+                    self.writer.line("    " + bits + " = bitcast double " + loaded + " to i64")
+                } else if field.typeName == "f32" {
+                    local floatBits = "%\"hash.float.bits." + fieldIndex.toString() + "\""
+                    bits = "%\"hash.bits." + fieldIndex.toString() + "\""
+                    self.writer.line("    " + floatBits + " = bitcast float " + loaded + " to i32")
+                    self.writer.line("    " + bits + " = zext i32 " + floatBits + " to i64")
+                } else if self.llvmType(field.typeName) != "i64" {
                     bits = "%\"hash.bits." + fieldIndex.toString() + "\""
                     self.writer.line("    " + bits + " = zext " + self.llvmType(field.typeName) + " " + loaded + " to i64")
                 }
@@ -271,7 +296,11 @@ library LLVM {{
                 self.writer.line("    " + sourceAddress + " = getelementptr i8, ptr %source, i64 " + offset)
                 self.writer.line("    " + targetAddress + " = getelementptr i8, ptr %copy, i64 " + offset)
                 self.writer.line("    " + value + " = load " + self.llvmType(field.typeName) + ", ptr " + sourceAddress)
-                self.writer.line("    store " + self.llvmType(field.typeName) + " " + value + ", ptr " + targetAddress)
+                if field.typeName == "string" {
+                    local copiedValue = "%\"copy.string." + fieldIndex.toString() + "\""
+                    self.writer.line("    " + copiedValue + " = call ptr @\"valen_string_copy_context\"(ptr " + value + ", ptr %context)")
+                    self.writer.line("    store ptr " + copiedValue + ", ptr " + targetAddress)
+                } else { self.writer.line("    store " + self.llvmType(field.typeName) + " " + value + ", ptr " + targetAddress) }
                 fieldIndex = fieldIndex + 1
             }
             self.writer.line("    ret ptr %copy")
