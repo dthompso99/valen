@@ -194,8 +194,9 @@ library X86_64 {{
         member includeRuntime:bool
         member includeModuleMetadata:bool
         member runtimeMetrics:bool
+        member metadataOnly:bool
 
-        __(program:Ir.Program, optimizationLevel:i64=1, emissionModule:string?=null, includeRuntime:bool=true, includeModuleMetadata:bool=false, runtimeMetrics:bool=false) -> void {
+        __(program:Ir.Program, optimizationLevel:i64=1, emissionModule:string?=null, includeRuntime:bool=true, includeModuleMetadata:bool=false, runtimeMetrics:bool=false, metadataOnly:bool=false) -> void {
             self.program = program
             self.writer = new Writer()
             self.functionSymbols = new Array<FunctionSymbol>(0)
@@ -229,6 +230,7 @@ library X86_64 {{
             self.includeRuntime = includeRuntime
             self.includeModuleMetadata = includeModuleMetadata
             self.runtimeMetrics = runtimeMetrics
+            self.metadataOnly = metadataOnly
         }
 
         generate() -> string {
@@ -246,7 +248,7 @@ library X86_64 {{
             if self.hasRuntime("valen_Operations_threadStart") { self.writer.line(".extern pthread_create"); self.writer.line(".extern pthread_join") }
             self.writer.optimize = self.optimize
             index = 0
-            while index < self.program.functions.length {
+            while !self.metadataOnly && index < self.program.functions.length {
                 if self.emits(self.program.functions[index]) { self.generateFunction(self.program.functions[index]) }
                 index = index + 1
             }
@@ -254,9 +256,7 @@ library X86_64 {{
             if !self.includeRuntime {
                 if self.includeModuleMetadata { self.structuralTypeRuntime(); self.gcTraceFunctionsForModule(); self.typeDataForModule() }
                 self.localTrapRuntime()
-                self.stringData()
-                self.floatData()
-                self.floatConversionData()
+                if !self.metadataOnly { self.stringData(); self.floatData(); self.floatConversionData() }
                 self.writer.line(".section .note.GNU-stack,\"\",@progbits")
                 return self.writer.build()
             }

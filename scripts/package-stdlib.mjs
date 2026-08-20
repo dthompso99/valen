@@ -17,6 +17,9 @@ const release = value('--release') ?? 'current';
 const target = resolveTarget(value('--target') ?? undefined).name;
 const version = value('--version') ?? '0.1.0';
 const nativeCompiler = value('--compiler');
+const backend = value('--backend') ?? 'native';
+if (!['native', 'llvm'].includes(backend)) throw new Error('--backend must be native or llvm');
+if (backend === 'llvm' && nativeCompiler === null) throw new Error('--backend llvm requires --compiler');
 const output = path.resolve(value('--output') ?? path.join(root, 'dist/lib/valen'));
 const sysroot = path.join(output, release, target);
 const directories = {
@@ -42,7 +45,7 @@ try {
             {sourceRoot: path.join(sysroot, 'source'), target});
         else {
             const result = spawnSync(path.resolve(nativeCompiler), ['--source-root', path.join(sysroot, 'source'),
-                '--target', target, '--library-version', version, '--emit-library', path.join(directories.source, module), '-o', object],
+                '--target', target, '--backend', backend, '--library-version', version, '--emit-library', path.join(directories.source, module), '-o', object],
             {stdio: 'inherit', env: {...process.env, VALEN_SYSROOT: sysroot}});
             if (result.error) throw result.error;
             if (result.status !== 0) throw new Error(`Valen compiler exited with status ${result.status}`);

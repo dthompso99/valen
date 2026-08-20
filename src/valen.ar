@@ -275,9 +275,13 @@ entry {{
             }
             local llvmEmissionModule = emissionModule
             if llvmEmissionModule == null && graph.entry != null { llvmEmissionModule = graph.entry!.path }
-            local backend = new LLVM.Backend(ir, optimizationLevel, llvmEmissionModule, emitLibrary)
+            local backend = new LLVM.Backend(ir, optimizationLevel, llvmEmissionModule, false)
             local llvm = backend.generate()
             if backend.error.length > 0 { System.writeError("valen: LLVM backend: "); System.writeError(backend.error); System.writeError("\n"); return 69 }
+            if emitLibrary {
+                local metadataBackend = new X86_64.Backend(ir, optimizationLevel, llvmEmissionModule, false, true, false, true)
+                llvm = llvm + self.llvmModuleAssembly(metadataBackend.generate())
+            }
             if outputPath == null { System.write(llvm); return 0 }
             local llvmPath = outputPath! + ".ll"
             if !self.writeAssembly(llvmPath, llvm) { return 74 }
@@ -366,6 +370,24 @@ entry {{
         return 0
     }
 
+    llvmModuleAssembly(assembly:string) -> string {
+        local output = new StringBuilder()
+        output.append("module asm \"")
+        local index:i64 = 0
+        local digits = "0123456789ABCDEF"
+        while index < assembly.length {
+            local byte = assembly[index] as i64
+            if byte == 34 || byte == 92 || byte == 10 || byte == 13 {
+                output.appendByte(92)
+                output.appendByte(digits[byte / 16])
+                output.appendByte(digits[byte - (byte / 16) * 16])
+            } else { output.appendByte(byte as u8) }
+            index = index + 1
+        }
+        output.append("\"\n")
+        return output.build()
+    }
+
     emitCompiledLibrary(graph:ModuleLoading.ModuleGraph, ir:Ir.Program, objectPath:string, version:string, optimizationLevel:i64, targetName:string) -> i32 {
         if graph.entry == null { System.writeError("valen: compiled library has no source module\n"); return 65 }
         local libraryName:string? = null; local declarationIndex:i64 = 0
@@ -407,21 +429,15 @@ entry {{
                     local field = typeNode.fields[fieldIndex]
                     local fieldType = field.typeName
                     local knownObject:bool = false
+                    local knownArray:bool = fieldType.length >= 7 && fieldType.slice(0, 6) == "Array<"
                     local baseFieldType = fieldType
                     if baseFieldType.length > 0 { if baseFieldType[baseFieldType.length - 1] == 63 { baseFieldType = baseFieldType.slice(0, baseFieldType.length - 1) } }
                     local knownIndex:i64 = 0
                     while knownIndex < ir.types.length { if ir.types[knownIndex].name == baseFieldType { knownObject = true }; knownIndex = knownIndex + 1 }
-                    if fieldType != "bool" && fieldType != "i8" && fieldType != "u8" && fieldType != "i16" && fieldType != "u16" && fieldType != "i32" && fieldType != "u32" && fieldType != "i64" && fieldType != "u64" && fieldType != "f32" && fieldType != "f64" && fieldType != "string" && !knownObject { return "cannot yet own array reference fields" }
                     fieldIndex = fieldIndex + 1
                 }
             }
             typeIndex = typeIndex + 1
-        }
-        local referencedIndex:i64 = 0
-        while referencedIndex < ir.referencedTypes.length {
-            local referenced = ir.referencedTypes[referencedIndex]
-            if referenced.length >= 7 && referenced.slice(0, 6) == "Array<" { return "cannot yet own specialized array metadata" }
-            referencedIndex = referencedIndex + 1
         }
         return null
     }

@@ -162,7 +162,7 @@ library LLVM {{
             return false
         }
 
-        isMetadataReference(field:Ir.Field) -> bool { return field.ownership != "member-weak" && (field.typeName == "string" || self.isObjectReference(field.typeName)) }
+        isMetadataReference(field:Ir.Field) -> bool { return field.ownership != "member-weak" && (field.typeName == "string" || self.isArray(self.baseType(field.typeName)) || self.isObjectReference(field.typeName)) }
 
         writeModuleTypeMetadata() -> void {
             local index:i64 = 0
@@ -283,6 +283,7 @@ library LLVM {{
                 self.writer.line("    " + leftValue + " = load " + self.llvmType(field.typeName) + ", ptr " + leftAddress)
                 self.writer.line("    " + rightValue + " = load " + self.llvmType(field.typeName) + ", ptr " + rightAddress)
                 if field.typeName == "string" { self.writer.line("    " + compared + " = call i1 @\"valen_string_equal_context\"(ptr " + leftValue + ", ptr " + rightValue + ", ptr %context)") }
+                else if self.isArray(self.baseType(field.typeName)) { self.writer.line("    " + compared + " = call i1 " + self.arrayEqualityGlobal(self.baseType(field.typeName)) + "(ptr " + leftValue + ", ptr " + rightValue + ", ptr %context)") }
                 else if self.isObjectReference(field.typeName) { self.writer.line("    " + compared + " = call i1 @\"valen_object_equal\"(ptr " + leftValue + ", ptr " + rightValue + ", ptr %context)") }
                 else if field.typeName == "f32" || field.typeName == "f64" { self.writer.line("    " + compared + " = fcmp oeq " + self.llvmType(field.typeName) + " " + leftValue + ", " + rightValue) }
                 else { self.writer.line("    " + compared + " = icmp eq " + self.llvmType(field.typeName) + " " + leftValue + ", " + rightValue) }
@@ -309,6 +310,9 @@ library LLVM {{
                 if field.typeName == "string" {
                     bits = "%\"hash.bits." + fieldIndex.toString() + "\""
                     self.writer.line("    " + bits + " = call i64 @\"valen_string_hash_context\"(ptr " + loaded + ", ptr %context)")
+                } else if self.isArray(self.baseType(field.typeName)) {
+                    bits = "%\"hash.bits." + fieldIndex.toString() + "\""
+                    self.writer.line("    " + bits + " = call i64 " + self.arrayHashGlobal(self.baseType(field.typeName)) + "(ptr " + loaded + ", ptr %context)")
                 } else if self.isObjectReference(field.typeName) {
                     bits = "%\"hash.bits." + fieldIndex.toString() + "\""
                     self.writer.line("    " + bits + " = call i64 @\"valen_object_hash\"(ptr " + loaded + ", ptr %context)")
@@ -360,6 +364,10 @@ library LLVM {{
                 if field.typeName == "string" {
                     local copiedValue = "%\"copy.string." + fieldIndex.toString() + "\""
                     self.writer.line("    " + copiedValue + " = call ptr @\"valen_string_copy_context\"(ptr " + value + ", ptr %context)")
+                    self.writer.line("    store ptr " + copiedValue + ", ptr " + targetAddress)
+                } else if self.isArray(self.baseType(field.typeName)) {
+                    local copiedValue = "%\"copy.array." + fieldIndex.toString() + "\""
+                    self.writer.line("    " + copiedValue + " = call ptr " + self.arrayCopyGlobal(self.baseType(field.typeName)) + "(ptr " + value + ", ptr %context)")
                     self.writer.line("    store ptr " + copiedValue + ", ptr " + targetAddress)
                 } else if self.isObjectReference(field.typeName) {
                     local copiedValue = "%\"copy.object." + fieldIndex.toString() + "\""

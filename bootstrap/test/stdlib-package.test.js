@@ -27,7 +27,7 @@ test('generation 0 packages and consumes generic standard-library modules', () =
     }
 });
 
-test('self-hosted toolchain packages and statically consumes the installed standard library', {timeout: 30000}, () => {
+test('self-hosted toolchain packages and statically consumes the installed standard library', {timeout: 60000}, () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-stdlib-package-'));
     try {
@@ -56,6 +56,19 @@ test('self-hosted toolchain packages and statically consumes the installed stand
         assert.equal(spawnSync('readelf', ['-d', executable], {encoding: 'utf8'}).stdout.includes('NEEDED'), false);
         for (const kind of ['source', 'objects', 'metadata', 'interfaces']) {
             assert.equal(fs.existsSync(path.join(sysroot, kind, 'std')), true, `missing ${kind}`);
+        }
+        if (fs.existsSync('/usr/bin/clang')) {
+            const llvmLibraryRoot = path.join(directory, 'lib/valen-llvm');
+            result = spawnSync(process.execPath, [path.join(root, 'scripts/package-stdlib.mjs'), '--compiler', compiler,
+                '--backend', 'llvm', '--output', llvmLibraryRoot], {cwd: root, encoding: 'utf8'});
+            assert.equal(result.status, 0, result.stderr);
+            const llvmSysroot = path.join(llvmLibraryRoot, 'current/x86_64-linux');
+            const llvmCollections = path.join(directory, 'llvm-collections');
+            result = spawnSync(compiler, ['--backend', 'llvm', path.join(root, 'bootstrap/test/fixtures/stdlib-collections.ar'),
+                '-o', llvmCollections], {cwd: root, encoding: 'utf8', env: {...process.env,
+                    VALEN_SYSROOT: llvmSysroot, VALEN_LIBRARY_PATH: ''}});
+            assert.equal(result.status, 0, result.stderr);
+            assert.equal(spawnSync(llvmCollections).status, 0);
         }
     } finally {
         fs.rmSync(directory, {recursive: true, force: true});
