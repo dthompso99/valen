@@ -210,6 +210,59 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             assert.equal(header.status, 0, header.stderr);
             assert.match(header.stdout, /Type:\s+REL/);
             assert.match(header.stdout, /Machine:\s+Advanced Micro Devices X86-64/);
+
+            const sysroot = path.join(directory, 'llvm-object-sysroot');
+            const sourceRoot = path.join(sysroot, 'source');
+            const objects = path.join(sysroot, 'objects');
+            const metadata = path.join(sysroot, 'metadata');
+            const interfaces = path.join(sysroot, 'interfaces');
+            for (const path of [sourceRoot, objects, metadata, interfaces]) fs.mkdirSync(path, {recursive: true});
+            const supportSource = path.join(sourceRoot, 'Support.ar');
+            const supportObject = path.join(objects, 'Support.o');
+            fs.writeFileSync(supportSource, 'library Support {{ value() -> i64 { return 7 } }}\n');
+            const library = spawnSync(compilerPath,
+                ['--source-root', sourceRoot, '--library-version', '1.0.0', '--emit-library', supportSource, '-o', supportObject],
+                {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(library.status, 0, library.stderr);
+            fs.copyFileSync(`${supportObject}.vmeta`, path.join(metadata, 'Support.o.vmeta'));
+            fs.copyFileSync(`${supportObject}.vmi`, path.join(interfaces, 'Support.vmi'));
+            const objectProjectRoot = path.join(directory, 'llvm-object-project');
+            fs.mkdirSync(objectProjectRoot);
+            const main = path.join(objectProjectRoot, 'main.ar');
+            fs.writeFileSync(main, "import Support from 'Support.ar'\nentry {{ __() -> i64 { return Support.value() } }}\n");
+            const importedObject = path.join(objectProjectRoot, 'main.o');
+            const imported = spawnSync(compilerPath,
+                ['--source-root', objectProjectRoot, '--backend', 'llvm', '--emit-object', main, '-o', importedObject],
+                {encoding: 'utf8', env: {...environment, VALEN_SYSROOT: sysroot, VALEN_LIBRARY_PATH: sourceRoot}, cwd: projectRoot});
+            assert.equal(imported.status, 0, imported.stderr);
+            const importedIr = fs.readFileSync(`${importedObject}.ll`, 'utf8');
+            const supportSymbol = 'valen_fn_83_117_112_112_111_114_116_46_118_97_108_117_101';
+            assert.match(importedIr, new RegExp(`declare i64 @"${supportSymbol}"\\(\\)`));
+            assert.doesNotMatch(importedIr, new RegExp(`define i64 @"${supportSymbol}"\\(`));
+            const symbols = spawnSync('readelf', ['-Ws', importedObject], {encoding: 'utf8'});
+            assert.equal(symbols.status, 0, symbols.stderr);
+            assert.match(symbols.stdout, new RegExp(`UND ${supportSymbol}$`, 'm'));
+
+            const llvmLibraryObject = path.join(directory, 'Support-llvm.o');
+            const llvmLibrary = spawnSync(compilerPath,
+                ['--source-root', sourceRoot, '--backend', 'llvm', '--library-version', '1.0.0', '--emit-library', supportSource, '-o', llvmLibraryObject],
+                {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(llvmLibrary.status, 0, llvmLibrary.stderr);
+            for (const artifact of [llvmLibraryObject, `${llvmLibraryObject}.vmi`, `${llvmLibraryObject}.vmeta`]) {
+                assert.equal(fs.existsSync(artifact), true, `LLVM library did not emit ${artifact}`);
+            }
+            const validated = spawnSync(compilerPath, ['--validate-library', `${llvmLibraryObject}.vmeta`],
+                {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(validated.status, 0, validated.stderr);
+            assert.equal(validated.stdout, 'Support 1.0.0\n');
+
+            const ownedSource = path.join(sourceRoot, 'Owned.ar');
+            fs.writeFileSync(ownedSource, 'library Owned {{ Item {{ member value:i64 }} }}\n');
+            const unsupported = spawnSync(compilerPath,
+                ['--source-root', sourceRoot, '--backend', 'llvm', '--library-version', '1.0.0', '--emit-library', ownedSource, '-o', path.join(directory, 'Owned.o')],
+                {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(unsupported.status, 69);
+            assert.match(unsupported.stderr, /cannot yet own object GC\/type\/structural metadata/);
         });
 
         await t.test('native compiler parses and validates project manifests', () => {

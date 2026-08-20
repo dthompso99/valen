@@ -175,7 +175,6 @@ entry {{
         }
         targetName = target!.name
         if backendName == "llvm" && targetName != "x86_64-linux" { System.writeError("valen: LLVM backend currently supports only x86_64-linux\n"); return 64 }
-        if backendName == "llvm" && emitLibrary { System.writeError("valen: LLVM backend does not yet support --emit-library\n"); return 64 }
         if emitLibrary && libraryVersion == null { System.writeError("valen: --emit-library requires --library-version <major.minor.patch>\n"); return 64 }
 
         local cwd = System.currentDirectory()
@@ -268,8 +267,12 @@ entry {{
             System.write(normalizer.format(ir))
             return 0
         }
-        if emitLibrary { return self.emitCompiledLibrary(graph, ir, outputPath!, libraryVersion!, optimizationLevel, targetName) }
+        if emitLibrary && backendName == "native" { return self.emitCompiledLibrary(graph, ir, outputPath!, libraryVersion!, optimizationLevel, targetName) }
         if backendName == "llvm" {
+            if emitLibrary {
+                local unsupported = self.unsupportedLlvmLibraryMetadata(ir, graph.entry!.path)
+                if unsupported != null { System.writeError("valen: LLVM compiled library " + unsupported! + "\n"); return 69 }
+            }
             local llvmEmissionModule = emissionModule
             if llvmEmissionModule == null && graph.entry != null { llvmEmissionModule = graph.entry!.path }
             local backend = new LLVM.Backend(ir, optimizationLevel, llvmEmissionModule)
@@ -279,12 +282,13 @@ entry {{
             local llvmPath = outputPath! + ".ll"
             if !self.writeAssembly(llvmPath, llvm) { return 74 }
             local llvmObjectPath = outputPath! + ".llvm.o"
-            if emitObjectOnly { llvmObjectPath = outputPath! }
+            if emitObjectOnly || emitLibrary { llvmObjectPath = outputPath! }
             local llvmResult = System.compileLlvm(llvmPath, llvmObjectPath, optimizationLevel, true)
             if llvmResult != 0 {
                 System.writeError("valen: LLVM toolchain exited with status "); System.writeError(llvmResult.toString()); System.writeError("; expected /usr/bin/clang\n")
                 return 69
             }
+            if emitLibrary { return self.emitLlvmCompiledLibraryMetadata(graph, outputPath!, libraryVersion!, targetName) }
             if emitObjectOnly { return 0 }
             local runtimeBackend = new X86_64.Backend(ir, optimizationLevel, "<llvm-runtime>", true, false, runtimeMetrics)
             local runtimeErrors = runtimeBackend.validateRuntime()
@@ -380,6 +384,47 @@ entry {{
         }
         local codec = new LibraryMetadata.Codec(targetName)
         local metadata = codec.create(libraryName!, version, artifact.interfaceFingerprint.toString(), artifact.implementationFingerprint.toString(), object, dependencies)
+        if metadata == null { System.writeError("valen: "); System.writeError(codec.error); System.writeError("\n"); return 64 }
+        if !codec.write(objectPath + ".vmeta", metadata!) { System.writeError("valen: "); System.writeError(codec.error); System.writeError("\n"); return 74 }
+        if !self.writeAssembly(objectPath + ".vmi", artifact.summary) { return 74 }
+        return 0
+    }
+
+    unsupportedLlvmLibraryMetadata(ir:Ir.Program, modulePath:string) -> string? {
+        local typeIndex:i64 = 0
+        while typeIndex < ir.types.length {
+            if ir.types[typeIndex].modulePath == modulePath { return "cannot yet own object GC/type/structural metadata" }
+            typeIndex = typeIndex + 1
+        }
+        local referencedIndex:i64 = 0
+        while referencedIndex < ir.referencedTypes.length {
+            local referenced = ir.referencedTypes[referencedIndex]
+            if referenced.length >= 7 && referenced.slice(0, 6) == "Array<" { return "cannot yet own specialized array metadata" }
+            referencedIndex = referencedIndex + 1
+        }
+        return null
+    }
+
+    emitLlvmCompiledLibraryMetadata(graph:ModuleLoading.ModuleGraph, objectPath:string, version:string, targetName:string) -> i32 {
+        local libraryName:string? = null; local declarationIndex:i64 = 0
+        while declarationIndex < graph.entry!.program.declarations.length {
+            local declaration = graph.entry!.program.declarations[declarationIndex]
+            if declaration.kind == "Library" { if libraryName != null { System.writeError("valen: compiled library source must declare exactly one library\n"); return 65 }; libraryName = declaration.name }
+            declarationIndex = declarationIndex + 1
+        }
+        if libraryName == null { System.writeError("valen: compiled library source must declare exactly one library\n"); return 65 }
+        local object = Compiler.loadSource(objectPath)
+        if object == null { System.writeError("valen: LLVM compiled library object is missing\n"); return 74 }
+        local interfaceBuilder = new ModuleInterfaces.Builder(); local artifact = interfaceBuilder.create(graph.entry!)
+        local dependencies = new Array<LibraryMetadata.Dependency>(0); local importIndex:i64 = 0
+        while importIndex < graph.entry!.imports.length {
+            local imported = graph.entry!.imports[importIndex]
+            local importedArtifact = interfaceBuilder.create(imported.loadedModule)
+            dependencies.append(new LibraryMetadata.Dependency(imported.name, importedArtifact.interfaceFingerprint.toString()))
+            importIndex = importIndex + 1
+        }
+        local codec = new LibraryMetadata.Codec(targetName)
+        local metadata = codec.createFromContent(libraryName!, version, artifact.interfaceFingerprint.toString(), artifact.implementationFingerprint.toString(), object!.content, dependencies)
         if metadata == null { System.writeError("valen: "); System.writeError(codec.error); System.writeError("\n"); return 64 }
         if !codec.write(objectPath + ".vmeta", metadata!) { System.writeError("valen: "); System.writeError(codec.error); System.writeError("\n"); return 74 }
         if !self.writeAssembly(objectPath + ".vmi", artifact.summary) { return 74 }

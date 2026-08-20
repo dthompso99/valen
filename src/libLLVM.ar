@@ -120,6 +120,13 @@ library LLVM {{
                 externalIndex = externalIndex + 1
             }
 
+            local importedIndex:i64 = 0
+            while importedIndex < self.program.functions.length {
+                local imported = self.program.functions[importedIndex]
+                if self.isReachable(imported.name) && !self.emits(imported) { self.declareFunction(imported) }
+                importedIndex = importedIndex + 1
+            }
+
             local index:i64 = 0
             while index < self.program.functions.length {
                 local function = self.program.functions[index]
@@ -140,15 +147,30 @@ library LLVM {{
             self.writer.line(declaration + ")")
         }
 
+        declareFunction(function:Ir.Function) -> void {
+            local declaration = "declare " + self.llvmType(function.returnType) + " " + self.globalName(function.name) + "("
+            local index:i64 = 0
+            while index < function.parameters.length {
+                if index > 0 { declaration = declaration + ", " }
+                declaration = declaration + self.llvmType(function.parameters[index].typeName)
+                index = index + 1
+            }
+            self.writer.line(declaration + ")")
+        }
+
+        isReachable(name:string) -> bool {
+            local index:i64 = 0
+            while index < self.reachableFunctions.length { if self.reachableFunctions[index] == name { return true }; index = index + 1 }
+            return false
+        }
+
         emits(function:Ir.Function) -> bool {
             local index:i64 = 0
             while index < self.program.compiledModules.length {
                 if function.modulePath == self.program.compiledModules[index] { return false }
                 index = index + 1
             }
-            local reachableIndex:i64 = 0
-            while reachableIndex < self.reachableFunctions.length { if self.reachableFunctions[reachableIndex] == function.name { return true }; reachableIndex = reachableIndex + 1 }
-            return false
+            return self.isReachable(function.name)
         }
 
         prepareReachableFunctions() -> void {

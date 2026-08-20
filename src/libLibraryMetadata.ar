@@ -41,6 +41,15 @@ library LibraryMetadata {{
             return result
         }
 
+        createFromContent(name:string, version:string, interfaceFingerprint:string, implementationFingerprint:string, object:string, dependencies:Array<Dependency>) -> ref Artifact? {
+            if !self.validName(name) { self.error = "Invalid library name '" + name + "'"; return null }
+            if !self.validVersion(version) { self.error = "Invalid semantic version '" + version + "'"; return null }
+            local result = new Artifact(name, version, self.target)
+            result.interfaceFingerprint = interfaceFingerprint; result.implementationFingerprint = implementationFingerprint
+            result.objectFingerprint = self.hashString(object).toString(); result.dependencies = dependencies
+            return result
+        }
+
         serialize(metadata:Artifact) -> string {
             local output = new StringBuilder()
             output.append("VALEN-LIBRARY-1\nname="); output.append(metadata.name)

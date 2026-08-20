@@ -125,8 +125,10 @@ selects the system linker only for programs with foreign libraries. Generation 0
 The self-hosted compiler can stop at the same boundary with
 `valen --emit-object <source> -o <output.o>`.
 Select `--backend llvm` to have clang lower the module-scoped LLVM IR into an x86-64 relocatable
-object. LLVM compiled-library emission remains separate work because `.vmeta` libraries must also
-own their Valen GC, structural, array, and type-descriptor support symbols.
+object. Stateless libraries can also use `--backend llvm --library-version <version> --emit-library`
+to produce the same object, `.vmi`, and `.vmeta` contract as the native backend. Libraries that own
+objects or specialized arrays are rejected until LLVM can emit their Valen GC, structural, array,
+and type-descriptor support symbols.
 
 `-O0` retains mandatory IR cleanup and validation while disabling optional optimizations. `-O1` is the default and enables constant folding, dead/unreachable elimination, conservative linear-scan register allocation, immediate selection, and peepholes. Unsupported levels are rejected instead of silently aliasing another mode.
 
