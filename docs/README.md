@@ -17,6 +17,7 @@ If you are new to the project, read these in order:
 13. [Bounded fuzzing](fuzzing.md) — run deterministic tokenizer/parser campaigns and retain minimized regressions.
 14. [Core specification](specification/README.md) — read the normative rules and compatibility policy.
 15. [Build identity](build-identity.md) — inspect deterministic compiler inputs and output fingerprints.
+16. [Compiler diagnostics](compiler-diagnostics.md) — consume human-readable or newline-delimited JSON errors from the native compiler.
 
 For compiler contributors:
 

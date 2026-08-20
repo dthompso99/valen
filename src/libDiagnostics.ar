@@ -86,9 +86,70 @@ library Diagnostics {{
         return builder.build()
     }
 
-    write(bag:DiagnosticBag) -> void {
+    jsonString(value:string) -> string {
+        local builder = new StringBuilder()
+        builder.append("\"")
+        local index:i64 = 0
+        while index < value.graphemeLength {
+            local character = value.graphemeAt(index)
+            local codePoint = character.codePointAt(0)
+            if character == "\"" { builder.append("\\\"") }
+            else if character == "\\" { builder.append("\\\\") }
+            else if codePoint == 8 { builder.append("\\b") }
+            else if codePoint == 9 { builder.append("\\t") }
+            else if codePoint == 10 { builder.append("\\n") }
+            else if codePoint == 12 { builder.append("\\f") }
+            else if codePoint == 13 { builder.append("\\r") }
+            else if codePoint < 32 { builder.append("\\u00"); builder.append(hexDigit(codePoint / 16)); builder.append(hexDigit(codePoint - (codePoint / 16) * 16)) }
+            else { builder.append(character) }
+            index = index + 1
+        }
+        builder.append("\"")
+        return builder.build()
+    }
+
+    hexDigit(value:i64) -> string {
+        local digits = "0123456789abcdef"
+        return digits.slice(value, value + 1)
+    }
+
+    jsonSpan(span:Compiler.SourceSpan) -> string {
+        return "{\"path\":" + jsonString(span.source.path) + ",\"start\":" + span.start.toString() + ",\"end\":" + span.end.toString() + ",\"line\":" + span.line.toString() + ",\"column\":" + span.column.toString() + "}"
+    }
+
+    formatJson(diagnostic:Diagnostic) -> string {
+        local builder = new StringBuilder()
+        builder.append("{\"severity\":"); builder.append(jsonString(severityName(diagnostic.severity)))
+        builder.append(",\"message\":"); builder.append(jsonString(diagnostic.message))
+        builder.append(",\"span\":"); builder.append(jsonSpan(diagnostic.span))
+        builder.append(",\"labels\":[")
+        local labelIndex:i64 = 0
+        while labelIndex < diagnostic.labels.length {
+            if labelIndex > 0 { builder.append(",") }
+            local label = diagnostic.labels[labelIndex]
+            builder.append("{\"message\":"); builder.append(jsonString(label.message)); builder.append(",\"primary\":")
+            if label.primary { builder.append("true") } else { builder.append("false") }
+            builder.append(",\"span\":"); builder.append(jsonSpan(label.span)); builder.append("}")
+            labelIndex = labelIndex + 1
+        }
+        builder.append("],\"notes\":[")
+        local noteIndex:i64 = 0
+        while noteIndex < diagnostic.notes.length { if noteIndex > 0 { builder.append(",") }; builder.append(jsonString(diagnostic.notes[noteIndex])); noteIndex = noteIndex + 1 }
+        builder.append("],\"fixes\":[")
+        local fixIndex:i64 = 0
+        while fixIndex < diagnostic.fixes.length {
+            if fixIndex > 0 { builder.append(",") }
+            local fix = diagnostic.fixes[fixIndex]
+            builder.append("{\"message\":"); builder.append(jsonString(fix.message)); builder.append(",\"replacement\":"); builder.append(jsonString(fix.replacement)); builder.append(",\"span\":"); builder.append(jsonSpan(fix.span)); builder.append("}")
+            fixIndex = fixIndex + 1
+        }
+        builder.append("]}")
+        return builder.build()
+    }
+
+    write(bag:DiagnosticBag, outputFormat:string="human") -> void {
         for diagnostic in bag.diagnostics {
-            System.writeError(format(diagnostic))
+            if outputFormat == "json" { System.writeError(formatJson(diagnostic)) } else { System.writeError(format(diagnostic)) }
             System.writeError("\n")
         }
     }

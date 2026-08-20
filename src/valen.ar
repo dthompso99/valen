@@ -30,6 +30,7 @@ entry {{
         local linkerMode:string = "auto"
         local backendName:string = "native"
         local runtimeMetrics:bool = false
+        local diagnosticFormat:string = "human"
         local targetName = self.hostTarget()
         local environmentTarget = System.environmentVariable("VALEN_TARGET")
         if environmentTarget != null { targetName = environmentTarget! }
@@ -60,6 +61,11 @@ entry {{
                 libraryVersion = arguments[argumentIndex + 1]; argumentIndex = argumentIndex + 1
             } else if argument == "--runtime-metrics" {
                 runtimeMetrics = true
+            } else if argument == "--diagnostic-format" {
+                if argumentIndex + 1 >= arguments.length { System.writeError("valen: --diagnostic-format requires human or json\n"); return 64 }
+                diagnosticFormat = arguments[argumentIndex + 1]
+                if diagnosticFormat != "human" && diagnosticFormat != "json" { System.writeError("valen: unsupported diagnostic format '${diagnosticFormat}'\n"); return 64 }
+                argumentIndex = argumentIndex + 1
             } else if argument == "-O0" {
                 optimizationLevel = 0
             } else if argument == "-O1" {
@@ -155,7 +161,7 @@ entry {{
         local loader = new ModuleLoading.ModuleLoader(sourceRoot, libraryPath, sysroot)
         local graph = loader.load(sourcePath!)
         if graph.diagnostics.hasErrors() {
-            Diagnostics.write(graph.diagnostics)
+            Diagnostics.write(graph.diagnostics, diagnosticFormat)
             return 65
         }
         if !self.validateCompiledArtifacts(graph, targetName) { return 65 }
@@ -178,7 +184,7 @@ entry {{
         local analyzer = new Semantics.Analyzer(graph)
         local analysis = analyzer.analyze()
         if !analysis.success() {
-            Diagnostics.write(analysis.diagnostics)
+            Diagnostics.write(analysis.diagnostics, diagnosticFormat)
             return 65
         }
         if checkOnly { return 0 }
@@ -505,6 +511,7 @@ entry {{
         System.write("  backend: --backend native (default) or llvm (x86_64-linux)\n")
         System.write("  linker: --linker auto (default), native, or system\n")
         System.write("  instrumentation: --runtime-metrics\n")
+        System.write("  diagnostics: --diagnostic-format human (default) or json (newline-delimited JSON)\n")
         System.write("  valen <source-file>\n")
         System.write("  valen <source-file> -o <executable>\n")
         System.write("  valen --check <source-file>\n")

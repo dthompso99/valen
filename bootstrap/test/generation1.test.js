@@ -460,6 +460,33 @@ test('generation 1 passes the native compiler conformance suite', async t => {
         assert.equal(fs.existsSync(`${generation2Path}.o`), true, 'generation 2 was not built from a native object');
         assert.equal(fs.existsSync(`${generation2Path}.s`), false, 'generation 2 unexpectedly required an assembler');
 
+        await t.test('native compilers emit deterministic newline-delimited JSON diagnostics', () => {
+            const sourcePath = path.join(projectRoot, invalidPrograms.find(fixture => fixture.name === 'multiple semantic errors').source);
+            const generation1 = spawnSync(compilerPath, ['--diagnostic-format', 'json', '--check', sourcePath], {
+                encoding: 'utf8', env: environment, cwd: projectRoot
+            });
+            const generation2 = spawnSync(generation2Path, ['--diagnostic-format', 'json', '--check', sourcePath], {
+                encoding: 'utf8', env: environment, cwd: projectRoot
+            });
+            assert.equal(generation1.status, 65, generation1.stderr || generation1.stdout);
+            assert.equal(generation2.status, 65, generation2.stderr || generation2.stdout);
+            assert.equal(generation2.stderr, generation1.stderr);
+            const diagnostics = generation1.stderr.trim().split('\n').map(line => JSON.parse(line));
+            assert.ok(diagnostics.length > 1);
+            for (const diagnostic of diagnostics) {
+                assert.equal(diagnostic.severity, 'error');
+                assert.equal(typeof diagnostic.message, 'string');
+                assert.equal(typeof diagnostic.span.path, 'string');
+                assert.equal(typeof diagnostic.span.start, 'number');
+                assert.equal(typeof diagnostic.span.end, 'number');
+                assert.equal(typeof diagnostic.span.line, 'number');
+                assert.equal(typeof diagnostic.span.column, 'number');
+                assert.ok(Array.isArray(diagnostic.labels));
+                assert.ok(Array.isArray(diagnostic.notes));
+                assert.ok(Array.isArray(diagnostic.fixes));
+            }
+        });
+
         await t.test('generation 1 and 2 produce equivalent normalized IR', async t => {
             for (const fixture of validPrograms) {
                 await t.test(fixture.name, () => {
