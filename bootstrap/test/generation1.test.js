@@ -195,7 +195,11 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             assert.match(unsupported.stderr, /supported targets: x86_64-linux, aarch64-linux/);
         });
 
-        await t.test('LLVM backend emits relocatable objects', () => {
+        await t.test('LLVM backend emits relocatable objects', t => {
+            if (!fs.existsSync('/usr/bin/clang')) {
+                t.skip('LLVM object emission requires /usr/bin/clang');
+                return;
+            }
             const source = path.join(projectRoot, 'bootstrap/test/fixtures/runtime-foundation.ar');
             const object = path.join(directory, 'llvm-output.o');
             const emitted = spawnSync(compilerPath,
