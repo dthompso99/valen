@@ -135,8 +135,8 @@ library LibraryMetadata {{
         starts(value:string, prefix:string) -> bool { return value.length >= prefix.length && value.slice(0, prefix.length) == prefix }
         alpha(value:u8) -> bool { return value >= 65 && value <= 90 || value >= 97 && value <= 122 }
         digit(value:u8) -> bool { return value >= 48 && value <= 57 }
-        hashBytes(input:Array<u8>) -> i64 { local value:i64 = 1469598103934665603; local index:i64 = 0; while index < input.length { value = value * 1099511628211 + (input[index] as i64); index = index + 1 }; return value }
-        hashString(input:string) -> i64 { local value:i64 = 1469598103934665603; local index:i64 = 0; while index < input.length { value = value * 1099511628211 + (input[index] as i64); index = index + 1 }; return value }
+        hashBytes(input:Array<u8>) -> i64 { local value:i64 = 1469598103934665603; local index:i64 = 0; while index < input.length { value = (value ^ input[index] as i64) * 1099511628211; index = index + 1 }; return value }
+        hashString(input:string) -> i64 { local value:i64 = 1469598103934665603; local index:i64 = 0; while index < input.length { value = (value ^ input[index] as i64) * 1099511628211; index = index + 1 }; return value }
         findByte(input:string, start:i64, value:u8) -> i64 { local index = start; while index < input.length { if input[index] == value { return index }; index = index + 1 }; return -1 }
     }}
 }}

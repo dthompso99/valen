@@ -8,6 +8,7 @@ import test from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {BuildIdentity} from '../build-identity.js';
 import {Compiler} from '../compiler.js';
+import {LibraryMetadata} from '../library-metadata.js';
 import {compileOnlyPrograms, expectedFailures, invalidPrograms, targetFailures, validPrograms} from './conformance-manifest.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -252,6 +253,42 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                 {encoding: 'utf8', env: environment, cwd: projectRoot});
             assert.equal(invalidVersion.status, 64);
             assert.match(invalidVersion.stderr, /Invalid semantic version/);
+        });
+
+        await t.test('native frozen projects verify exact dependency artifacts', () => {
+            const source = path.join(directory, 'Support.ar');
+            const object = path.join(directory, 'Support.o');
+            fs.writeFileSync(source, 'library Support {{ value() -> i64 { return 7 } }}\n');
+            const emitted = spawnSync(compilerPath,
+                ['--source-root', directory, '--library-version', '1.0.0', '--emit-library', source, '-o', object],
+                {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(emitted.status, 0, emitted.stderr);
+            const metadata = LibraryMetadata.parse(fs.readFileSync(`${object}.vmeta`, 'utf8'));
+            const manifestPath = path.join(directory, 'artifact-project.json');
+            const lockPath = path.join(directory, 'artifact-project.lock');
+            fs.writeFileSync(manifestPath, JSON.stringify({format: 1, package: {name: 'artifact-app', version: '0.1.0'},
+                executable: {source: 'main.ar'}, dependencies: [
+                    {name: 'Support', version: '1.0.0', source: 'Support.ar', metadata: 'Support.o.vmeta'}
+                ]}));
+            fs.writeFileSync(lockPath, JSON.stringify({format: 1, package: {name: 'artifact-app', version: '0.1.0'},
+                target: metadata.target, dependencies: [{name: metadata.name, version: metadata.version,
+                    source: 'Support.ar', metadata: 'Support.o.vmeta', compiler: metadata.compiler,
+                    target: metadata.target, abi: metadata.abi, interfaceFingerprint: metadata.interfaceFingerprint,
+                    implementationFingerprint: metadata.implementationFingerprint, objectFingerprint: metadata.objectFingerprint}]}));
+            const verify = () => spawnSync(compilerPath,
+                ['--validate-project', '--locked', manifestPath, lockPath], {encoding: 'utf8', env: environment, cwd: projectRoot});
+            const verified = verify();
+            assert.equal(verified.status, 0, verified.stderr);
+            const objectBytes = fs.readFileSync(object);
+            fs.writeFileSync(object, Buffer.concat([objectBytes, Buffer.from([0])]));
+            const tamperedObject = verify();
+            assert.equal(tamperedObject.status, 65);
+            assert.match(tamperedObject.stderr, /object fingerprint does not match/);
+            fs.writeFileSync(object, objectBytes);
+            fs.appendFileSync(`${object}.vmi`, 'tampered');
+            const tamperedInterface = verify();
+            assert.equal(tamperedInterface.status, 65);
+            assert.match(tamperedInterface.stderr, /interface fingerprint does not match/);
         });
 
         await t.test('native compiler cache hits, invalidates, and preserves foreign libraries', () => {

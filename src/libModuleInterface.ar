@@ -149,7 +149,7 @@ library ModuleInterfaces {{
         hash(input:string) -> i64 {
             local value:i64 = 1469598103934665603
             local index:i64 = 0
-            while index < input.length { value = value * 1099511628211 + (input[index] as i64); index = index + 1 }
+            while index < input.length { value = (value ^ input[index] as i64) * 1099511628211; index = index + 1 }
             return value
         }
     }}

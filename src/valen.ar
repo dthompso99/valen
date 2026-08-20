@@ -413,9 +413,39 @@ entry {{
             }
             local stale = (new ProjectManifest.Codec()).verify(manifest, locked.lock!, selectedTarget)
             if stale != null { System.writeError("valen: "); System.writeError(stale!); System.writeError("\n"); return 65 }
+            local artifactError = self.validateLockedArtifacts(locked.lock!, self.directoryName(path))
+            if artifactError != null { System.writeError("valen: "); System.writeError(artifactError!); System.writeError("\n"); return 65 }
         }
         System.write(manifest.name); System.write(" "); System.write(manifest.version); System.write(" "); System.write(manifest.source); System.write("\n")
         return 0
+    }
+
+    validateLockedArtifacts(lock:ProjectManifest.Lock, root:string) -> string? {
+        local index:i64 = 0
+        while index < lock.dependencies.length {
+            local dependency = lock.dependencies[index]
+            if dependency.metadata.length < 7 || dependency.metadata.slice(dependency.metadata.length - 6, 6) != ".vmeta" { return "project dependency '" + dependency.name + "' metadata path must end in .vmeta" }
+            local metadataPath = root + "/" + dependency.metadata
+            local objectPath = metadataPath.slice(0, metadataPath.length - 6)
+            local interfacePath = objectPath + ".vmi"
+            local metadataSource = Compiler.loadSource(metadataPath)
+            local objectSource = Compiler.loadSource(objectPath)
+            local interfaceSource = Compiler.loadSource(interfacePath)
+            if metadataSource == null || objectSource == null || interfaceSource == null { return "project dependency '" + dependency.name + "' locked artifacts are missing" }
+            local codec = new LibraryMetadata.Codec(lock.target)
+            local metadata = codec.parse(metadataSource!.content)
+            if metadata == null { return "invalid project dependency '" + dependency.name + "' metadata: " + codec.error }
+            if metadata!.name != dependency.name || metadata!.version != dependency.version || metadata!.compiler != dependency.compiler || metadata!.target != dependency.target || metadata!.abi != dependency.abi || metadata!.interfaceFingerprint != dependency.interfaceFingerprint || metadata!.implementationFingerprint != dependency.implementationFingerprint || metadata!.objectFingerprint != dependency.objectFingerprint { return "project dependency '" + dependency.name + "' metadata does not match the lockfile" }
+            if codec.hashString(objectSource!.content).toString() != dependency.objectFingerprint { return "project dependency '" + dependency.name + "' object fingerprint does not match the lockfile" }
+            if codec.hashString(interfaceSource!.content).toString() != dependency.interfaceFingerprint { return "project dependency '" + dependency.name + "' interface fingerprint does not match the lockfile" }
+            if dependency.source != null {
+                local implementationSource = Compiler.loadSource(root + "/" + dependency.source!)
+                if implementationSource == null { return "project dependency '" + dependency.name + "' source is missing" }
+                if codec.hashString(implementationSource!.content).toString() != dependency.implementationFingerprint { return "project dependency '" + dependency.name + "' implementation fingerprint does not match the lockfile" }
+            }
+            index = index + 1
+        }
+        return null
     }
 
     link(assembly:string, outputPath:string, libraries:Array<string>, linkerMode:string, ir:Ir.Program?=null, graph:ModuleLoading.ModuleGraph?=null, optimizationLevel:i64=1, cache:CompilerCache.Cache?=null, analysis:Semantics.Analysis?=null, targetName:string="x86_64-linux", runtimeMetrics:bool=false) -> i64 {
