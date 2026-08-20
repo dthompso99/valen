@@ -10,6 +10,7 @@ import {SemanticAnalyzer} from '../semantic.js';
 import {IrGenerator} from '../ir.js';
 import {IrCanonicalizer, IrValidationError, IrValidator} from '../ir-validation.js';
 import {X86_64Backend} from '../x86-64.js';
+import {AArch64Backend} from '../aarch64.js';
 import {formatDiagnostic} from '../diagnostics.js';
 import {ModuleLoader} from '../module-loader.js';
 
@@ -1389,6 +1390,32 @@ test('IR validation accepts complete loop values and rejects mismatched incoming
     const invalid = structuredClone(program);
     invalid.functions[0].blocks[1].instructions[0].alternateTarget = 'exit';
     assert.throws(() => new IrValidator().validate(invalid), /incoming blocks do not match block predecessors/);
+});
+
+test('native backends lower loop values as staged parallel copies', () => {
+    const parameter = (name, type) => ({kind: 'parameter', name, type});
+    const temporary = (name, type) => ({kind: 'temporary', name, type});
+    const first = temporary('%first', 'i64');
+    const second = temporary('%second', 'i64');
+    const fn = {name: 'entry.__', owner: 'entry', parameters: [{name: 'a', type: 'i64'}, {name: 'b', type: 'i64'}, {name: 'condition', type: 'bool'}], returnType: 'i64', blocks: [
+        {label: 'entry', instructions: [{op: 'jump', target: 'header'}]},
+        {label: 'header', instructions: [
+            {op: 'loop_value', result: '%first', type: 'i64', first: parameter('a', 'i64'), second, target: 'entry', alternateTarget: 'body'},
+            {op: 'loop_value', result: '%second', type: 'i64', first: parameter('b', 'i64'), second: first, target: 'entry', alternateTarget: 'body'},
+            {op: 'branch', condition: parameter('condition', 'bool'), thenTarget: 'body', elseTarget: 'exit'}
+        ]},
+        {label: 'body', instructions: [{op: 'jump', target: 'header'}]},
+        {label: 'exit', instructions: [{op: 'return', value: first}]}
+    ]};
+    const create = () => ({types: [{name: 'entry', fields: [], virtualMethods: [], contracts: []}], functions: [structuredClone(fn)], externals: [], entry: fn.name});
+
+    const x86 = new X86_64Backend().generate(create(), {optimizationLevel: 0});
+    const x86Body = x86.slice(x86.indexOf('__body:'), x86.indexOf('__exit:'));
+    assert.match(x86Body, /mov rax, QWORD PTR \[rbp-\d+\]\n    mov QWORD PTR \[rbp-\d+\], rax\n    mov rax, QWORD PTR \[rbp-\d+\]\n    mov QWORD PTR \[rbp-\d+\], rax\n    mov rax, QWORD PTR \[rbp-\d+\]\n    mov QWORD PTR \[rbp-\d+\], rax\n    mov rax, QWORD PTR \[rbp-\d+\]\n    mov QWORD PTR \[rbp-\d+\], rax\n    jmp /);
+
+    const arm = new AArch64Backend().generate(create(), {optimizationLevel: 0});
+    const armBody = arm;
+    assert.match(armBody, /ldr x9, \[sp, #\d+\]\n    str x9, \[sp, #\d+\]\n    ldr x9, \[sp, #\d+\]\n    str x9, \[sp, #\d+\]\n    ldr x9, \[sp, #\d+\]\n    str x9, \[sp, #\d+\]\n    ldr x9, \[sp, #\d+\]\n    str x9, \[sp, #\d+\]\n    b /);
 });
 
 test('IR optimization propagates block-local primitive values without crossing control flow', () => {

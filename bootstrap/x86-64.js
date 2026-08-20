@@ -382,6 +382,8 @@ export class X86_64Backend {
                 reserve(`name:${instruction.name}`, instruction.type ?? instruction.value?.type);
             }
         }
+        const loopScratchCount = Math.max(0, ...fn.blocks.map(block => block.instructions.filter(item => item.op === 'loop_value').length));
+        for (let index = 0; index < loopScratchCount; index++) reserve(`loop-scratch:${index}`);
         for (const register of new Set(this.registers.values())) reserve(`save:${register}`);
 
         const roots = [...slotTypes].filter(([, type]) => this.isManagedReferenceType(type));
@@ -430,6 +432,7 @@ export class X86_64Backend {
                     instruction.op === 'branch' && (blockOrder.get(instruction.thenTarget) <= blockIndex || blockOrder.get(instruction.elseTarget) <= blockIndex)) {
                     lines.push('    call valen_gc_safepoint');
                 }
+                if (instruction.op === 'jump') lines.push(...this.loopValueCopies(block.label, instruction.target));
                 lines.push(...this.generateInstruction(instruction, endLabel));
             }
         }
@@ -445,6 +448,19 @@ export class X86_64Backend {
         for (const [key] of roots) lines.push(`    mov rdi, QWORD PTR [rbx-${this.slots.get(key)}]`, '    call valen_gc_mark');
         lines.push('    pop rbx', '    ret', '');
         return this.optimize ? this.peephole(lines) : lines;
+    }
+
+    loopValueCopies(source, target) {
+        const values = this.fn.blocks.find(block => block.label === target)?.instructions.filter(item => item.op === 'loop_value') ?? [];
+        const lines = [];
+        for (let index = 0; index < values.length; index++) {
+            const item = values[index];
+            const incoming = source === item.target ? item.first : source === item.alternateTarget ? item.second : null;
+            if (!incoming) continue;
+            lines.push(...this.load(incoming, 'rax'), `    mov ${this.slot(`loop-scratch:${index}`)}, rax`);
+        }
+        for (let index = 0; index < values.length; index++) lines.push(`    mov rax, ${this.slot(`loop-scratch:${index}`)}`, `    mov ${this.temp(values[index].result)}, rax`);
+        return lines;
     }
 
     selectImmediateConstants(fn) {
@@ -809,6 +825,8 @@ export class X86_64Backend {
                 lines.push(...this.load(instruction.value, 'rax'));
                 lines.push(...this.convertNumber(instruction.value.type, instruction.type));
                 lines.push(`    mov ${this.temp(instruction.result)}, rax`);
+                break;
+            case 'loop_value':
                 break;
             case 'optional_box':
                 lines.push('    mov edi, 24', '    xor esi, esi', '    xor edx, edx', '    xor ecx, ecx', '    call valen_gc_alloc',

@@ -507,6 +507,10 @@ export class IrValidator {
                     else {
                         const incoming = predecessors.get(block.label) ?? [];
                         if (instruction.target === instruction.alternateTarget || incoming.length !== 2 || !incoming.includes(instruction.target) || !incoming.includes(instruction.alternateTarget)) errors.push(`${where} incoming blocks do not match block predecessors`);
+                        for (const label of [instruction.target, instruction.alternateTarget]) {
+                            const predecessor = blocks.get(label)?.instructions.at(-1);
+                            if (predecessor?.op !== 'jump' || predecessor.target !== block.label) errors.push(`${where} requires explicit single-successor incoming edges`);
+                        }
                         if (instruction.first.type !== instruction.type || instruction.second.type !== instruction.type) errors.push(`${where} incoming value types do not match result type '${instruction.type}'`);
                         if (!integerTypes.has(instruction.type) && !['u64', 'f32', 'f64'].includes(instruction.type)) errors.push(`${where} requires a primitive result type`);
                     }

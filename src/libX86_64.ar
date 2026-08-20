@@ -549,6 +549,11 @@ library X86_64 {{
                 }
                 blockIndex = blockIndex + 1
             }
+            local loopScratchCount:i64 = 0
+            blockIndex = 0
+            while blockIndex < function.blocks.length { local count:i64 = 0; local index:i64 = 0; while index < function.blocks[blockIndex].instructions.length { if function.blocks[blockIndex].instructions[index].op == "loop_value" { count = count + 1 }; index = index + 1 }; if count > loopScratchCount { loopScratchCount = count }; blockIndex = blockIndex + 1 }
+            local loopScratchIndex:i64 = 0
+            while loopScratchIndex < loopScratchCount { self.reserve("loop-scratch:" + loopScratchIndex.toString(), ""); loopScratchIndex = loopScratchIndex + 1 }
             local registerIndex:i64 = 0
             while registerIndex < 5 {
                 local registerName = self.allocationRegister(registerIndex)
@@ -661,7 +666,7 @@ library X86_64 {{
                             self.writer.line(done + ":")
                         }
                     }
-                    if !fused { self.generateInstruction(instruction, endLabel); index = index + 1 }
+                    if !fused { if instruction.op == "jump" { self.loopValueCopies(function, block.label, instruction.target!) }; self.generateInstruction(instruction, endLabel); index = index + 1 }
                 }
                 blockIndex = blockIndex + 1
             }
@@ -692,8 +697,30 @@ library X86_64 {{
             self.writer.line("")
         }
 
+        loopValueCopies(function:Ir.Function, source:string, target:string) -> void {
+            local blockIndex:i64 = 0
+            while blockIndex < function.blocks.length && function.blocks[blockIndex].label != target { blockIndex = blockIndex + 1 }
+            if blockIndex >= function.blocks.length { return }
+            local valueIndex:i64 = 0
+            local instructionIndex:i64 = 0
+            while instructionIndex < function.blocks[blockIndex].instructions.length {
+                local instruction = function.blocks[blockIndex].instructions[instructionIndex]
+                if instruction.op == "loop_value" {
+                    local incoming:Ir.Value? = null
+                    if instruction.target! == source { incoming = instruction.first }
+                    if instruction.alternateTarget! == source { incoming = instruction.second }
+                    if incoming != null { self.load(incoming!, "rax"); self.writer.line("    mov " + self.slot("loop-scratch:" + valueIndex.toString()) + ", rax") }
+                    valueIndex = valueIndex + 1
+                }
+                instructionIndex = instructionIndex + 1
+            }
+            valueIndex = 0; instructionIndex = 0
+            while instructionIndex < function.blocks[blockIndex].instructions.length { local instruction = function.blocks[blockIndex].instructions[instructionIndex]; if instruction.op == "loop_value" { self.writer.line("    mov rax, " + self.slot("loop-scratch:" + valueIndex.toString())); self.storeResult(instruction, "rax"); valueIndex = valueIndex + 1 }; instructionIndex = instructionIndex + 1 }
+        }
+
         generateInstruction(instruction:Ir.Instruction, endLabel:string) -> void {
             local op = instruction.op
+            if op == "loop_value" { return }
             if op == "constant" {
                 if self.findImmediate(instruction.result!.name) != null { return }
                 self.writer.line("    mov rax, " + instruction.text!)

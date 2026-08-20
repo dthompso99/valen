@@ -101,6 +101,8 @@ export class AArch64Backend {
                 reserve(`name:${instruction.name}`, instruction.type ?? instruction.value?.type);
             }
         }
+        const loopScratchCount = Math.max(0, ...fn.blocks.map(block => block.instructions.filter(item => item.op === 'loop_value').length));
+        for (let index = 0; index < loopScratchCount; index++) reserve(`loop-scratch:${index}`);
         const rootOffset = this.align(slotOffset, 16);
         const frameSize = this.align(rootOffset + 24, 16);
         if (frameSize > 4064) throw new Error(`aarch64-linux bootstrap backend function '${fn.displayName}' needs an unsupported large stack frame`);
@@ -138,6 +140,7 @@ export class AArch64Backend {
                 if (this.threading && (instruction.op === 'jump' && blockOrder.get(instruction.target) <= blockIndex ||
                     instruction.op === 'branch' && (blockOrder.get(instruction.thenTarget) <= blockIndex ||
                         blockOrder.get(instruction.elseTarget) <= blockIndex))) lines.push('    bl valen_gc_safepoint');
+                if (instruction.op === 'jump') lines.push(...this.loopValueCopies(block.label, instruction.target));
                 lines.push(...this.instruction(instruction, end));
             }
         }
@@ -156,6 +159,19 @@ export class AArch64Backend {
             '    bl valen_gc_mark');
         lines.push('    ldr x30, [sp, #24]', '    add sp, sp, #32', '    ret',
             `.size ${rootTrace}, .-${rootTrace}`, '');
+        return lines;
+    }
+
+    loopValueCopies(source, target) {
+        const values = this.fn.blocks.find(block => block.label === target)?.instructions.filter(item => item.op === 'loop_value') ?? [];
+        const lines = [];
+        for (let index = 0; index < values.length; index++) {
+            const item = values[index];
+            const incoming = source === item.target ? item.first : source === item.alternateTarget ? item.second : null;
+            if (!incoming) continue;
+            lines.push(...this.load(incoming, 'x9'), `    str x9, [sp, #${this.slots.get(`loop-scratch:${index}`)}]`);
+        }
+        for (let index = 0; index < values.length; index++) lines.push(`    ldr x9, [sp, #${this.slots.get(`loop-scratch:${index}`)}]`, `    str x9, ${this.temp(values[index].result)}`);
         return lines;
     }
 
@@ -383,6 +399,8 @@ export class AArch64Backend {
                     `    str x9, ${this.temp(instruction.result)}`];
             case 'convert':
                 return this.convert(instruction);
+            case 'loop_value':
+                return [];
             case 'jump':
                 return [`    b ${this.blockLabel(instruction.target)}`];
             case 'branch':

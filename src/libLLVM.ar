@@ -657,6 +657,10 @@ library LLVM {{
                 self.emittedValues.append(instruction.result!.name)
             }
             local op = instruction.op
+            if op == "loop_value" {
+                self.writer.line("    " + self.value(instruction.result!) + " = phi " + self.llvmType(instruction.typeName!) + " [ " + self.phiValue(function, instruction.first!, instruction.target!) + ", %" + self.labelReference(instruction.target!) + " ], [ " + self.phiValue(function, instruction.second!, instruction.alternateTarget!) + ", %" + self.labelReference(instruction.alternateTarget!) + " ]")
+                return
+            }
             if op == "constant" { self.constant(instruction); return }
             if op == "float_constant" { self.floatConstant(instruction); return }
             if op == "string_constant" { self.stringConstant(instruction); return }
@@ -1420,6 +1424,11 @@ library LLVM {{
         }
         derived(value:Ir.Value, suffix:string) -> string { local index = self.nextInternal; self.nextInternal = self.nextInternal + 1; return "%\"llvm." + suffix + "." + value.name + "." + index.toString() + "\"" }
         localTemporary(value:Ir.Value) -> string { return "%\"temp." + self.currentBlock + "." + value.name + "\"" }
+        phiValue(function:Ir.Function, value:Ir.Value, predecessor:string) -> string {
+            if value.kind == "parameter" { return self.parameterName(value.name) }
+            if value.name.length > 0 { if value.name[0] == 37 { local blockIndex:i64 = 0; while blockIndex < function.blocks.length { if self.definitionBlock(function, value.name, function.blocks[blockIndex].label) { return "%\"temp." + function.blocks[blockIndex].label + "." + value.name + "\"" }; blockIndex = blockIndex + 1 } } }
+            return self.value(value)
+        }
         spillName(name:string) -> string { return "%\"spill." + name + "\"" }
 
         definitionBlock(function:Ir.Function, name:string, blockName:string) -> bool {

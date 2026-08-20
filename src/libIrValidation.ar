@@ -800,6 +800,7 @@ library IrValidation {{
             if afterOrdinary { errors.append(prefix + " must appear before ordinary instructions") }
             if instruction.result == null || instruction.first == null || instruction.second == null || instruction.target == null || instruction.alternateTarget == null { errors.append(prefix + " is incomplete"); return }
             if instruction.target! == instruction.alternateTarget! || self.predecessorCount(functionNode, block.label) != 2 || !self.blockTargets(functionNode, instruction.target!, block.label) || !self.blockTargets(functionNode, instruction.alternateTarget!, block.label) { errors.append(prefix + " incoming blocks do not match block predecessors") }
+            if !self.singleSuccessorTarget(functionNode, instruction.target!, block.label) || !self.singleSuccessorTarget(functionNode, instruction.alternateTarget!, block.label) { errors.append(prefix + " requires explicit single-successor incoming edges") }
             if instruction.first!.typeName != instruction.result!.typeName || instruction.second!.typeName != instruction.result!.typeName { errors.append(prefix + " incoming value types do not match result type") }
             if !self.scalarPrimitive(instruction.result!.typeName) { errors.append(prefix + " requires a primitive result type") }
         }
@@ -811,6 +812,12 @@ library IrValidation {{
             if end.op == "jump" { return end.target! == target }
             if end.op == "branch" { return end.target! == target || end.alternateTarget! == target }
             return false
+        }
+        singleSuccessorTarget(functionNode:Ir.Function, source:string, target:string) -> bool {
+            local block = self.findBlock(functionNode, source)
+            if block == null || block!.instructions.length == 0 { return false }
+            local end = block!.instructions[block!.instructions.length - 1]
+            return end.op == "jump" && end.target! == target
         }
 
         validateInstruction(program:Ir.Program, functionNode:Ir.Function, instruction:Ir.Instruction, errors:Array<string>) -> void {
