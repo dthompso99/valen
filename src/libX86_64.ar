@@ -3641,7 +3641,7 @@ library X86_64 {{
                 while instructionIndex < function.blocks[blockIndex].instructions.length {
                     local instruction = function.blocks[blockIndex].instructions[instructionIndex]
                     if instruction.result != null {
-                        if self.findImmediate(instruction.result!.name) == null && !self.isManagedReferenceType(instruction.result!.typeName) && !self.loopCarriedTemporary(function, instruction.result!.name) { local allocation = new Allocation("temp:" + instruction.result!.name, position); self.allocations.append(allocation); self.allocationIndex.set(allocation.name, self.allocations.length - 1) }
+                        if self.findImmediate(instruction.result!.name) == null && !self.isManagedReferenceType(instruction.result!.typeName) && !self.loopBackedgeTemporary(function, instruction.result!.name) { local allocation = new Allocation("temp:" + instruction.result!.name, position); self.allocations.append(allocation); self.allocationIndex.set(allocation.name, self.allocations.length - 1) }
                     }
                     self.recordAllocationUse(instruction.first, position)
                     self.recordAllocationUse(instruction.second, position)
@@ -3688,7 +3688,7 @@ library X86_64 {{
             }
         }
 
-        loopCarriedTemporary(function:Ir.Function, name:string) -> bool { local blockIndex:i64 = 0; while blockIndex < function.blocks.length { local instructionIndex:i64 = 0; while instructionIndex < function.blocks[blockIndex].instructions.length { local instruction = function.blocks[blockIndex].instructions[instructionIndex]; if instruction.op == "loop_value" { if instruction.result != null && instruction.result!.name == name { return true }; if instruction.second != null && instruction.second!.kind == "temporary" && instruction.second!.name == name { return true } }; instructionIndex = instructionIndex + 1 }; blockIndex = blockIndex + 1 }; return false }
+        loopBackedgeTemporary(function:Ir.Function, name:string) -> bool { local blockIndex:i64 = 0; while blockIndex < function.blocks.length { local instructionIndex:i64 = 0; while instructionIndex < function.blocks[blockIndex].instructions.length { local instruction = function.blocks[blockIndex].instructions[instructionIndex]; if instruction.op == "loop_value" && instruction.second != null && instruction.second!.kind == "temporary" && instruction.second!.name == name { return true }; instructionIndex = instructionIndex + 1 }; blockIndex = blockIndex + 1 }; return false }
 
         selectImmediateConstants(function:Ir.Function) -> void {
             self.immediates = new Array<Immediate>(0)

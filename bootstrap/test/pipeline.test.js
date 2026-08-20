@@ -1404,7 +1404,7 @@ test('native backends lower loop values as staged parallel copies', () => {
             {op: 'loop_value', result: '%second', type: 'i64', first: parameter('b', 'i64'), second: first, target: 'entry', alternateTarget: 'body'},
             {op: 'branch', condition: parameter('condition', 'bool'), thenTarget: 'body', elseTarget: 'exit'}
         ]},
-        {label: 'body', instructions: [{op: 'jump', target: 'header'}]},
+        {label: 'body', instructions: [{op: 'constant', result: '%keep_body', type: 'i64', value: '0'}, {op: 'jump', target: 'header'}]},
         {label: 'exit', instructions: [{op: 'return', value: first}]}
     ]};
     const create = () => ({types: [{name: 'entry', fields: [], virtualMethods: [], contracts: []}], functions: [structuredClone(fn)], externals: [], entry: fn.name});
@@ -1412,7 +1412,6 @@ test('native backends lower loop values as staged parallel copies', () => {
     const x86 = new X86_64Backend().generate(create(), {optimizationLevel: 0});
     const x86Body = x86.slice(x86.indexOf('__body:'), x86.indexOf('__exit:'));
     assert.match(x86Body, /mov rax, QWORD PTR \[rbp-\d+\]\n    mov QWORD PTR \[rbp-\d+\], rax\n    mov rax, QWORD PTR \[rbp-\d+\]\n    mov QWORD PTR \[rbp-\d+\], rax\n    mov rax, QWORD PTR \[rbp-\d+\]\n    mov QWORD PTR \[rbp-\d+\], rax\n    mov rax, QWORD PTR \[rbp-\d+\]\n    mov QWORD PTR \[rbp-\d+\], rax\n    jmp /);
-
     const arm = new AArch64Backend().generate(create(), {optimizationLevel: 0});
     const armBody = arm;
     assert.match(armBody, /ldr x9, \[sp, #\d+\]\n    str x9, \[sp, #\d+\]\n    ldr x9, \[sp, #\d+\]\n    str x9, \[sp, #\d+\]\n    ldr x9, \[sp, #\d+\]\n    str x9, \[sp, #\d+\]\n    ldr x9, \[sp, #\d+\]\n    str x9, \[sp, #\d+\]\n    b /);
@@ -1455,6 +1454,9 @@ test('IR optimization promotes canonical primitive loop locals', () => {
     assert.equal(loop.alternateTarget, 'body');
     assert.ok(!optimized.fn.blocks.flatMap(block => block.instructions).some(item => ['declare_local', 'load_local', 'store_local'].includes(item.op) && item.name === 'index'));
     assert.doesNotThrow(() => new IrValidator().validate(optimized.program));
+    const optimizedBackend = new X86_64Backend();
+    optimizedBackend.generate(structuredClone(optimized.program));
+    assert.ok(optimizedBackend.registers.has(loop.result));
 
     const unoptimized = create();
     new IrCanonicalizer().run(unoptimized.program, {optimize: false});

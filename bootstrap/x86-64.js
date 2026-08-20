@@ -367,8 +367,8 @@ export class X86_64Backend {
         this.fn = fn;
         this.slots = new Map();
         this.immediates = this.optimize ? this.selectImmediateConstants(fn) : new Map();
-        this.loopCarriedTemporaries = new Set(fn.blocks.flatMap(block => block.instructions.filter(item => item.op === 'loop_value').flatMap(item =>
-            [item.result, item.second?.kind === 'temporary' ? item.second.name : null])).filter(Boolean));
+        this.loopBackedgeTemporaries = new Set(fn.blocks.flatMap(block => block.instructions.filter(item => item.op === 'loop_value').map(item =>
+            item.second?.kind === 'temporary' ? item.second.name : null)).filter(Boolean));
         this.registers = this.optimize ? this.allocateRegisters(fn) : new Map();
         const slotTypes = new Map();
         let slotCount = 0;
@@ -509,7 +509,7 @@ export class X86_64Backend {
         const lastUses = new Map();
         for (let index = 0; index < instructions.length; index++) {
             const instruction = instructions[index];
-            if (instruction.result && !this.loopCarriedTemporaries.has(instruction.result) && !this.immediates.has(instruction.result) && !this.isManagedReferenceType(instruction.type)) {
+            if (instruction.result && !this.loopBackedgeTemporaries.has(instruction.result) && !this.immediates.has(instruction.result) && !this.isManagedReferenceType(instruction.type)) {
                 definitions.set(instruction.result, {name: instruction.result, type: instruction.type, start: index, end: index});
             }
             const visit = value => {
