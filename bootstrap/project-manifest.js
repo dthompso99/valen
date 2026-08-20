@@ -19,6 +19,13 @@ const string = (value, where) => {
     if (typeof value !== 'string' || value.length === 0) throw new Error(`${where} must be a non-empty string`);
     return value;
 };
+const relativePath = (value, where) => {
+    const selected = string(value, where);
+    if (path.isAbsolute(selected) || selected.split(/[\\/]/).includes('..')) {
+        throw new Error(`${where} must stay within the project root`);
+    }
+    return selected;
+};
 const version = (value, where) => {
     if (!semanticVersion.test(value)) throw new Error(`${where} must be a semantic version`);
     return value;
@@ -41,10 +48,8 @@ export class ProjectManifest {
 
         const executable = object(raw.executable, 'Project executable');
         fields(executable, ['source', 'output', 'target', 'optimization'], 'project executable');
-        const sourcePath = string(executable.source, 'Project executable source');
-        if (path.isAbsolute(sourcePath)) throw new Error('Project executable source must be relative to the manifest');
-        const output = executable.output === undefined ? 'build/app' : string(executable.output, 'Project executable output');
-        if (path.isAbsolute(output)) throw new Error('Project executable output must be relative to the manifest');
+        const sourcePath = relativePath(executable.source, 'Project executable source');
+        const output = executable.output === undefined ? 'build/app' : relativePath(executable.output, 'Project executable output');
         const target = executable.target === undefined ? null : resolveTarget(string(executable.target, 'Project executable target')).name;
         const optimization = executable.optimization ?? 1;
         if (optimization !== 0 && optimization !== 1) throw new Error('Project executable optimization must be 0 or 1');
@@ -59,8 +64,7 @@ export class ProjectManifest {
             if (!packageName.test(dependencyName)) throw new Error(`Invalid project dependency name '${dependencyName}'`);
             if (seen.has(dependencyName)) throw new Error(`Duplicate project dependency '${dependencyName}'`);
             seen.add(dependencyName);
-            const metadata = string(dependency.metadata, `Project dependency '${dependencyName}' metadata`);
-            if (path.isAbsolute(metadata)) throw new Error(`Project dependency '${dependencyName}' metadata must be relative to the manifest`);
+            const metadata = relativePath(dependency.metadata, `Project dependency '${dependencyName}' metadata`);
             return {name: dependencyName, version: version(dependency.version, `Project dependency '${dependencyName}' version`), metadata};
         }).sort((left, right) => left.name.localeCompare(right.name));
 

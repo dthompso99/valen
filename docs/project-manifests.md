@@ -33,4 +33,18 @@ Verify without writing:
 node scripts/valen-project.mjs lock --locked valen.project.json
 ```
 
-The lockfile sorts dependencies by name and records exact compiler-interface, target, ABI, interface, implementation, and object fingerprints. It contains no timestamps or absolute host paths. Registry resolution, Git dependencies, multiple targets, compiler-driver integration, and the self-hosted parser remain follow-up work in issue #104.
+Build the declared executable, updating the lockfile when needed:
+
+```sh
+node scripts/valen-project.mjs build valen.project.json
+```
+
+For a reproducible build that refuses to create or update a missing or stale lockfile:
+
+```sh
+node scripts/valen-project.mjs build --locked valen.project.json
+```
+
+Manifest source, output, and dependency metadata paths are confined to the project root. Manifest-driven builds currently support dependency-free executables; compiled dependency routing remains **WIP**.
+
+The lockfile sorts dependencies by name and records exact compiler-interface, target, ABI, interface, implementation, and object fingerprints. It contains no timestamps or absolute host paths. Registry resolution, Git dependencies, multiple targets, compiled dependency routing, and the self-hosted parser remain follow-up work in issue #104.
