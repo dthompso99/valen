@@ -1,0 +1,3 @@
+import System from 'libSystem.ar'
+Box {{ member value:i64; __(value:i64) -> void { self.value=value } }}
+entry {{ __() -> i32 { local checksum:i64=1; local index:i64=0; while index<500000 { local box=new Box((index^checksum)&2147483647); checksum=(checksum+box.value)&2147483647; index=index+1 }; System.collectGarbage(); System.print(checksum); return 0 } }}

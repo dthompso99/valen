@@ -54,6 +54,11 @@ lengths. It deliberately measures each language's ordinary transient-string cons
 runtimes allocate their normal builder/string objects, while native implementations may keep short buffers on the
 stack or optimize fixed-length work. Treat it as an allocation/runtime workload, not a pure byte-copy comparison.
 
+`allocation-gc` constructs five hundred thousand short-lived boxed values, folds each field into a feedback
+checksum, and performs a final Valen collection. It measures allocation and reclamation while also exposing
+escape/scalar-replacement differences: optimizing toolchains may prove that a box never escapes and remove its
+physical allocation, which is itself an important compiler capability rather than a benchmark error.
+
 Use `--workloads` to select a comma-separated subset. Reports identify every row by workload, and the JSON
 configuration records each workload's iteration count. All implementations of a workload must produce the same
 deterministic output before any timing is accepted.
