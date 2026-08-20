@@ -1,0 +1,180 @@
+import System from "libSystem.ar"
+
+library Json {{
+    enum Kind {{ Null, Boolean, Integer, String, Array, Object }}
+
+    Value {{
+        member kind:Kind
+        member boolean:bool
+        member integer:i64
+        member text:string
+        member values:Array<Value>
+        member keys:Array<string>
+
+        __(kind:Kind) -> void {
+            self.kind = kind; self.boolean = false; self.integer = 0; self.text = ""
+            self.values = new Array<Value>(0); self.keys = new Array<string>(0)
+        }
+
+        get(key:string) -> ref Value? {
+            local index:i64 = 0
+            while index < self.keys.length { if self.keys[index] == key { return self.values[index] }; index = index + 1 }
+            return null
+        }
+
+        stringify() -> string {
+            if self.kind == Json.Kind.Null { return "null" }
+            if self.kind == Json.Kind.Boolean { if self.boolean { return "true" }; return "false" }
+            if self.kind == Json.Kind.Integer { return self.integer.toString() }
+            if self.kind == Json.Kind.String { return Json.quote(self.text) }
+            local output = new StringBuilder()
+            if self.kind == Json.Kind.Array {
+                output.appendByte(91); local index:i64 = 0
+                while index < self.values.length { if index > 0 { output.appendByte(44) }; output.append(self.values[index].stringify()); index = index + 1 }
+                output.appendByte(93); return output.build()
+            }
+            output.appendByte(123); local index:i64 = 0
+            while index < self.keys.length {
+                if index > 0 { output.appendByte(44) }
+                output.append(Json.quote(self.keys[index])); output.appendByte(58); output.append(self.values[index].stringify()); index = index + 1
+            }
+            output.appendByte(125); return output.build()
+        }
+    }}
+
+    Result {{
+        member valid:bool
+        member value:Value?
+        member offset:i64
+        member message:string
+        __(valid:bool, value:Value?=null, offset:i64=0, message:string="") -> void {
+            self.valid = valid; self.value = value; self.offset = offset; self.message = message
+        }
+    }}
+
+    Parser {{
+        member source:string
+        member index:i64
+        member errorOffset:i64
+        member errorMessage:string
+
+        __(source:string) -> void { self.source = source; self.index = 0; self.errorOffset = 0; self.errorMessage = "" }
+
+        fail(message:string) -> void { if self.errorMessage.length == 0 { self.errorOffset = self.index; self.errorMessage = message } }
+        whitespace() -> void { while self.index < self.source.length && (self.source[self.index] == 32 || self.source[self.index] == 9 || self.source[self.index] == 10 || self.source[self.index] == 13) { self.index = self.index + 1 } }
+        literal(value:string) -> bool {
+            if self.index + value.length > self.source.length { return false }
+            local offset:i64 = 0
+            while offset < value.length { if self.source[self.index + offset] != value[offset] { return false }; offset = offset + 1 }
+            self.index = self.index + value.length; return true
+        }
+        hex(byte:u8) -> i64 {
+            if byte >= 48 && byte <= 57 { return (byte - 48) as i64 }
+            if byte >= 65 && byte <= 70 { return (byte - 55) as i64 }
+            if byte >= 97 && byte <= 102 { return (byte - 87) as i64 }
+            return -1
+        }
+        unicode() -> i64 {
+            if self.index + 4 > self.source.length { self.fail("Incomplete Unicode escape"); return -1 }
+            local value:i64 = 0; local count:i64 = 0
+            while count < 4 { local digit = self.hex(self.source[self.index]); if digit < 0 { self.fail("Invalid Unicode escape"); return -1 }; value = value * 16 + digit; self.index = self.index + 1; count = count + 1 }
+            if value >= 55296 && value <= 56319 {
+                if self.index + 6 > self.source.length || self.source[self.index] != 92 || self.source[self.index + 1] != 117 { self.fail("High surrogate requires a low surrogate"); return -1 }
+                self.index = self.index + 2; local low:i64 = 0; count = 0
+                while count < 4 { local digit = self.hex(self.source[self.index]); if digit < 0 { self.fail("Invalid Unicode escape"); return -1 }; low = low * 16 + digit; self.index = self.index + 1; count = count + 1 }
+                if low < 56320 || low > 57343 { self.fail("High surrogate requires a low surrogate"); return -1 }
+                return 65536 + (value - 55296) * 1024 + low - 56320
+            }
+            if value >= 56320 && value <= 57343 { self.fail("Unexpected low surrogate"); return -1 }
+            return value
+        }
+        appendCodePoint(output:StringBuilder, value:i64) -> void {
+            if value <= 127 { output.appendByte(value as u8); return }
+            if value <= 2047 { output.appendByte((192 | (value >> 6)) as u8); output.appendByte((128 | (value & 63)) as u8); return }
+            if value <= 65535 { output.appendByte((224 | (value >> 12)) as u8); output.appendByte((128 | ((value >> 6) & 63)) as u8); output.appendByte((128 | (value & 63)) as u8); return }
+            output.appendByte((240 | (value >> 18)) as u8); output.appendByte((128 | ((value >> 12) & 63)) as u8); output.appendByte((128 | ((value >> 6) & 63)) as u8); output.appendByte((128 | (value & 63)) as u8)
+        }
+        stringValue() -> string? {
+            if self.source[self.index] != 34 { self.fail("Expected string"); return null }
+            self.index = self.index + 1; local output = new StringBuilder()
+            while self.index < self.source.length {
+                local byte = self.source[self.index]; self.index = self.index + 1
+                if byte == 34 { return output.build() }
+                if byte < 32 { self.fail("Unescaped control character in string"); return null }
+                if byte != 92 { output.appendByte(byte); continue }
+                if self.index >= self.source.length { self.fail("Incomplete string escape"); return null }
+                local escape = self.source[self.index]; self.index = self.index + 1
+                if escape == 34 || escape == 47 || escape == 92 { output.appendByte(escape) }
+                else { if escape == 98 { output.appendByte(8) } else { if escape == 102 { output.appendByte(12) } else { if escape == 110 { output.appendByte(10) } else { if escape == 114 { output.appendByte(13) } else { if escape == 116 { output.appendByte(9) } else { if escape == 117 { local point = self.unicode(); if point < 0 { return null }; self.appendCodePoint(output, point) } else { self.fail("Invalid string escape"); return null } } } } } } }
+            }
+            self.fail("Unterminated string"); return null
+        }
+        numberValue() -> Value? {
+            local start = self.index
+            if self.source[self.index] == 45 { self.index = self.index + 1; if self.index >= self.source.length { self.fail("Expected digit after minus sign"); return null } }
+            if self.source[self.index] == 48 { self.index = self.index + 1; if self.index < self.source.length && self.source[self.index] >= 48 && self.source[self.index] <= 57 { self.fail("Leading zero in number"); return null } }
+            else { if self.source[self.index] < 49 || self.source[self.index] > 57 { self.fail("Expected JSON value"); return null }; while self.index < self.source.length && self.source[self.index] >= 48 && self.source[self.index] <= 57 { self.index = self.index + 1 } }
+            if self.index < self.source.length && (self.source[self.index] == 46 || self.source[self.index] == 69 || self.source[self.index] == 101) { self.fail("Non-integral JSON numbers are not supported"); return null }
+            local parsed = System.parseInteger(self.source.slice(start, self.index - start))
+            if !parsed.valid { self.fail("JSON integer is outside i64 range"); return null }
+            local result = new Value(Json.Kind.Integer); result.integer = parsed.value; return result
+        }
+        value() -> Value? {
+            self.whitespace(); if self.index >= self.source.length { self.fail("Expected JSON value"); return null }
+            local byte = self.source[self.index]
+            if byte == 110 { if !self.literal("null") { self.fail("Invalid literal"); return null }; return new Value(Json.Kind.Null) }
+            if byte == 116 { if !self.literal("true") { self.fail("Invalid literal"); return null }; local result = new Value(Json.Kind.Boolean); result.boolean = true; return result }
+            if byte == 102 { if !self.literal("false") { self.fail("Invalid literal"); return null }; return new Value(Json.Kind.Boolean) }
+            if byte == 34 { local text = self.stringValue(); if text == null { return null }; local result = new Value(Json.Kind.String); result.text = text!; return result }
+            if byte == 91 { return self.arrayValue() }
+            if byte == 123 { return self.objectValue() }
+            return self.numberValue()
+        }
+        arrayValue() -> Value? {
+            local result = new Value(Json.Kind.Array); self.index = self.index + 1; self.whitespace()
+            if self.index < self.source.length && self.source[self.index] == 93 { self.index = self.index + 1; return result }
+            while self.errorMessage.length == 0 {
+                local item = self.value(); if item == null { return null }; result.values.append(copy item!); self.whitespace()
+                if self.index >= self.source.length { self.fail("Unterminated array"); return null }
+                if self.source[self.index] == 93 { self.index = self.index + 1; return copy result }
+                if self.source[self.index] != 44 { self.fail("Expected comma or closing bracket"); return null }
+                self.index = self.index + 1; self.whitespace()
+            }
+            return null
+        }
+        objectValue() -> Value? {
+            local result = new Value(Json.Kind.Object); self.index = self.index + 1; self.whitespace()
+            if self.index < self.source.length && self.source[self.index] == 125 { self.index = self.index + 1; return result }
+            while self.errorMessage.length == 0 {
+                if self.index >= self.source.length || self.source[self.index] != 34 { self.fail("Expected object key"); return null }
+                local key = self.stringValue(); if key == null { return null }
+                local existing:i64 = 0; while existing < result.keys.length { if result.keys[existing] == key! { self.fail("Duplicate object key"); return null }; existing = existing + 1 }
+                self.whitespace(); if self.index >= self.source.length || self.source[self.index] != 58 { self.fail("Expected colon after object key"); return null }; self.index = self.index + 1
+                local item = self.value(); if item == null { return null }; result.keys.append(key!); result.values.append(copy item!); self.whitespace()
+                if self.index >= self.source.length { self.fail("Unterminated object"); return null }
+                if self.source[self.index] == 125 { self.index = self.index + 1; return copy result }
+                if self.source[self.index] != 44 { self.fail("Expected comma or closing brace"); return null }
+                self.index = self.index + 1; self.whitespace()
+            }
+            return null
+        }
+        parse() -> Result {
+            local parsed = self.value(); if parsed == null { return new Result(false, null, self.errorOffset, self.errorMessage) }
+            self.whitespace(); if self.index != self.source.length { self.fail("Unexpected trailing input"); return new Result(false, null, self.errorOffset, self.errorMessage) }
+            return new Result(true, parsed!)
+        }
+    }}
+
+    parse(source:string) -> Result { return (new Parser(source)).parse() }
+
+    quote(value:string) -> string {
+        local output = new StringBuilder(); local hex = "0123456789abcdef"; output.appendByte(34); local index:i64 = 0
+        while index < value.length {
+            local byte = value[index]
+            if byte == 34 || byte == 92 { output.appendByte(92); output.appendByte(byte) }
+            else { if byte == 8 { output.append("\\b") } else { if byte == 12 { output.append("\\f") } else { if byte == 10 { output.append("\\n") } else { if byte == 13 { output.append("\\r") } else { if byte == 9 { output.append("\\t") } else { if byte < 32 { output.append("\\u00"); output.appendByte(hex[((byte >> 4) & 15) as i64]); output.appendByte(hex[(byte & 15) as i64]) } else { output.appendByte(byte) } } } } } } }
+            index = index + 1
+        }
+        output.appendByte(34); return output.build()
+    }
+}}

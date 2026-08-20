@@ -83,3 +83,9 @@ value. `Collections.StringSet` is built on a concrete map specialization, and th
 library uses the same map for its set implementation. Primitive map values and a fully generic
 `HashMap<K, V>` remain **WIP** until generic ownership and hashing/equality contracts can express
 their policies without special cases.
+
+`std/libJson.ar` provides the bootstrap-safe JSON value tree used by native compiler tooling. It
+preserves object member order, rejects duplicate keys, reports deterministic byte offsets, decodes
+Unicode escapes, and serializes supported values without insignificant whitespace. The initial
+number contract is signed `i64`; fractional and exponent forms are rejected explicitly rather than
+rounded. Project-manifest schema rules remain outside the syntax library.

@@ -1,0 +1,34 @@
+import Json from 'std/libJson.ar'
+
+test json {{
+    nested_values_and_deterministic_serialization() -> void {
+        local parsed = Json.parse(" { \"name\": \"Valen\\n\", \"enabled\": true, \"count\": -7, \"items\": [null, \"\\u03bb\", \"\\ud83d\\ude80\"] } ")
+        expect(parsed.valid)
+        expect(parsed.value != null)
+        expect(parsed.value!.kind == Json.Kind.Object)
+        expect(parsed.value!.get("enabled") != null)
+        expect(parsed.value!.get("enabled")!.boolean)
+        expect(parsed.value!.get("count")!.integer == -7)
+        expect(parsed.value!.get("items")!.values[1].text == "λ")
+        expect(parsed.value!.get("items")!.values[2].text == "🚀")
+        expect(parsed.value!.stringify() == "{\"name\":\"Valen\\n\",\"enabled\":true,\"count\":-7,\"items\":[null,\"λ\",\"🚀\"]}")
+        local roundTrip = Json.parse(parsed.value!.stringify())
+        expect(roundTrip.valid)
+        expect(roundTrip.value!.stringify() == parsed.value!.stringify())
+    }
+
+    deterministic_errors() -> void {
+        local duplicate = Json.parse("{\"a\":1,\"a\":2}")
+        expect(!duplicate.valid)
+        expect(duplicate.message == "Duplicate object key")
+        expect(duplicate.offset == 10)
+        local decimal = Json.parse("1.5")
+        expect(!decimal.valid)
+        expect(decimal.message == "Non-integral JSON numbers are not supported")
+        expect(decimal.offset == 1)
+        local trailing = Json.parse("true false")
+        expect(!trailing.valid)
+        expect(trailing.message == "Unexpected trailing input")
+        expect(trailing.offset == 5)
+    }
+}}
