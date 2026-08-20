@@ -63,6 +63,7 @@ library IrValidation {{
                     self.simplifyControlFlow(functionNode)
                     self.removeUnreachable(functionNode)
                     self.splitCriticalEdges(functionNode)
+                    self.promoteLoopLocals(functionNode)
                     self.propagateLocalValues(functionNode)
                     self.devirtualizeExactCalls(program, functionNode)
                     self.inlineLeafCalls(program, functionNode)
@@ -120,6 +121,69 @@ library IrValidation {{
             while self.findBlock(functionNode, label) != null { sequence = sequence + 1; label = "critical_edge_" + sequence.toString() }
             return label
         }
+
+        promoteLoopLocals(functionNode:Ir.Function) -> void {
+            local headerIndex:i64 = 0
+            while headerIndex < functionNode.blocks.length {
+                local header = functionNode.blocks[headerIndex]
+                if self.predecessorCount(functionNode, header.label) == 2 && header.instructions.length > 0 && header.instructions[header.instructions.length - 1].op == "branch" {
+                    local branch = header.instructions[header.instructions.length - 1]
+                    local bodyIndex = self.directBackedgeIndex(functionNode, header.label, branch.target!, branch.alternateTarget!)
+                    local preheaderIndex = self.otherPredecessorIndex(functionNode, header.label, bodyIndex)
+                    if bodyIndex >= 0 && preheaderIndex >= 0 {
+                        local bodyLabel = functionNode.blocks[bodyIndex].label
+                        local exitLabel = branch.target!; if exitLabel == bodyLabel { exitLabel = branch.alternateTarget! }
+                        local exitIndex = self.blockIndex(functionNode, exitLabel)
+                        if exitIndex >= 0 && self.predecessorCount(functionNode, bodyLabel) == 1 && self.predecessorCount(functionNode, exitLabel) == 1 {
+                            local declarationIndex:i64 = 0
+                            while declarationIndex < functionNode.blocks[preheaderIndex].instructions.length {
+                                local declaration = functionNode.blocks[preheaderIndex].instructions[declarationIndex]
+                                if declaration.op == "declare_local" && declaration.name != null && declaration.first != null && declaration.typeName != null && self.scalarPrimitive(declaration.typeName!) {
+                                    if self.promoteLoopLocal(functionNode, preheaderIndex, headerIndex, bodyIndex, exitIndex, declaration) { declarationIndex = 0 } else { declarationIndex = declarationIndex + 1 }
+                                } else { declarationIndex = declarationIndex + 1 }
+                            }
+                        }
+                    }
+                }
+                headerIndex = headerIndex + 1
+            }
+        }
+
+        directBackedgeIndex(functionNode:Ir.Function, header:string, first:string, second:string) -> i64 {
+            local index:i64 = 0
+            while index < functionNode.blocks.length { local block = functionNode.blocks[index]; if (block.label == first || block.label == second) && block.instructions.length > 0 { local end = block.instructions[block.instructions.length - 1]; if end.op == "jump" && end.target! == header { return index } }; index = index + 1 }
+            return -1
+        }
+
+        otherPredecessorIndex(functionNode:Ir.Function, header:string, excluded:i64) -> i64 {
+            local index:i64 = 0
+            while index < functionNode.blocks.length { if index != excluded { local block = functionNode.blocks[index]; if block.instructions.length > 0 { local end = block.instructions[block.instructions.length - 1]; if end.op == "jump" && end.target! == header { return index } } }; index = index + 1 }
+            return -1
+        }
+
+        blockIndex(functionNode:Ir.Function, label:string) -> i64 { local index:i64 = 0; while index < functionNode.blocks.length { if functionNode.blocks[index].label == label { return index }; index = index + 1 }; return -1 }
+
+        promoteLoopLocal(functionNode:Ir.Function, preheaderIndex:i64, headerIndex:i64, bodyIndex:i64, exitIndex:i64, declaration:Ir.Instruction) -> bool {
+            local stores:i64 = 0; local store:Ir.Instruction? = null; local valid:bool = true; local blockIndex:i64 = 0
+            while blockIndex < functionNode.blocks.length { local instructionIndex:i64 = 0; while instructionIndex < functionNode.blocks[blockIndex].instructions.length { local instruction = functionNode.blocks[blockIndex].instructions[instructionIndex]; if instruction.name != null && instruction.name! == declaration.name! { if instruction.op == "store_local" { stores = stores + 1; store = instruction; if blockIndex != bodyIndex || instruction.first == null { valid = false } }; if instruction.op == "load_local" && blockIndex != headerIndex && blockIndex != bodyIndex && blockIndex != exitIndex { valid = false } }; instructionIndex = instructionIndex + 1 }; blockIndex = blockIndex + 1 }
+            if !valid || stores != 1 || store == null { return false }
+            local result = self.freshLoopValue(functionNode)
+            local loopValue = new Ir.Value("temporary", result, declaration.typeName!)
+            blockIndex = 0
+            while blockIndex < functionNode.blocks.length { local retained = new Array<ref Ir.Instruction>(0); local instructionIndex:i64 = 0; while instructionIndex < functionNode.blocks[blockIndex].instructions.length { local instruction = functionNode.blocks[blockIndex].instructions[instructionIndex]; instruction.first = self.replaceLoopLoad(instruction.first, functionNode, declaration.name!, loopValue); instruction.second = self.replaceLoopLoad(instruction.second, functionNode, declaration.name!, loopValue); instruction.third = self.replaceLoopLoad(instruction.third, functionNode, declaration.name!, loopValue); local argumentIndex:i64 = 0; while argumentIndex < instruction.arguments.length { instruction.arguments[argumentIndex] = self.replaceLoopLoad(instruction.arguments[argumentIndex], functionNode, declaration.name!, loopValue)!; argumentIndex = argumentIndex + 1 }; local remove = instruction.name != null && instruction.name! == declaration.name! && (instruction.op == "load_local" || instruction.op == "store_local" || instruction.op == "declare_local"); if !remove { retained.append(instruction) }; instructionIndex = instructionIndex + 1 }; functionNode.blocks[blockIndex].instructions = retained; blockIndex = blockIndex + 1 }
+            local loop = new Ir.Instruction("loop_value"); loop.result = loopValue; loop.typeName = declaration.typeName; loop.first = declaration.first; loop.second = store!.first; loop.target = functionNode.blocks[preheaderIndex].label; loop.alternateTarget = functionNode.blocks[bodyIndex].label
+            local header = new Array<ref Ir.Instruction>(0); local index:i64 = 0; while index < functionNode.blocks[headerIndex].instructions.length && functionNode.blocks[headerIndex].instructions[index].op == "loop_value" { header.append(functionNode.blocks[headerIndex].instructions[index]); index = index + 1 }; header.append(loop); while index < functionNode.blocks[headerIndex].instructions.length { header.append(functionNode.blocks[headerIndex].instructions[index]); index = index + 1 }; functionNode.blocks[headerIndex].instructions = header
+            return true
+        }
+
+        replaceLoopLoad(value:Ir.Value?, functionNode:Ir.Function, localName:string, replacement:Ir.Value) -> ref Ir.Value? {
+            if value == null || value!.kind != "temporary" { return value }
+            local blockIndex:i64 = 0; while blockIndex < functionNode.blocks.length { local instructionIndex:i64 = 0; while instructionIndex < functionNode.blocks[blockIndex].instructions.length { local instruction = functionNode.blocks[blockIndex].instructions[instructionIndex]; if instruction.op == "load_local" && instruction.name != null && instruction.name! == localName && instruction.result != null && instruction.result!.name == value!.name { return replacement }; instructionIndex = instructionIndex + 1 }; blockIndex = blockIndex + 1 }
+            return value
+        }
+
+        freshLoopValue(functionNode:Ir.Function) -> string { local sequence:i64 = 0; local name = "%loop" + sequence.toString(); while self.hasResult(functionNode, name) { sequence = sequence + 1; name = "%loop" + sequence.toString() }; return name }
+        hasResult(functionNode:Ir.Function, name:string) -> bool { local blockIndex:i64 = 0; while blockIndex < functionNode.blocks.length { local instructionIndex:i64 = 0; while instructionIndex < functionNode.blocks[blockIndex].instructions.length { local result = functionNode.blocks[blockIndex].instructions[instructionIndex].result; if result != null && result!.name == name { return true }; instructionIndex = instructionIndex + 1 }; blockIndex = blockIndex + 1 }; return false }
 
         devirtualizeExactCalls(program:Ir.Program, functionNode:Ir.Function) -> void {
             local exactTemporaries = new Array<ExactType>(0)

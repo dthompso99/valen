@@ -34,6 +34,7 @@ export class IrCanonicalizer {
             this.simplifyControlFlow(fn);
             this.removeUnreachable(fn);
             this.splitCriticalEdges(fn);
+            this.promoteLoopLocals(fn);
             this.propagateLocalValues(fn);
             if (program) {
                 this.devirtualizeExactCalls(fn, program);
@@ -76,6 +77,62 @@ export class IrCanonicalizer {
             }
         }
         fn.blocks.push(...added);
+    }
+
+    promoteLoopLocals(fn) {
+        const primitive = type => ['bool', 'u8', 'i8', 'u16', 'i16', 'u32', 'i32', 'u64', 'i64', 'f32', 'f64'].includes(type);
+        const predecessors = this.predecessors(fn);
+        const blocks = new Map(fn.blocks.map(block => [block.label, block]));
+        const used = new Set(fn.blocks.flatMap(block => block.instructions).map(item => item.result).filter(Boolean));
+        let sequence = 0;
+        const fresh = () => { let name; do name = `%loop${sequence++}`; while (used.has(name)); used.add(name); return name; };
+        for (const header of fn.blocks) {
+            const incoming = predecessors.get(header.label) ?? [];
+            const branch = header.instructions.at(-1);
+            if (incoming.length !== 2 || branch?.op !== 'branch') continue;
+            const incomingBlocks = incoming.map(label => blocks.get(label));
+            if (incomingBlocks.some(block => block?.instructions.at(-1)?.op !== 'jump' || block.instructions.at(-1).target !== header.label)) continue;
+            const body = incomingBlocks.find(block => block.label === branch.thenTarget || block.label === branch.elseTarget);
+            const preheader = incomingBlocks.find(block => block !== body);
+            if (!body || !preheader || ![branch.thenTarget, branch.elseTarget].includes(body.label)) continue;
+            const exitLabel = branch.thenTarget === body.label ? branch.elseTarget : branch.thenTarget;
+            const exit = blocks.get(exitLabel);
+            if (!exit || (predecessors.get(body.label)?.length ?? 0) !== 1 || predecessors.get(body.label)[0] !== header.label ||
+                (predecessors.get(exit.label)?.length ?? 0) !== 1 || predecessors.get(exit.label)[0] !== header.label) continue;
+            const allowed = new Set([header.label, body.label, exit.label]);
+            const promoted = [];
+            for (const declaration of preheader.instructions) {
+                if (declaration.op !== 'declare_local' || !declaration.value || !primitive(declaration.type)) continue;
+                const stores = [];
+                const loads = [];
+                for (const block of fn.blocks) for (const instruction of block.instructions) {
+                    if (instruction.op === 'store_local' && instruction.name === declaration.name) stores.push({block, instruction});
+                    if (instruction.op === 'load_local' && instruction.name === declaration.name) loads.push({block, instruction});
+                }
+                if (stores.length !== 1 || stores[0].block !== body || !stores[0].instruction.value || loads.some(item => !allowed.has(item.block.label))) continue;
+                promoted.push({declaration, store: stores[0].instruction, loads, result: fresh()});
+            }
+            if (!promoted.length) continue;
+            const aliases = new Map(promoted.flatMap(item => item.loads.map(load => [load.instruction.result, {kind: 'temporary', name: item.result, type: item.declaration.type}])));
+            const replace = value => {
+                if (!value || typeof value !== 'object') return value;
+                if (value.kind === 'temporary' && aliases.has(value.name)) return aliases.get(value.name);
+                if (value.kind) return value;
+                if (Array.isArray(value)) return value.map(replace);
+                for (const [key, child] of Object.entries(value)) if (key !== 'result') value[key] = replace(child);
+                return value;
+            };
+            for (const block of fn.blocks) for (const instruction of block.instructions) for (const [key, value] of Object.entries(instruction)) if (key !== 'result') instruction[key] = replace(value);
+            const declarations = new Set(promoted.map(item => item.declaration));
+            const stores = new Set(promoted.map(item => item.store));
+            const loads = new Set(promoted.flatMap(item => item.loads.map(load => load.instruction)));
+            preheader.instructions = preheader.instructions.filter(item => !declarations.has(item));
+            body.instructions = body.instructions.filter(item => !stores.has(item) && !loads.has(item));
+            header.instructions = header.instructions.filter(item => !loads.has(item));
+            exit.instructions = exit.instructions.filter(item => !loads.has(item));
+            header.instructions.unshift(...promoted.map(item => ({op: 'loop_value', result: item.result, type: item.declaration.type,
+                first: item.declaration.value, second: replace(item.store.value), target: preheader.label, alternateTarget: body.label})));
+        }
     }
 
     devirtualizeExactCalls(fn, program) {

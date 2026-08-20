@@ -1418,6 +1418,54 @@ test('native backends lower loop values as staged parallel copies', () => {
     assert.match(armBody, /ldr x9, \[sp, #\d+\]\n    str x9, \[sp, #\d+\]\n    ldr x9, \[sp, #\d+\]\n    str x9, \[sp, #\d+\]\n    ldr x9, \[sp, #\d+\]\n    str x9, \[sp, #\d+\]\n    ldr x9, \[sp, #\d+\]\n    str x9, \[sp, #\d+\]\n    b /);
 });
 
+test('IR optimization promotes canonical primitive loop locals', () => {
+    const temporary = (name, type = 'i64') => ({kind: 'temporary', name, type});
+    const create = () => {
+        const fn = {name: 'entry.__', owner: 'entry', parameters: [], returnType: 'i64', blocks: [
+            {label: 'entry', instructions: [
+                {op: 'constant', result: '%zero', type: 'i64', value: '0'},
+                {op: 'declare_local', name: 'index', type: 'i64', value: temporary('%zero')},
+                {op: 'jump', target: 'header'}
+            ]},
+            {label: 'header', instructions: [
+                {op: 'load_local', result: '%current', type: 'i64', name: 'index'},
+                {op: 'constant', result: '%limit', type: 'i64', value: '10'},
+                {op: 'binary', result: '%condition', type: 'bool', operator: '<', left: temporary('%current'), right: temporary('%limit')},
+                {op: 'branch', condition: temporary('%condition', 'bool'), thenTarget: 'body', elseTarget: 'exit'}
+            ]},
+            {label: 'body', instructions: [
+                {op: 'load_local', result: '%loaded', type: 'i64', name: 'index'},
+                {op: 'constant', result: '%one', type: 'i64', value: '1'},
+                {op: 'binary', result: '%next', type: 'i64', operator: '+', left: temporary('%loaded'), right: temporary('%one')},
+                {op: 'store_local', name: 'index', value: temporary('%next')},
+                {op: 'jump', target: 'header'}
+            ]},
+            {label: 'exit', instructions: [
+                {op: 'load_local', result: '%result', type: 'i64', name: 'index'},
+                {op: 'return', value: temporary('%result')}
+            ]}
+        ]};
+        return {program: {types: [{name: 'entry', fields: [], virtualMethods: [], contracts: []}], functions: [fn], externals: [], entry: fn.name}, fn};
+    };
+    const optimized = create();
+    new IrCanonicalizer().run(optimized.program);
+    const loop = optimized.fn.blocks.find(block => block.label === 'header').instructions[0];
+    assert.equal(loop.op, 'loop_value');
+    assert.equal(loop.target, 'entry');
+    assert.equal(loop.alternateTarget, 'body');
+    assert.ok(!optimized.fn.blocks.flatMap(block => block.instructions).some(item => ['declare_local', 'load_local', 'store_local'].includes(item.op) && item.name === 'index'));
+    assert.doesNotThrow(() => new IrValidator().validate(optimized.program));
+
+    const unoptimized = create();
+    new IrCanonicalizer().run(unoptimized.program, {optimize: false});
+    assert.ok(unoptimized.fn.blocks.flatMap(block => block.instructions).some(item => item.op === 'store_local' && item.name === 'index'));
+
+    const rejected = create();
+    rejected.fn.blocks[2].instructions.splice(-1, 0, {op: 'store_local', name: 'index', value: temporary('%next')});
+    new IrCanonicalizer().run(rejected.program);
+    assert.ok(!rejected.fn.blocks.flatMap(block => block.instructions).some(item => item.op === 'loop_value'));
+});
+
 test('IR optimization propagates block-local primitive values without crossing control flow', () => {
     const value = {kind: 'temporary', name: '%0', type: 'i64'};
     const loaded = {kind: 'temporary', name: '%1', type: 'i64'};
