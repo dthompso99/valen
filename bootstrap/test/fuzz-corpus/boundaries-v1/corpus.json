@@ -1,0 +1,4 @@
+{
+  "version": 1,
+  "inputs": ["empty.txt", "local-import.txt", "traversal.txt", "http-request.txt", "websocket-frame.txt", "websocket-key.txt"]
+}

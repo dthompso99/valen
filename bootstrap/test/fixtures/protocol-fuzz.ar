@@ -1,0 +1,36 @@
+import System from 'libSystem.ar'
+import Http from 'libHttp.ar'
+import WebSocket from 'libWebSocket.ar'
+
+entry {{
+    nibble(value:u8) -> i64 {
+        if value >= 48 && value <= 57 { return (value - 48) as i64 }
+        if value >= 65 && value <= 70 { return (value - 55) as i64 }
+        if value >= 97 && value <= 102 { return (value - 87) as i64 }
+        return -1
+    }
+
+    decodeHex(input:string) -> string? {
+        if (input.length & 1) != 0 { return null }
+        local output = new StringBuilder(); local index:i64 = 0
+        while index < input.length {
+            local high = self.nibble(input[index]); local low = self.nibble(input[index + 1])
+            if high < 0 || low < 0 { return null }
+            output.appendByte(((high << 4) | low) as u8); index = index + 2
+        }
+        return output.build()
+    }
+
+    __() -> i32 {
+        local arguments = System.arguments()
+        if arguments.length != 3 { return 64 }
+        if arguments[1] == "http" { Http.complete(arguments[2]); Http.parse(arguments[2]); return 0 }
+        if arguments[1] == "websocket" {
+            local handshake = new WebSocket.Handshake(); handshake.accept(arguments[2])
+            local frame = self.decodeHex(arguments[2])
+            if frame != null { local protocol = new WebSocket.Protocol(); protocol.decodeClient(frame!, 4096) }
+            return 0
+        }
+        return 64
+    }
+}}

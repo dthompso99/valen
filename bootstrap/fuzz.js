@@ -1,6 +1,10 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {Compiler} from './compiler.js';
+import {ModuleLoader} from './module-loader.js';
 import {Parser} from './parser.js';
 import {Tokenizer} from './tokenizer.js';
 import {ModuleInterface} from './module-interface.js';
@@ -8,13 +12,51 @@ import {LibraryMetadata} from './library-metadata.js';
 import {ElfObject} from './elf.js';
 
 export const corpusVersion = 1;
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+let harness = null;
+
+const protocolHarness = () => {
+    if (harness) return harness;
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-protocol-fuzz-'));
+    const executable = path.join(directory, 'harness');
+    const previous = process.env.VALEN_LIBRARY_PATH;
+    process.env.VALEN_LIBRARY_PATH = path.join(projectRoot, 'lib');
+    try { new Compiler().compile(path.join(projectRoot, 'bootstrap/test/fixtures/protocol-fuzz.ar'), executable, {sourceRoot: projectRoot}); }
+    finally {
+        if (previous === undefined) delete process.env.VALEN_LIBRARY_PATH;
+        else process.env.VALEN_LIBRARY_PATH = previous;
+    }
+    harness = {directory, executable};
+    process.once('exit', () => fs.rmSync(directory, {recursive: true, force: true}));
+    return harness;
+};
+
+const evaluateProtocol = (target, source) => {
+    if (source.includes('\0')) return;
+    const retained = source.endsWith('\n') ? source.slice(0, -1) : source;
+    const input = target === 'http' ? retained.replaceAll('\\r\\n', '\r\n') : retained;
+    const result = spawnSync(protocolHarness().executable, [target, input], {encoding: 'utf8'});
+    if (result.error || result.signal || result.status !== 0) {
+        throw new RangeError(`Native ${target} parser failed: ${result.error?.message ?? result.signal ?? result.status}\n${result.stderr ?? ''}`);
+    }
+};
 
 const targets = {
     tokenizer(source) { new Tokenizer(source, '<fuzz>').parse(); },
     parser(source) { new Parser().parse(source, '<fuzz>'); },
     vmi(source) { ModuleInterface.parse(source); },
     vmeta(source) { LibraryMetadata.parse(source); },
-    elf(source) { ElfObject.parse(Buffer.from(source, 'base64')); }
+    elf(source) { ElfObject.parse(Buffer.from(source, 'base64')); },
+    module(source) {
+        const root = path.join(os.tmpdir(), 'valen-module-fuzz');
+        const entry = path.join(root, 'main.ar'), dependency = path.join(root, 'dependency.ar');
+        const specifier = source.endsWith('\n') ? source.slice(0, -1) : source;
+        const documents = new Map([[entry, `import Dependency from ${JSON.stringify(specifier)}\nentry {{ __() -> i32 { return 0 } }}\n`],
+            [dependency, 'library Dependency {{ value() -> i64 { return 0 } }}\n']]);
+        new ModuleLoader({sourceRoot: root, libraryPath: root, documents}).load(entry);
+    },
+    http(source) { evaluateProtocol('http', source); },
+    websocket(source) { evaluateProtocol('websocket', source); }
 };
 
 const randomGenerator = seed => {
