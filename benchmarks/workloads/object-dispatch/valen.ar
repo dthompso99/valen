@@ -1,0 +1,24 @@
+import System from 'libSystem.ar'
+
+Operation {{ apply(value:i64) -> i64 { return value } }}
+Base {{ apply(value:i64) -> i64 { return value + 1 } }}
+Child inherits Base implements Operation {{ apply(value:i64) -> i64 { return value + 2 } }}
+
+entry {{
+    __() -> i32 {
+        local base = new Base()
+        local child = new Child()
+        local virtual:Base = child
+        local contract:Operation = child
+        local checksum:i64 = 1
+        local index:i64 = 0
+        while index < 50000000 {
+            checksum = (checksum + base.apply((index ^ checksum) & 2147483647)) & 2147483647
+            checksum = (checksum + virtual.apply((index ^ checksum) & 2147483647)) & 2147483647
+            checksum = (checksum + contract.apply((index ^ checksum) & 2147483647)) & 2147483647
+            index = index + 1
+        }
+        System.print(checksum)
+        return 0
+    }
+}}

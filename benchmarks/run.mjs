@@ -15,6 +15,7 @@ const option = name => {
     return index < 0 ? null : process.argv[index + 1];
 };
 const requested = new Set((option('--languages') ?? 'valen,valen-llvm,c,cpp,rust,go,java,node').split(',').filter(Boolean));
+const requestedWorkloads = (option('--workloads') ?? 'integer-loop,object-dispatch').split(',').filter(Boolean);
 const repetitions = Number(option('--repetitions') ?? 5);
 const outputPath = option('--output');
 const keep = process.argv.includes('--keep');
@@ -30,6 +31,12 @@ const memory = kib => kib == null ? 'unavailable' : kib < 1024 ? `${kib} KiB` : 
 const environment = {...process.env, VALEN_LIBRARY_PATH: path.join(root, 'lib')};
 const valenCompiler = path.join(root, 'valen');
 const fileFingerprint = filePath => createHash('sha256').update(fs.readFileSync(filePath)).digest('hex').slice(0, 12);
+const artifactPath = (workload, language) => path.join(temporary, `${workload}-${language}`);
+const workloads = {
+    'integer-loop': {expectedOutput: '124999999686\n', iterations: 1000000000, javaClass: 'IntegerLoop'},
+    'object-dispatch': {expectedOutput: '1426395009\n', iterations: 50000000, javaClass: 'ObjectDispatch'}
+};
+for (const name of requestedWorkloads) if (!workloads[name]) throw new Error(`Unknown workload '${name}'`);
 
 async function measure(command, args, options = {}) {
     const started = process.hrtime.bigint();
@@ -82,34 +89,34 @@ const languages = {
     valen: {
         tools: [valenCompiler], missingHint: 'run ./scripts/bootstrap-valen.sh first',
         version: () => `Valen native compiler (sha256:${fileFingerprint(valenCompiler)})`,
-        compile: source => ({command: valenCompiler, args: [source, '-O1', '-o', path.join(temporary, 'integer-loop-valen')]}),
-        runtime: () => ({name: 'valen', command: path.join(temporary, 'integer-loop-valen'), args: []}), artifact: () => path.join(temporary, 'integer-loop-valen')
+        compile: (source, workload) => ({command: valenCompiler, args: [source, '-O1', '-o', artifactPath(workload, 'valen')]}),
+        runtime: (source, workload) => ({name: 'valen', command: artifactPath(workload, 'valen'), args: []}), artifact: (source, workload) => artifactPath(workload, 'valen')
     },
     'valen-llvm': {
         tools: [valenCompiler, '/usr/bin/clang'], missingHint: 'run ./scripts/bootstrap-valen.sh and install clang first',
         version: () => `Valen LLVM backend (sha256:${fileFingerprint(valenCompiler)}; ${version('/usr/bin/clang')})`,
-        compile: source => ({command: valenCompiler, args: ['--backend', 'llvm', '--target', 'x86_64-linux', source, '-O1', '-o', path.join(temporary, 'integer-loop-valen-llvm')]}),
-        runtime: () => ({name: 'valen-llvm', command: path.join(temporary, 'integer-loop-valen-llvm'), args: []}), artifact: () => path.join(temporary, 'integer-loop-valen-llvm')
+        compile: (source, workload) => ({command: valenCompiler, args: ['--backend', 'llvm', '--target', 'x86_64-linux', source, '-O1', '-o', artifactPath(workload, 'valen-llvm')]}),
+        runtime: (source, workload) => ({name: 'valen-llvm', command: artifactPath(workload, 'valen-llvm'), args: []}), artifact: (source, workload) => artifactPath(workload, 'valen-llvm')
     },
     c: {
-        tools: ['cc'], version: () => version('cc'), compile: source => ({command: 'cc', args: ['-std=c11', '-O2', source, '-o', path.join(temporary, 'integer-loop-c')]}),
-        runtime: () => ({name: 'c', command: path.join(temporary, 'integer-loop-c'), args: []}), artifact: () => path.join(temporary, 'integer-loop-c')
+        tools: ['cc'], version: () => version('cc'), compile: (source, workload) => ({command: 'cc', args: ['-std=c11', '-O2', source, '-o', artifactPath(workload, 'c')]}),
+        runtime: (source, workload) => ({name: 'c', command: artifactPath(workload, 'c'), args: []}), artifact: (source, workload) => artifactPath(workload, 'c')
     },
     cpp: {
-        tools: ['c++'], version: () => version('c++'), compile: source => ({command: 'c++', args: ['-std=c++20', '-O2', source, '-o', path.join(temporary, 'integer-loop-cpp')]}),
-        runtime: () => ({name: 'cpp', command: path.join(temporary, 'integer-loop-cpp'), args: []}), artifact: () => path.join(temporary, 'integer-loop-cpp')
+        tools: ['c++'], version: () => version('c++'), compile: (source, workload) => ({command: 'c++', args: ['-std=c++20', '-O2', source, '-o', artifactPath(workload, 'cpp')]}),
+        runtime: (source, workload) => ({name: 'cpp', command: artifactPath(workload, 'cpp'), args: []}), artifact: (source, workload) => artifactPath(workload, 'cpp')
     },
     rust: {
-        tools: ['rustc'], version: () => version('rustc'), compile: source => ({command: 'rustc', args: ['-C', 'opt-level=3', source, '-o', path.join(temporary, 'integer-loop-rust')]}),
-        runtime: () => ({name: 'rust', command: path.join(temporary, 'integer-loop-rust'), args: []}), artifact: () => path.join(temporary, 'integer-loop-rust')
+        tools: ['rustc'], version: () => version('rustc'), compile: (source, workload) => ({command: 'rustc', args: ['-C', 'opt-level=3', source, '-o', artifactPath(workload, 'rust')]}),
+        runtime: (source, workload) => ({name: 'rust', command: artifactPath(workload, 'rust'), args: []}), artifact: (source, workload) => artifactPath(workload, 'rust')
     },
     go: {
-        tools: ['go'], version: () => version('go', ['version']), compile: source => ({command: 'go', args: ['build', '-o', path.join(temporary, 'integer-loop-go'), source]}),
-        runtime: () => ({name: 'go', command: path.join(temporary, 'integer-loop-go'), args: []}), artifact: () => path.join(temporary, 'integer-loop-go')
+        tools: ['go'], version: () => version('go', ['version']), compile: (source, workload) => ({command: 'go', args: ['build', '-o', artifactPath(workload, 'go'), source]}),
+        runtime: (source, workload) => ({name: 'go', command: artifactPath(workload, 'go'), args: []}), artifact: (source, workload) => artifactPath(workload, 'go')
     },
     java: {
         tools: ['java', 'javac'], version: () => version('java'), compile: source => ({command: 'javac', args: ['-d', temporary, source]}),
-        runtime: () => ({name: 'java', command: 'java', args: ['-cp', temporary, 'IntegerLoop']}), artifact: () => path.join(temporary, 'IntegerLoop.class')
+        runtime: (source, workload) => ({name: 'java', command: 'java', args: ['-cp', temporary, workloads[workload].javaClass]}), artifact: (source, workload) => path.join(temporary, `${workloads[workload].javaClass}.class`)
     },
     node: {
         tools: ['node'], version: () => version('node'), compile: source => ({command: 'node', args: ['--check', source]}),
@@ -124,41 +131,42 @@ const report = {
         timestamp: new Date().toISOString(), platform: os.platform(), release: os.release(), arch: os.arch(),
         cpu: os.cpus()[0]?.model ?? 'unknown', cpuCount: os.cpus().length, totalMemoryBytes: os.totalmem()
     },
-    configuration: {repetitions, warmupRuns: 1, workload: 'integer-loop', iterations: 1000000000},
+    configuration: {repetitions, warmupRuns: 1, workloads: requestedWorkloads.map(name => ({name, iterations: workloads[name].iterations}))},
     skipped: [], results: []
 };
 
 try {
-    for (const name of requested) {
+    for (const workloadName of requestedWorkloads) for (const name of requested) {
         const language = languages[name];
         if (!language) throw new Error(`Unknown language '${name}'`);
         const missing = language.tools.filter(tool => !commandExists(tool));
         if (missing.length) {
             const hint = language.missingHint ? `; ${language.missingHint}` : '';
-            report.skipped.push({language: name, reason: `missing ${missing.join(', ')}${hint}`});
+            report.skipped.push({workload: workloadName, language: name, reason: `missing ${missing.join(', ')}${hint}`});
             continue;
         }
         try {
-            const source = path.join(benchmarkRoot, 'workloads/integer-loop', extensions[name]);
-            const command = language.compile(source);
+            const filename = name === 'java' ? `${workloads[workloadName].javaClass}.java` : extensions[name];
+            const source = path.join(benchmarkRoot, 'workloads', workloadName, filename);
+            const command = language.compile(source, workloadName);
             const compilation = await measure(command.command, command.args);
-            const runtime = language.runtime(source);
-            const execution = await repeated(runtime, '124999999686\n');
-            const artifact = language.artifact(source);
+            const runtime = language.runtime(source, workloadName);
+            const execution = await repeated(runtime, workloads[workloadName].expectedOutput);
+            const artifact = language.artifact(source, workloadName);
             const dynamic = ['valen', 'valen-llvm', 'c', 'cpp', 'rust', 'go'].includes(name)
                 ? spawnSync('readelf', ['-d', artifact], {encoding: 'utf8'}).stdout.match(/NEEDED[^\[]*\[([^\]]+)\]/g)?.map(item => item.slice(item.indexOf('[') + 1, -1)) ?? []
                 : [];
-            report.results.push({language: name, version: language.version(),
+            report.results.push({workload: workloadName, language: name, version: language.version(),
             compile: {seconds: compilation.wallSeconds, peakRssKiB: compilation.maxRssKiB}, execution,
             artifact: {bytes: fs.statSync(artifact).size, dynamicDependencies: dynamic}});
         } catch (error) {
-            report.skipped.push({language: name, reason: error.message.split('\n').filter(Boolean).slice(0, 2).join(' — ')});
+            report.skipped.push({workload: workloadName, language: name, reason: error.message.split('\n').filter(Boolean).slice(0, 2).join(' — ')});
         }
     }
     const lines = ['# Valen comparative benchmark', '', `CPU: ${report.metadata.cpu}`, `Commit: ${report.metadata.commit}`, '',
-        '| Language | Compile | Runtime median | Peak RSS | Artifact | Dynamic dependencies |', '| --- | ---: | ---: | ---: | ---: | --- |'];
-    for (const result of report.results) lines.push(`| ${result.language} | ${result.compile.seconds.toFixed(3)} s | ${result.execution.medianSeconds.toFixed(3)} s | ${memory(result.execution.peakRssKiB)} | ${(result.artifact.bytes / 1024).toFixed(1)} KiB | ${result.artifact.dynamicDependencies.join(', ') || 'none'} |`);
-    for (const skipped of report.skipped) lines.push(`| ${skipped.language} | skipped: ${skipped.reason} | | | | |`);
+        '| Workload | Language | Compile | Runtime median | Peak RSS | Artifact | Dynamic dependencies |', '| --- | --- | ---: | ---: | ---: | ---: | --- |'];
+    for (const result of report.results) lines.push(`| ${result.workload} | ${result.language} | ${result.compile.seconds.toFixed(3)} s | ${result.execution.medianSeconds.toFixed(3)} s | ${memory(result.execution.peakRssKiB)} | ${(result.artifact.bytes / 1024).toFixed(1)} KiB | ${result.artifact.dynamicDependencies.join(', ') || 'none'} |`);
+    for (const skipped of report.skipped) lines.push(`| ${skipped.workload} | ${skipped.language} | skipped: ${skipped.reason} | | | | |`);
     const rendered = `${lines.join('\n')}\n`;
     process.stdout.write(rendered);
     if (outputPath) fs.writeFileSync(path.resolve(outputPath), `${JSON.stringify(report, null, 2)}\n`);

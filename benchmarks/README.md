@@ -19,6 +19,7 @@ Select languages, change the measured repetition count, or preserve a machine-re
 
 ```sh
 node benchmarks/run.mjs --languages valen,valen-llvm,c,cpp,rust,go
+node benchmarks/run.mjs --workloads integer-loop,object-dispatch
 node benchmarks/run.mjs --repetitions 10
 node benchmarks/run.mjs --output benchmarks/results/local.json
 ```
@@ -35,13 +36,22 @@ the same host; neither path bootstraps the compiler during measurement.
 The first implementation baseline is recorded in
 [results/x86_64-llvm-baseline.md](results/x86_64-llvm-baseline.md).
 
-## Current workload
+## Current workloads
 
 `integer-loop` performs one billion signed-integer iterations with multiplication, division, remainder
 reconstruction, accumulation, and a deterministic checksum. Its duration is long enough for process RSS
 sampling and reduces process-launch noise. It primarily measures instruction selection, register allocation,
 integer division, loop branches, and JIT warmup where applicable; it does not represent whole-application
 performance.
+
+`object-dispatch` performs fifty million iterations containing one direct method call, one inherited virtual
+call, and one contract/interface call. Each result feeds the next call through a bounded checksum so ahead-of-time
+compilers cannot replace the loop with a closed-form sum. It measures object dispatch and call lowering without
+including allocation in the timed loop.
+
+Use `--workloads` to select a comma-separated subset. Reports identify every row by workload, and the JSON
+configuration records each workload's iteration count. All implementations of a workload must produce the same
+deterministic output before any timing is accepted.
 
 The report records:
 
