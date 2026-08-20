@@ -13,6 +13,7 @@ If you are new to the project, read these in order:
 9. [Language server](language-server.md) — connect editor diagnostics and semantic navigation through standard LSP.
 10. [Standard library architecture](standard-library.md) — understand module boundaries, static distribution, and the future shared-library path.
 11. [Project manifests and lockfiles](project-manifests.md) — describe and verify deterministic local dependency graphs.
+12. [Runtime metrics](runtime-metrics.md) — inspect managed allocation, root, collection, and reclamation counters.
 
 For compiler contributors:
 

@@ -27,6 +27,7 @@ export const validPrograms = [
     {name: 'array slices and nested arrays', source: 'bootstrap/test/fixtures/array-slices.ar'},
     {name: 'garbage collection', source: 'bootstrap/test/fixtures/garbage-collection.ar'},
     {name: 'repeated garbage collection', source: 'bootstrap/test/fixtures/garbage-collection-repeated.ar'},
+    {name: 'runtime GC metrics', source: 'bootstrap/test/fixtures/runtime-metrics.ar', compilerArguments: ['--runtime-metrics']},
     {name: 'optional diagnostics', source: 'bootstrap/test/fixtures/diagnostics.ar'},
     {name: 'optional primitives', source: 'bootstrap/test/fixtures/optional-primitives.ar'},
     {name: 'flow-sensitive optional narrowing', source: 'bootstrap/test/fixtures/optional-narrowing.ar'},

@@ -370,7 +370,7 @@ test('generation 1 passes the native compiler conformance suite', async t => {
         for (const fixture of validPrograms) {
             await t.test(fixture.name, () => {
                 const executable = path.join(directory, `program-${sequence++}`);
-                const compile = spawnSync(compilerPath, [path.join(projectRoot, fixture.source), '-o', executable], {encoding: 'utf8', env: environment, cwd: projectRoot});
+                const compile = spawnSync(compilerPath, [...(fixture.compilerArguments ?? []), path.join(projectRoot, fixture.source), '-o', executable], {encoding: 'utf8', env: environment, cwd: projectRoot});
                 assert.equal(compile.status, 0, compile.stderr || compile.stdout);
                 const run = spawnSync(executable, [], {encoding: 'utf8', env: environment, cwd: projectRoot});
                 assert.equal(run.status, 0, `${fixture.source}\n${run.stderr || run.stdout}`);

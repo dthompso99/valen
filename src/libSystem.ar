@@ -21,6 +21,15 @@ library System {{
     native currentDirectory() -> string?
     native environmentVariable(name:string) -> string?
     native collectGarbage() -> void
+    native gcTrackedBytes() -> i64
+    native gcTrackedAllocatedBytes() -> i64
+    native gcHeapObjects() -> i64
+    native gcRoots() -> i64
+    native gcPeakRoots() -> i64
+    native gcCollections() -> i64
+    native gcReclaimedObjects() -> i64
+    native gcTrackedReclaimedBytes() -> i64
+    native processArenaEnabled() -> bool
     native enableProcessArena() -> void
     native enableShutdownSignals() -> bool
     native shutdownRequested() -> bool
@@ -30,6 +39,35 @@ library System {{
     native memoryCompare(left:Array<u8>, leftOffset:i64, right:Array<u8>, rightOffset:i64, count:i64) -> i64
     native fileDescriptor(file:File) -> i64
     native makeFileNonblocking(file:File) -> bool
+
+    runtimeMetrics() -> RuntimeMetrics {
+        return new RuntimeMetrics(gcTrackedBytes(), gcTrackedAllocatedBytes(), gcHeapObjects(), gcRoots(),
+            gcPeakRoots(), gcCollections(), gcReclaimedObjects(), gcTrackedReclaimedBytes(), processArenaEnabled())
+    }
+
+    RuntimeMetrics {{
+        member trackedBytes:i64
+        member trackedAllocatedBytes:i64
+        member heapObjects:i64
+        member roots:i64
+        member peakRoots:i64
+        member collections:i64
+        member reclaimedObjects:i64
+        member trackedReclaimedBytes:i64
+        member arenaEnabled:bool
+
+        __(trackedBytes:i64, trackedAllocatedBytes:i64, heapObjects:i64, roots:i64, peakRoots:i64, collections:i64, reclaimedObjects:i64, trackedReclaimedBytes:i64, arenaEnabled:bool) -> void {
+            self.trackedBytes = trackedBytes
+            self.trackedAllocatedBytes = trackedAllocatedBytes
+            self.heapObjects = heapObjects
+            self.roots = roots
+            self.peakRoots = peakRoots
+            self.collections = collections
+            self.reclaimedObjects = reclaimedObjects
+            self.trackedReclaimedBytes = trackedReclaimedBytes
+            self.arenaEnabled = arenaEnabled
+        }
+    }}
 
     parseInteger(input:string) -> IntegerParseResult {
         if input.length == 0 { return new IntegerParseResult(false, 0) }

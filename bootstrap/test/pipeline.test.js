@@ -252,7 +252,8 @@ test('standard output and error lower to distinct native descriptors', () => {
     const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/stdio.ar');
     const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
-    const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
+    const ir = new IrGenerator().generate(semantic);
+    const assembly = new X86_64Backend().generate(ir);
     assert.match(assembly, /valen_System_write:[\s\S]*?mov edi, 1/);
     assert.match(assembly, /valen_System_writeError:[\s\S]*?mov edi, 2/);
 });
@@ -1067,6 +1068,28 @@ test('managed allocation triggers adaptive collection and native handles use GC 
     assert.match(assembly, /valen_gc_maybe_collect:[\s\S]*cmp rax, QWORD PTR \[rip\+valen_gc_threshold\][\s\S]*jmp valen_gc_collect/);
     assert.match(assembly, /valen_Network_listen:[\s\S]*call valen_gc_alloc[\s\S]*mov QWORD PTR \[rax\+16\], r12/);
     assert.match(assembly, /valen_gc_native_handle_finalize:[\s\S]*mov QWORD PTR \[r10\+16\], -1/);
+});
+
+test('runtime GC metrics count allocations, roots, collections, and reclamation', () => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/runtime-metrics.ar');
+    const semantic = new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot, libraryPath: path.join(projectRoot, 'lib')});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const ir = new IrGenerator().generate(semantic);
+    const disabled = new X86_64Backend().generate(structuredClone(ir));
+    assert.doesNotMatch(disabled, /valen_gc_(allocated_bytes|objects|root_count|peak_roots|collections|reclaimed_objects|reclaimed_bytes)/);
+    const assembly = new X86_64Backend().generate(ir, {runtimeMetrics: true});
+    assert.match(assembly, /valen_System_gcTrackedBytes:[\s\S]*valen_gc_bytes/);
+    assert.match(assembly, /valen_gc_alloc:[\s\S]*valen_gc_allocated_bytes[\s\S]*valen_gc_objects/);
+    assert.match(assembly, /valen_gc_root_push:[\s\S]*valen_gc_root_count[\s\S]*valen_gc_peak_roots/);
+    assert.match(assembly, /\.Lgc_collect_begin:[\s\S]*valen_gc_collections/);
+    assert.match(assembly, /\.Lgc_reclaim:[\s\S]*valen_gc_reclaimed_objects[\s\S]*valen_gc_reclaimed_bytes/);
+});
+
+test('production runtime omits metrics storage and counter updates', () => {
+    const semantic = new SemanticAnalyzer().analyzeFile(path.join(projectRoot, 'bootstrap/test/fixtures/garbage-collection-repeated.ar'), {sourceRoot: projectRoot, libraryPath: path.join(projectRoot, 'lib')});
+    assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
+    const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
+    assert.doesNotMatch(assembly, /valen_gc_(allocated_bytes|objects|root_count|peak_roots|collections|reclaimed_objects|reclaimed_bytes)/);
 });
 
 test('shutdown signals lower to async-safe flags checked by application safe points', () => {

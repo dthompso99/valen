@@ -1,0 +1,35 @@
+import System from '/src/libSystem.ar'
+
+Sample {{
+    member value:i64
+}}
+
+entry {{
+    createGarbage() -> void {
+        local sample = new Sample()
+        sample.value = 42
+    }
+
+    __() -> i32 {
+        local before = System.runtimeMetrics()
+        if before.arenaEnabled { return 1 }
+        if before.trackedBytes < 0 || before.trackedAllocatedBytes < before.trackedBytes { return 2 }
+        if before.heapObjects < 0 || before.roots < 0 || before.peakRoots < before.roots { return 3 }
+
+        self.createGarbage()
+        local allocated = System.runtimeMetrics()
+        if allocated.trackedBytes <= before.trackedBytes { return 4 }
+        if allocated.trackedAllocatedBytes <= before.trackedAllocatedBytes { return 5 }
+        if allocated.heapObjects <= before.heapObjects { return 6 }
+        if allocated.roots <= 0 || allocated.peakRoots < allocated.roots { return 7 }
+
+        System.collectGarbage()
+        System.collectGarbage()
+        local collected = System.runtimeMetrics()
+        if collected.collections <= allocated.collections { return 8 }
+        if collected.reclaimedObjects <= allocated.reclaimedObjects { return 9 }
+        if collected.trackedReclaimedBytes <= allocated.trackedReclaimedBytes { return 10 }
+        if collected.heapObjects > allocated.heapObjects { return 11 }
+        return 0
+    }
+}}

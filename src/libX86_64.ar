@@ -193,8 +193,9 @@ library X86_64 {{
         member emissionModule:string?
         member includeRuntime:bool
         member includeModuleMetadata:bool
+        member runtimeMetrics:bool
 
-        __(program:Ir.Program, optimizationLevel:i64=1, emissionModule:string?=null, includeRuntime:bool=true, includeModuleMetadata:bool=false) -> void {
+        __(program:Ir.Program, optimizationLevel:i64=1, emissionModule:string?=null, includeRuntime:bool=true, includeModuleMetadata:bool=false, runtimeMetrics:bool=false) -> void {
             self.program = program
             self.writer = new Writer()
             self.functionSymbols = new Array<FunctionSymbol>(0)
@@ -227,6 +228,7 @@ library X86_64 {{
             self.emissionModule = emissionModule
             self.includeRuntime = includeRuntime
             self.includeModuleMetadata = includeModuleMetadata
+            self.runtimeMetrics = runtimeMetrics
         }
 
         generate() -> string {
@@ -333,6 +335,9 @@ library X86_64 {{
             if name == "valen_System_openRead" || name == "valen_System_openWrite" || name == "valen_System_read" || name == "valen_System_writeFile" || name == "valen_System_writeBytes" || name == "valen_System_sync" { return true }
             if name == "valen_System_close" || name == "valen_System_replaceFile" || name == "valen_System_removeFile" || name == "valen_System_makeExecutable" { return true }
             if name == "valen_System_lastError" || name == "valen_System_currentDirectory" || name == "valen_System_environmentVariable" || name == "valen_System_collectGarbage" { return true }
+            if name == "valen_System_gcTrackedBytes" || name == "valen_System_gcTrackedAllocatedBytes" || name == "valen_System_gcHeapObjects" || name == "valen_System_gcRoots" { return true }
+            if name == "valen_System_gcPeakRoots" || name == "valen_System_gcCollections" || name == "valen_System_gcReclaimedObjects" || name == "valen_System_gcTrackedReclaimedBytes" { return true }
+            if name == "valen_System_processArenaEnabled" { return true }
             if name == "valen_System_enableProcessArena" || name == "valen_System_enableShutdownSignals" || name == "valen_System_shutdownRequested" { return true }
             if name == "valen_System_link" || name == "valen_System_compileLlvm" || name == "valen_System_memoryCopy" || name == "valen_System_memoryCompare" { return true }
             if name == "valen_System_fileDescriptor" || name == "valen_System_makeFileNonblocking" { return true }
@@ -565,6 +570,7 @@ library X86_64 {{
             local rootPushDone = self.currentFunctionSymbol + "__gc_push_done"
             local rootPopSlow = self.currentFunctionSymbol + "__gc_pop_slow"
             local rootPopDone = self.currentFunctionSymbol + "__gc_pop_done"
+            local rootCounted = self.currentFunctionSymbol + "__gc_root_counted"
             self.writer.line2(".globl ", self.currentFunctionSymbol)
             self.writer.line2(self.currentFunctionSymbol, ":")
             self.writer.line("    push rbp")
@@ -609,7 +615,13 @@ library X86_64 {{
             }
             self.writer.line("    cmp QWORD PTR [rip+valen_gc_workers], 0"); self.writer.line2("    jne ", rootPushSlow)
             self.writer.line("    mov rax, QWORD PTR [rip+valen_gc_roots]"); self.writer.lineInteger("    mov QWORD PTR [rbp-", rootRecordOffset, "], rax")
-            self.writer.lineInteger("    lea rax, [rbp-", rootRecordOffset, "]"); self.writer.line("    mov QWORD PTR [rip+valen_gc_roots], rax"); self.writer.line2("    jmp ", rootPushDone)
+            self.writer.lineInteger("    lea rax, [rbp-", rootRecordOffset, "]"); self.writer.line("    mov QWORD PTR [rip+valen_gc_roots], rax")
+            if self.runtimeMetrics {
+                self.writer.line("    inc QWORD PTR [rip+valen_gc_root_count]"); self.writer.line("    mov rax, QWORD PTR [rip+valen_gc_root_count]")
+                self.writer.line("    cmp rax, QWORD PTR [rip+valen_gc_peak_roots]"); self.writer.line2("    jbe ", rootCounted)
+                self.writer.line("    mov QWORD PTR [rip+valen_gc_peak_roots], rax"); self.writer.line2(rootCounted, ":")
+            }
+            self.writer.line2("    jmp ", rootPushDone)
             self.writer.line2(rootPushSlow, ":"); self.writer.lineInteger("    lea rdi, [rbp-", rootRecordOffset, "]"); self.writer.line("    call valen_gc_root_push"); self.writer.line2(rootPushDone, ":")
             blockIndex = 0
             while blockIndex < function.blocks.length {
@@ -654,7 +666,8 @@ library X86_64 {{
             }
             self.writer.line2(endLabel, ":")
             self.writer.line("    cmp QWORD PTR [rip+valen_gc_workers], 0"); self.writer.line2("    jne ", rootPopSlow)
-            self.writer.lineInteger("    mov rcx, QWORD PTR [rbp-", rootRecordOffset, "]"); self.writer.line("    mov QWORD PTR [rip+valen_gc_roots], rcx"); self.writer.line2("    jmp ", rootPopDone)
+            self.writer.lineInteger("    mov rcx, QWORD PTR [rbp-", rootRecordOffset, "]"); self.writer.line("    mov QWORD PTR [rip+valen_gc_roots], rcx")
+            if self.runtimeMetrics { self.writer.line("    dec QWORD PTR [rip+valen_gc_root_count]") }; self.writer.line2("    jmp ", rootPopDone)
             self.writer.line2(rootPopSlow, ":"); self.writer.line("    sub rsp, 16"); self.writer.line("    mov QWORD PTR [rsp], rax"); self.writer.lineInteger("    lea rdi, [rbp-", rootRecordOffset, "]"); self.writer.line("    call valen_gc_root_pop"); self.writer.line("    mov rax, QWORD PTR [rsp]"); self.writer.line("    add rsp, 16"); self.writer.line2(rootPopDone, ":")
             registerIndex = 0
             while registerIndex < 5 {
@@ -1600,7 +1613,9 @@ library X86_64 {{
             self.writer.line("    add rdi, 48"); self.writer.line("    cmp DWORD PTR [rip+valen_arena_enabled], 0"); self.writer.line("    je .Lgc_alloc_direct"); self.writer.line("    call valen_alloc"); self.writer.line("    jmp .Lgc_alloc_ready")
             self.writer.line(".Lgc_alloc_direct:"); self.writer.line("    mov rsi, rdi"); self.writer.line("    xor edi, edi"); self.writer.line("    mov edx, 3"); self.writer.line("    mov r10d, 34"); self.writer.line("    mov r8, -1"); self.writer.line("    xor r9d, r9d"); self.writer.line("    mov eax, 9"); self.writer.line("    syscall"); self.writer.line(".Lgc_alloc_ready:")
             self.writer.line("    cmp rax, -4095"); self.writer.line("    jae .Lallocation_error")
-            self.writer.line("    lea rcx, [r12+48]"); self.writer.line("    mov QWORD PTR [rax+8], rcx"); self.writer.line("    mov QWORD PTR [rax+16], r13"); self.writer.line("    mov QWORD PTR [rax+24], r14"); self.writer.line("    mov QWORD PTR [rax+32], 0"); self.writer.line("    mov QWORD PTR [rax+40], r15"); self.writer.line("    push rax"); self.writer.line("    call valen_gc_heap_lock"); self.writer.line("    pop rax"); self.writer.line("    mov rdx, QWORD PTR [rip+valen_gc_heap]"); self.writer.line("    mov QWORD PTR [rax], rdx"); self.writer.line("    mov QWORD PTR [rip+valen_gc_heap], rax"); self.writer.line("    lock add QWORD PTR [rip+valen_gc_bytes], rcx"); self.writer.line("    mov DWORD PTR [rip+valen_gc_lock], 0"); self.writer.line("    add rax, 48")
+            self.writer.line("    lea rcx, [r12+48]"); self.writer.line("    mov QWORD PTR [rax+8], rcx"); self.writer.line("    mov QWORD PTR [rax+16], r13"); self.writer.line("    mov QWORD PTR [rax+24], r14"); self.writer.line("    mov QWORD PTR [rax+32], 0"); self.writer.line("    mov QWORD PTR [rax+40], r15"); self.writer.line("    push rax"); self.writer.line("    call valen_gc_heap_lock"); self.writer.line("    pop rax"); self.writer.line("    mov rdx, QWORD PTR [rip+valen_gc_heap]"); self.writer.line("    mov QWORD PTR [rax], rdx"); self.writer.line("    mov QWORD PTR [rip+valen_gc_heap], rax"); self.writer.line("    lock add QWORD PTR [rip+valen_gc_bytes], rcx")
+            if self.runtimeMetrics { self.writer.line("    lock add QWORD PTR [rip+valen_gc_allocated_bytes], rcx"); self.writer.line("    lock inc QWORD PTR [rip+valen_gc_objects]") }
+            self.writer.line("    mov DWORD PTR [rip+valen_gc_lock], 0"); self.writer.line("    add rax, 48")
             self.writer.line("    pop r15"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    ret"); self.writer.line("")
             self.writer.line(".globl valen_gc_maybe_collect"); self.writer.line("valen_gc_maybe_collect:"); self.writer.line("    cmp DWORD PTR [rip+valen_arena_enabled], 0"); self.writer.line("    jne .Lgc_maybe_done"); self.writer.line("    cmp QWORD PTR [rip+valen_gc_workers], 0"); self.writer.line("    je .Lgc_maybe_threshold"); self.writer.line("    call valen_gc_safepoint"); self.writer.line(".Lgc_maybe_threshold:"); self.writer.line("    mov rax, QWORD PTR [rip+valen_gc_bytes]"); self.writer.line("    cmp rax, QWORD PTR [rip+valen_gc_threshold]"); self.writer.line("    jb .Lgc_maybe_done"); self.writer.line("    jmp valen_gc_collect"); self.writer.line(".Lgc_maybe_done:"); self.writer.line("    ret"); self.writer.line("")
             self.writer.line("valen_gc_heap_lock:"); self.writer.line("    xor eax, eax"); self.writer.line("    mov edx, 1"); self.writer.line("    lock cmpxchg DWORD PTR [rip+valen_gc_lock], edx"); self.writer.line("    je .Lgc_heap_locked"); self.writer.line("    pause"); self.writer.line("    jmp valen_gc_heap_lock"); self.writer.line(".Lgc_heap_locked:"); self.writer.line("    ret"); self.writer.line("")
@@ -1611,24 +1626,47 @@ library X86_64 {{
             self.writer.line("    mov eax, 202"); self.writer.line("    lea rdi, [rip+valen_gc_parked]"); self.writer.line("    mov esi, 1"); self.writer.line("    mov edx, 1"); self.writer.line("    xor r10d, r10d"); self.writer.line("    xor r8d, r8d"); self.writer.line("    xor r9d, r9d"); self.writer.line("    syscall")
             self.writer.line(".Lgc_safepoint_wait:"); self.writer.line("    cmp DWORD PTR [rip+valen_gc_request], 0"); self.writer.line("    je .Lgc_safepoint_release"); self.writer.line("    mov eax, 202"); self.writer.line("    lea rdi, [rip+valen_gc_request]"); self.writer.line("    xor esi, esi"); self.writer.line("    mov edx, 1"); self.writer.line("    xor r10d, r10d"); self.writer.line("    xor r8d, r8d"); self.writer.line("    xor r9d, r9d"); self.writer.line("    syscall"); self.writer.line("    jmp .Lgc_safepoint_wait")
             self.writer.line(".Lgc_safepoint_release:"); self.writer.line("    lock dec DWORD PTR [rip+valen_gc_parked]"); self.writer.line("    mov eax, 202"); self.writer.line("    lea rdi, [rip+valen_gc_parked]"); self.writer.line("    mov esi, 1"); self.writer.line("    mov edx, 1"); self.writer.line("    xor r10d, r10d"); self.writer.line("    xor r8d, r8d"); self.writer.line("    xor r9d, r9d"); self.writer.line("    syscall"); self.writer.line(".Lgc_safepoint_done:"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line("valen_gc_root_push:"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi"); self.writer.line("    call valen_gc_heap_lock"); self.writer.line("    mov rax, QWORD PTR [rip+valen_gc_roots]"); self.writer.line("    mov QWORD PTR [rbx], rax"); self.writer.line("    mov QWORD PTR [rip+valen_gc_roots], rbx"); self.writer.line("    mov DWORD PTR [rip+valen_gc_lock], 0"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line("valen_gc_root_pop:"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi"); self.writer.line("    call valen_gc_heap_lock"); self.writer.line("    lea rax, [rip+valen_gc_roots]"); self.writer.line(".Lgc_root_pop_find:"); self.writer.line("    mov rcx, QWORD PTR [rax]"); self.writer.line("    test rcx, rcx"); self.writer.line("    je .Lgc_root_pop_done"); self.writer.line("    cmp rcx, rbx"); self.writer.line("    je .Lgc_root_pop_remove"); self.writer.line("    mov rax, rcx"); self.writer.line("    jmp .Lgc_root_pop_find"); self.writer.line(".Lgc_root_pop_remove:"); self.writer.line("    mov rcx, QWORD PTR [rbx]"); self.writer.line("    mov QWORD PTR [rax], rcx"); self.writer.line(".Lgc_root_pop_done:"); self.writer.line("    mov DWORD PTR [rip+valen_gc_lock], 0"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line("valen_gc_root_push:"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi"); self.writer.line("    call valen_gc_heap_lock"); self.writer.line("    mov rax, QWORD PTR [rip+valen_gc_roots]"); self.writer.line("    mov QWORD PTR [rbx], rax"); self.writer.line("    mov QWORD PTR [rip+valen_gc_roots], rbx")
+            if self.runtimeMetrics { self.writer.line("    inc QWORD PTR [rip+valen_gc_root_count]"); self.writer.line("    mov rax, QWORD PTR [rip+valen_gc_root_count]"); self.writer.line("    cmp rax, QWORD PTR [rip+valen_gc_peak_roots]"); self.writer.line("    jbe .Lgc_root_push_counted"); self.writer.line("    mov QWORD PTR [rip+valen_gc_peak_roots], rax"); self.writer.line(".Lgc_root_push_counted:") }
+            self.writer.line("    mov DWORD PTR [rip+valen_gc_lock], 0"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("")
+            self.writer.line("valen_gc_root_pop:"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi"); self.writer.line("    call valen_gc_heap_lock"); self.writer.line("    lea rax, [rip+valen_gc_roots]"); self.writer.line(".Lgc_root_pop_find:"); self.writer.line("    mov rcx, QWORD PTR [rax]"); self.writer.line("    test rcx, rcx"); self.writer.line("    je .Lgc_root_pop_done"); self.writer.line("    cmp rcx, rbx"); self.writer.line("    je .Lgc_root_pop_remove"); self.writer.line("    mov rax, rcx"); self.writer.line("    jmp .Lgc_root_pop_find"); self.writer.line(".Lgc_root_pop_remove:"); self.writer.line("    mov rcx, QWORD PTR [rbx]"); self.writer.line("    mov QWORD PTR [rax], rcx")
+            if self.runtimeMetrics { self.writer.line("    dec QWORD PTR [rip+valen_gc_root_count]") }
+            self.writer.line(".Lgc_root_pop_done:"); self.writer.line("    mov DWORD PTR [rip+valen_gc_lock], 0"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("")
             self.writer.line(".globl valen_gc_native_handle_finalize"); self.writer.line("valen_gc_native_handle_finalize:"); self.writer.line("    cmp QWORD PTR [rdi+16], 0"); self.writer.line("    jl .Lgc_native_handle_finalized"); self.writer.line("    mov r10, rdi"); self.writer.line("    mov rdi, QWORD PTR [rdi+16]"); self.writer.line("    mov eax, 3"); self.writer.line("    syscall"); self.writer.line("    mov QWORD PTR [r10+16], -1"); self.writer.line("    mov QWORD PTR [r10+8], 0"); self.writer.line(".Lgc_native_handle_finalized:"); self.writer.line("    ret")
             self.writer.line(".globl valen_gc_mark"); self.writer.line("valen_gc_mark:"); self.writer.line("    test rdi, rdi"); self.writer.line("    je .Lgc_mark_done"); self.writer.line("    mov rax, QWORD PTR [rip+valen_gc_heap]"); self.writer.line(".Lgc_mark_find:"); self.writer.line("    test rax, rax"); self.writer.line("    je .Lgc_mark_done"); self.writer.line("    lea rcx, [rax+48]"); self.writer.line("    cmp rcx, rdi"); self.writer.line("    je .Lgc_mark_found"); self.writer.line("    mov rax, QWORD PTR [rax]"); self.writer.line("    jmp .Lgc_mark_find"); self.writer.line(".Lgc_mark_found:"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rax"); self.writer.line("    lea rax, [rip+valen_string_finalize]"); self.writer.line("    cmp QWORD PTR [rbx+40], rax"); self.writer.line("    je .Lgc_mark_live"); self.writer.line("    lea rax, [rip+valen_gc_native_handle_finalize]"); self.writer.line("    cmp QWORD PTR [rbx+40], rax"); self.writer.line("    jne .Lgc_mark_object"); self.writer.line("    cmp QWORD PTR [rdi+16], 0"); self.writer.line("    jge .Lgc_mark_live"); self.writer.line("    jmp .Lgc_mark_pop"); self.writer.line(".Lgc_mark_object:"); self.writer.line("    cmp QWORD PTR [rdi+8], 0"); self.writer.line("    je .Lgc_mark_pop"); self.writer.line(".Lgc_mark_live:"); self.writer.line("    cmp QWORD PTR [rbx+32], 0"); self.writer.line("    jne .Lgc_mark_pop"); self.writer.line("    mov QWORD PTR [rbx+32], 1"); self.writer.line("    mov rax, QWORD PTR [rbx+16]"); self.writer.line("    test rax, rax"); self.writer.line("    je .Lgc_mark_pop"); self.writer.line("    call rax"); self.writer.line(".Lgc_mark_pop:"); self.writer.line("    pop rbx"); self.writer.line(".Lgc_mark_done:"); self.writer.line("    ret"); self.writer.line("")
             self.writer.line(".globl valen_gc_collect"); self.writer.line("valen_gc_collect:"); self.writer.line("    cmp DWORD PTR [rip+valen_arena_enabled], 0"); self.writer.line("    jne .Lgc_collect_return"); self.writer.line("    cmp QWORD PTR [rip+valen_gc_workers], 0"); self.writer.line("    je .Lgc_collect_begin_single"); self.writer.line("    xor eax, eax"); self.writer.line("    mov edx, 1"); self.writer.line("    lock cmpxchg DWORD PTR [rip+valen_gc_collecting], edx"); self.writer.line("    jne valen_gc_safepoint")
             self.writer.line("    call valen_gc_state_lock"); self.writer.line("    mov DWORD PTR [rip+valen_gc_request], 1"); self.writer.line("    mov rax, QWORD PTR [rip+valen_gc_mutators]"); self.writer.line("    dec eax"); self.writer.line("    jns .Lgc_collect_target_ready"); self.writer.line("    xor eax, eax"); self.writer.line(".Lgc_collect_target_ready:"); self.writer.line("    mov DWORD PTR [rip+valen_gc_target], eax"); self.writer.line("    mov DWORD PTR [rip+valen_gc_state_guard], 0")
             self.writer.line(".Lgc_collect_wait:"); self.writer.line("    mov eax, DWORD PTR [rip+valen_gc_parked]"); self.writer.line("    cmp eax, DWORD PTR [rip+valen_gc_target]"); self.writer.line("    jae .Lgc_collect_begin_multi"); self.writer.line("    mov edx, eax"); self.writer.line("    mov eax, 202"); self.writer.line("    lea rdi, [rip+valen_gc_parked]"); self.writer.line("    xor esi, esi"); self.writer.line("    xor r10d, r10d"); self.writer.line("    xor r8d, r8d"); self.writer.line("    xor r9d, r9d"); self.writer.line("    syscall"); self.writer.line("    jmp .Lgc_collect_wait")
-            self.writer.line(".Lgc_collect_begin_multi:"); self.writer.line("    jmp .Lgc_collect_begin"); self.writer.line(".Lgc_collect_begin_single:"); self.writer.line(".Lgc_collect_begin:"); self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14")
+            self.writer.line(".Lgc_collect_begin_multi:"); self.writer.line("    jmp .Lgc_collect_begin"); self.writer.line(".Lgc_collect_begin_single:"); self.writer.line(".Lgc_collect_begin:")
+            if self.runtimeMetrics { self.writer.line("    lock inc QWORD PTR [rip+valen_gc_collections]") }
+            self.writer.line("    push rbp"); self.writer.line("    mov rbp, rsp"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14")
             self.writer.line("    mov r12, QWORD PTR [rip+valen_gc_roots]"); self.writer.line(".Lgc_root_frame:"); self.writer.line("    test r12, r12"); self.writer.line("    je .Lgc_weak_start"); self.writer.line("    mov rax, QWORD PTR [r12+8]"); self.writer.line("    mov rdi, QWORD PTR [r12+16]"); self.writer.line("    call rax"); self.writer.line("    mov r12, QWORD PTR [r12]"); self.writer.line("    jmp .Lgc_root_frame")
             self.writer.line(".Lgc_weak_start:"); self.writer.line("    mov r12, QWORD PTR [rip+valen_gc_heap]"); self.writer.line(".Lgc_weak_next:"); self.writer.line("    test r12, r12"); self.writer.line("    je .Lgc_sweep_start"); self.writer.line("    cmp QWORD PTR [r12+32], 0"); self.writer.line("    je .Lgc_weak_advance"); self.writer.line("    mov rax, QWORD PTR [r12+24]"); self.writer.line("    test rax, rax"); self.writer.line("    je .Lgc_weak_advance"); self.writer.line("    lea rdi, [r12+48]"); self.writer.line("    call rax"); self.writer.line(".Lgc_weak_advance:"); self.writer.line("    mov r12, QWORD PTR [r12]"); self.writer.line("    jmp .Lgc_weak_next")
             self.writer.line(".Lgc_sweep_start:"); self.writer.line("    lea r12, [rip+valen_gc_heap]"); self.writer.line("    mov QWORD PTR [rip+valen_gc_bytes], 0"); self.writer.line(".Lgc_sweep_next:"); self.writer.line("    mov rbx, QWORD PTR [r12]"); self.writer.line("    test rbx, rbx"); self.writer.line("    je .Lgc_done"); self.writer.line("    cmp QWORD PTR [rbx+32], 0"); self.writer.line("    je .Lgc_reclaim"); self.writer.line("    mov QWORD PTR [rbx+32], 0"); self.writer.line("    mov rax, QWORD PTR [rbx+8]"); self.writer.line("    add QWORD PTR [rip+valen_gc_bytes], rax"); self.writer.line("    mov r12, rbx"); self.writer.line("    jmp .Lgc_sweep_next")
-            self.writer.line(".Lgc_reclaim:"); self.writer.line("    mov r14, QWORD PTR [rbx]"); self.writer.line("    mov QWORD PTR [r12], r14"); self.writer.line("    mov rax, QWORD PTR [rbx+40]"); self.writer.line("    test rax, rax"); self.writer.line("    je .Lgc_unmap"); self.writer.line("    lea rdi, [rbx+48]"); self.writer.line("    call rax"); self.writer.line(".Lgc_unmap:"); self.writer.line("    mov rsi, QWORD PTR [rbx+8]"); self.writer.line("    mov rdi, rbx"); self.writer.line("    mov eax, 11"); self.writer.line("    syscall"); self.writer.line("    jmp .Lgc_sweep_next")
+            self.writer.line(".Lgc_reclaim:")
+            if self.runtimeMetrics { self.writer.line("    lock dec QWORD PTR [rip+valen_gc_objects]"); self.writer.line("    lock inc QWORD PTR [rip+valen_gc_reclaimed_objects]"); self.writer.line("    mov rax, QWORD PTR [rbx+8]"); self.writer.line("    lock add QWORD PTR [rip+valen_gc_reclaimed_bytes], rax") }
+            self.writer.line("    mov r14, QWORD PTR [rbx]"); self.writer.line("    mov QWORD PTR [r12], r14"); self.writer.line("    mov rax, QWORD PTR [rbx+40]"); self.writer.line("    test rax, rax"); self.writer.line("    je .Lgc_unmap"); self.writer.line("    lea rdi, [rbx+48]"); self.writer.line("    call rax"); self.writer.line(".Lgc_unmap:"); self.writer.line("    mov rsi, QWORD PTR [rbx+8]"); self.writer.line("    mov rdi, rbx"); self.writer.line("    mov eax, 11"); self.writer.line("    syscall"); self.writer.line("    jmp .Lgc_sweep_next")
             self.writer.line(".Lgc_done:"); self.writer.line("    mov rax, QWORD PTR [rip+valen_gc_bytes]"); self.writer.line("    shl rax, 1"); self.writer.line("    cmp rax, 1048576"); self.writer.line("    jae .Lgc_threshold_store"); self.writer.line("    mov eax, 1048576"); self.writer.line(".Lgc_threshold_store:"); self.writer.line("    mov QWORD PTR [rip+valen_gc_threshold], rax")
             self.writer.line("    cmp DWORD PTR [rip+valen_gc_collecting], 0"); self.writer.line("    je .Lgc_collect_finish"); self.writer.line("    mov DWORD PTR [rip+valen_gc_request], 0"); self.writer.line("    mov eax, 202"); self.writer.line("    lea rdi, [rip+valen_gc_request]"); self.writer.line("    mov esi, 1"); self.writer.line("    mov edx, 2147483647"); self.writer.line("    xor r10d, r10d"); self.writer.line("    xor r8d, r8d"); self.writer.line("    xor r9d, r9d"); self.writer.line("    syscall")
             self.writer.line(".Lgc_collect_release_wait:"); self.writer.line("    cmp DWORD PTR [rip+valen_gc_parked], 0"); self.writer.line("    je .Lgc_collect_release_done"); self.writer.line("    mov edx, DWORD PTR [rip+valen_gc_parked]"); self.writer.line("    mov eax, 202"); self.writer.line("    lea rdi, [rip+valen_gc_parked]"); self.writer.line("    xor esi, esi"); self.writer.line("    xor r10d, r10d"); self.writer.line("    xor r8d, r8d"); self.writer.line("    xor r9d, r9d"); self.writer.line("    syscall"); self.writer.line("    jmp .Lgc_collect_release_wait")
             self.writer.line(".Lgc_collect_release_done:"); self.writer.line("    mov DWORD PTR [rip+valen_gc_collecting], 0"); self.writer.line(".Lgc_collect_finish:"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    leave"); self.writer.line(".Lgc_collect_return:"); self.writer.line("    ret"); self.writer.line("")
             self.writer.line(".globl valen_gc_array_new"); self.writer.line("valen_gc_array_new:"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    push r13"); self.writer.line("    push r14"); self.writer.line("    mov r12, rdi"); self.writer.line("    mov r13, rsi"); self.writer.line("    mov r14, rdx"); self.writer.line("    push rcx"); self.writer.line("    mov edi, 40"); self.writer.line("    mov rsi, r14"); self.writer.line("    mov rdx, QWORD PTR [rsp]"); self.writer.line("    lea rcx, [rip+valen_gc_array_finalize]"); self.writer.line("    call valen_gc_alloc"); self.writer.line("    add rsp, 8"); self.writer.line("    mov rbx, rax"); self.writer.line("    mov rax, r13"); self.writer.line("    cmp rax, 4"); self.writer.line("    jae .Lgc_array_capacity"); self.writer.line("    mov eax, 4"); self.writer.line(".Lgc_array_capacity:"); self.writer.line("    mov QWORD PTR [rbx], r13"); self.writer.line("    mov QWORD PTR [rbx+8], rax"); self.writer.line("    mov QWORD PTR [rbx+24], r12"); self.writer.line("    mov QWORD PTR [rbx+32], 1"); self.writer.line("    imul rax, r12"); self.writer.line("    mov rdi, rax"); self.writer.line("    call valen_alloc"); self.writer.line("    mov QWORD PTR [rbx+16], rax"); self.writer.line("    mov rax, rbx"); self.writer.line("    pop r14"); self.writer.line("    pop r13"); self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("valen_gc_array_finalize:"); self.writer.line("    cmp DWORD PTR [rip+valen_arena_enabled], 0"); self.writer.line("    jne .Lgc_array_finalize_done"); self.writer.line("    mov rsi, QWORD PTR [rdi+8]"); self.writer.line("    imul rsi, QWORD PTR [rdi+24]"); self.writer.line("    test rsi, rsi"); self.writer.line("    jne .Lgc_array_finalize_size"); self.writer.line("    mov esi, 1"); self.writer.line(".Lgc_array_finalize_size:"); self.writer.line("    mov rdi, QWORD PTR [rdi+16]"); self.writer.line("    mov eax, 11"); self.writer.line("    syscall"); self.writer.line(".Lgc_array_finalize_done:"); self.writer.line("    ret"); self.writer.line("")
             self.writer.line(".globl valen_System_collectGarbage"); self.writer.line("valen_System_collectGarbage:"); self.writer.line("    jmp valen_gc_collect"); self.writer.line("")
+            self.metricRuntime("valen_System_gcTrackedBytes", "valen_gc_bytes")
+            self.metricRuntime("valen_System_gcTrackedAllocatedBytes", "valen_gc_allocated_bytes")
+            self.metricRuntime("valen_System_gcHeapObjects", "valen_gc_objects")
+            self.metricRuntime("valen_System_gcRoots", "valen_gc_root_count")
+            self.metricRuntime("valen_System_gcPeakRoots", "valen_gc_peak_roots")
+            self.metricRuntime("valen_System_gcCollections", "valen_gc_collections")
+            self.metricRuntime("valen_System_gcReclaimedObjects", "valen_gc_reclaimed_objects")
+            self.metricRuntime("valen_System_gcTrackedReclaimedBytes", "valen_gc_reclaimed_bytes")
+            self.writer.line(".globl valen_System_processArenaEnabled"); self.writer.line("valen_System_processArenaEnabled:"); self.writer.line("    mov eax, DWORD PTR [rip+valen_arena_enabled]"); self.writer.line("    ret"); self.writer.line("")
+        }
+
+        metricRuntime(symbol:string, storage:string) -> void {
+            self.writer.line(".globl " + symbol); self.writer.line(symbol + ":")
+            if self.runtimeMetrics || storage == "valen_gc_bytes" { self.writer.line("    mov rax, QWORD PTR [rip+" + storage + "]") } else { self.writer.line("    xor eax, eax") }
+            self.writer.line("    ret"); self.writer.line("")
         }
 
         gcTraceFunctions() -> void {
@@ -3046,6 +3084,22 @@ library X86_64 {{
             self.writer.line("    .zero 8")
             self.writer.line("valen_gc_bytes:")
             self.writer.line("    .zero 8")
+            if self.runtimeMetrics {
+            self.writer.line("valen_gc_allocated_bytes:")
+            self.writer.line("    .zero 8")
+            self.writer.line("valen_gc_objects:")
+            self.writer.line("    .zero 8")
+            self.writer.line("valen_gc_root_count:")
+            self.writer.line("    .zero 8")
+            self.writer.line("valen_gc_peak_roots:")
+            self.writer.line("    .zero 8")
+            self.writer.line("valen_gc_collections:")
+            self.writer.line("    .zero 8")
+            self.writer.line("valen_gc_reclaimed_objects:")
+            self.writer.line("    .zero 8")
+            self.writer.line("valen_gc_reclaimed_bytes:")
+            self.writer.line("    .zero 8")
+            }
             self.writer.line("valen_gc_workers:")
             self.writer.line("    .zero 8")
             self.writer.line("valen_gc_mutators:")

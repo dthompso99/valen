@@ -3,9 +3,10 @@ import {prepareIr} from './ir-validation.js';
 const argumentRegisters = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9'];
 
 export class X86_64Backend {
-    generate(program, {optimizationLevel = 1, moduleId = null, includeRuntime = true, includeModuleMetadata = false} = {}) {
+    generate(program, {optimizationLevel = 1, runtimeMetrics = false, moduleId = null, includeRuntime = true, includeModuleMetadata = false} = {}) {
         if (![0, 1].includes(optimizationLevel)) throw new Error(`Unsupported optimization level '-O${optimizationLevel}'`);
         this.optimize = optimizationLevel === 1;
+        this.runtimeMetrics = runtimeMetrics;
         prepareIr(program, {optimize: this.optimize, requireEntry: includeRuntime});
         this.program = program;
         this.emittedTypes = moduleId === null ? program.types : program.types.filter(type => type.moduleId === moduleId);
@@ -69,6 +70,9 @@ export class X86_64Backend {
             'valen_System_currentDirectory',
             'valen_System_environmentVariable',
             'valen_System_collectGarbage',
+            'valen_System_gcTrackedBytes', 'valen_System_gcTrackedAllocatedBytes', 'valen_System_gcHeapObjects',
+            'valen_System_gcRoots', 'valen_System_gcPeakRoots', 'valen_System_gcCollections',
+            'valen_System_gcReclaimedObjects', 'valen_System_gcTrackedReclaimedBytes', 'valen_System_processArenaEnabled',
             'valen_System_enableProcessArena',
             'valen_System_enableShutdownSignals',
             'valen_System_shutdownRequested',
@@ -145,6 +149,7 @@ export class X86_64Backend {
         if (runtimeSymbols.has('valen_System_currentDirectory')) lines.push(...this.currentDirectoryRuntime());
         if (runtimeSymbols.has('valen_System_environmentVariable')) lines.push(...this.environmentVariableRuntime());
         if (runtimeSymbols.has('valen_System_collectGarbage')) lines.push('.globl valen_System_collectGarbage', 'valen_System_collectGarbage:', '    jmp valen_gc_collect', '');
+        lines.push(...this.runtimeMetricsRuntime(runtimeSymbols));
         if (runtimeSymbols.has('valen_System_enableProcessArena')) lines.push('.globl valen_System_enableProcessArena', 'valen_System_enableProcessArena:', '    mov DWORD PTR [rip+valen_arena_enabled], 1', '    ret', '');
         if (runtimeSymbols.has('valen_System_enableShutdownSignals') || runtimeSymbols.has('valen_System_shutdownRequested')) lines.push(...this.shutdownSignalRuntime());
         if (runtimeSymbols.has('valen_System_link')) lines.push(...this.linkRuntime());
@@ -234,6 +239,27 @@ export class X86_64Backend {
             '.globl valen_Network_lastError', 'valen_Network_lastError:', '    mov rax, QWORD PTR [rip+valen_network_error]', '    ret', '',
             '.Lnetwork_error:', '    neg rax', '    mov QWORD PTR [rip+valen_network_error], rax', '    xor eax, eax', '    ret', ''
         ];
+    }
+
+    runtimeMetricsRuntime(runtimeSymbols) {
+        const metrics = new Map([
+            ['valen_System_gcTrackedBytes', 'valen_gc_bytes'],
+            ['valen_System_gcTrackedAllocatedBytes', 'valen_gc_allocated_bytes'],
+            ['valen_System_gcHeapObjects', 'valen_gc_objects'],
+            ['valen_System_gcRoots', 'valen_gc_root_count'],
+            ['valen_System_gcPeakRoots', 'valen_gc_peak_roots'],
+            ['valen_System_gcCollections', 'valen_gc_collections'],
+            ['valen_System_gcReclaimedObjects', 'valen_gc_reclaimed_objects'],
+            ['valen_System_gcTrackedReclaimedBytes', 'valen_gc_reclaimed_bytes']
+        ]);
+        const lines = [];
+        for (const [symbol, storage] of metrics) if (runtimeSymbols.has(symbol)) {
+            lines.push(`.globl ${symbol}`, `${symbol}:`,
+                this.runtimeMetrics || storage === 'valen_gc_bytes' ? `    mov rax, QWORD PTR [rip+${storage}]` : '    xor eax, eax', '    ret', '');
+        }
+        if (runtimeSymbols.has('valen_System_processArenaEnabled')) lines.push('.globl valen_System_processArenaEnabled',
+            'valen_System_processArenaEnabled:', '    mov eax, DWORD PTR [rip+valen_arena_enabled]', '    ret', '');
+        return lines;
     }
 
     descriptorRuntime(name, offset = 0) {
@@ -372,6 +398,7 @@ export class X86_64Backend {
         const rootTraceLabel = `${symbol}__gc_roots`;
         const rootPushSlow = `${symbol}__gc_push_slow`, rootPushDone = `${symbol}__gc_push_done`;
         const rootPopSlow = `${symbol}__gc_pop_slow`, rootPopDone = `${symbol}__gc_pop_done`;
+        const rootCounted = `${symbol}__gc_root_counted`;
         lines.push(`    lea rax, [rip+${rootTraceLabel}]`, `    mov QWORD PTR [rbp-${rootRecordOffset - 8}], rax`,
             `    mov QWORD PTR [rbp-${rootRecordOffset - 16}], rbp`);
         for (const location of this.argumentLocations(fn.parameters)) {
@@ -382,7 +409,10 @@ export class X86_64Backend {
         }
         lines.push('    cmp QWORD PTR [rip+valen_gc_workers], 0', `    jne ${rootPushSlow}`,
             '    mov rax, QWORD PTR [rip+valen_gc_roots]', `    mov QWORD PTR [rbp-${rootRecordOffset}], rax`,
-            `    lea rax, [rbp-${rootRecordOffset}]`, '    mov QWORD PTR [rip+valen_gc_roots], rax', `    jmp ${rootPushDone}`,
+            `    lea rax, [rbp-${rootRecordOffset}]`, '    mov QWORD PTR [rip+valen_gc_roots], rax',
+            ...(this.runtimeMetrics ? ['    inc QWORD PTR [rip+valen_gc_root_count]', '    mov rax, QWORD PTR [rip+valen_gc_root_count]',
+                '    cmp rax, QWORD PTR [rip+valen_gc_peak_roots]', `    jbe ${rootCounted}`,
+                '    mov QWORD PTR [rip+valen_gc_peak_roots], rax', `${rootCounted}:`] : []), `    jmp ${rootPushDone}`,
             `${rootPushSlow}:`, `    lea rdi, [rbp-${rootRecordOffset}]`, '    call valen_gc_root_push', `${rootPushDone}:`);
 
         const blockOrder = new Map(fn.blocks.map((block, index) => [block.label, index]));
@@ -399,7 +429,8 @@ export class X86_64Backend {
         }
 
         lines.push(`${endLabel}:`, '    cmp QWORD PTR [rip+valen_gc_workers], 0', `    jne ${rootPopSlow}`,
-            `    mov rcx, QWORD PTR [rbp-${rootRecordOffset}]`, '    mov QWORD PTR [rip+valen_gc_roots], rcx', `    jmp ${rootPopDone}`,
+            `    mov rcx, QWORD PTR [rbp-${rootRecordOffset}]`, '    mov QWORD PTR [rip+valen_gc_roots], rcx',
+            ...(this.runtimeMetrics ? ['    dec QWORD PTR [rip+valen_gc_root_count]'] : []), `    jmp ${rootPopDone}`,
             `${rootPopSlow}:`, '    sub rsp, 16', '    mov QWORD PTR [rsp], rax', `    lea rdi, [rbp-${rootRecordOffset}]`, '    call valen_gc_root_pop',
             '    mov rax, QWORD PTR [rsp]', '    add rsp, 16', `${rootPopDone}:`);
         for (const register of new Set(this.registers.values())) lines.push(`    mov ${register}, ${this.slot(`save:${register}`)}`);
@@ -2348,7 +2379,7 @@ export class X86_64Backend {
     }
 
     garbageCollectorRuntime() {
-        return [
+        const lines = [
             '.globl valen_gc_alloc', 'valen_gc_alloc:',
             '    push r12', '    push r13', '    push r14', '    push r15', '    mov r12, rdi', '    mov r13, rsi', '    mov r14, rdx', '    mov r15, rcx',
             '    sub rsp, 8', '    call valen_gc_maybe_collect', '    add rsp, 8', '    mov rdi, r12',
@@ -2358,7 +2389,8 @@ export class X86_64Backend {
             '    lea rcx, [r12+48]', '    mov QWORD PTR [rax+8], rcx', '    mov QWORD PTR [rax+16], r13', '    mov QWORD PTR [rax+24], r14',
             '    mov QWORD PTR [rax+32], 0', '    mov QWORD PTR [rax+40], r15', '    push rax', '    call valen_gc_heap_lock', '    pop rax',
             '    mov rdx, QWORD PTR [rip+valen_gc_heap]', '    mov QWORD PTR [rax], rdx', '    mov QWORD PTR [rip+valen_gc_heap], rax',
-            '    lock add QWORD PTR [rip+valen_gc_bytes], rcx', '    mov DWORD PTR [rip+valen_gc_lock], 0',
+            '    lock add QWORD PTR [rip+valen_gc_bytes], rcx', '    lock add QWORD PTR [rip+valen_gc_allocated_bytes], rcx',
+            '    lock inc QWORD PTR [rip+valen_gc_objects]', '    mov DWORD PTR [rip+valen_gc_lock], 0',
             '    add rax, 48', '    pop r15', '    pop r14', '    pop r13', '    pop r12', '    ret', '',
             '.globl valen_gc_maybe_collect', 'valen_gc_maybe_collect:', '    cmp DWORD PTR [rip+valen_arena_enabled], 0', '    jne .Lgc_maybe_done',
             '    cmp QWORD PTR [rip+valen_gc_workers], 0', '    je .Lgc_maybe_threshold', '    call valen_gc_safepoint',
@@ -2376,8 +2408,10 @@ export class X86_64Backend {
             '    mov eax, 202', '    lea rdi, [rip+valen_gc_request]', '    xor esi, esi', '    mov edx, 1', '    xor r10d, r10d', '    xor r8d, r8d', '    xor r9d, r9d', '    syscall', '    jmp .Lgc_safepoint_wait',
             '.Lgc_safepoint_release:', '    lock dec DWORD PTR [rip+valen_gc_parked]', '    mov eax, 202', '    lea rdi, [rip+valen_gc_parked]', '    mov esi, 1', '    mov edx, 1', '    xor r10d, r10d', '    xor r8d, r8d', '    xor r9d, r9d', '    syscall',
             '.Lgc_safepoint_done:', '    ret', '',
-            'valen_gc_root_push:', '    push rbx', '    mov rbx, rdi', '    call valen_gc_heap_lock', '    mov rax, QWORD PTR [rip+valen_gc_roots]', '    mov QWORD PTR [rbx], rax', '    mov QWORD PTR [rip+valen_gc_roots], rbx', '    mov DWORD PTR [rip+valen_gc_lock], 0', '    pop rbx', '    ret', '',
-            'valen_gc_root_pop:', '    push rbx', '    mov rbx, rdi', '    call valen_gc_heap_lock', '    lea rax, [rip+valen_gc_roots]', '.Lgc_root_pop_find:', '    mov rcx, QWORD PTR [rax]', '    test rcx, rcx', '    je .Lgc_root_pop_done', '    cmp rcx, rbx', '    je .Lgc_root_pop_remove', '    mov rax, rcx', '    jmp .Lgc_root_pop_find', '.Lgc_root_pop_remove:', '    mov rcx, QWORD PTR [rbx]', '    mov QWORD PTR [rax], rcx', '.Lgc_root_pop_done:', '    mov DWORD PTR [rip+valen_gc_lock], 0', '    pop rbx', '    ret', '',
+            'valen_gc_root_push:', '    push rbx', '    mov rbx, rdi', '    call valen_gc_heap_lock', '    mov rax, QWORD PTR [rip+valen_gc_roots]', '    mov QWORD PTR [rbx], rax', '    mov QWORD PTR [rip+valen_gc_roots], rbx',
+            '    inc QWORD PTR [rip+valen_gc_root_count]', '    mov rax, QWORD PTR [rip+valen_gc_root_count]', '    cmp rax, QWORD PTR [rip+valen_gc_peak_roots]', '    jbe .Lgc_root_push_counted',
+            '    mov QWORD PTR [rip+valen_gc_peak_roots], rax', '.Lgc_root_push_counted:', '    mov DWORD PTR [rip+valen_gc_lock], 0', '    pop rbx', '    ret', '',
+            'valen_gc_root_pop:', '    push rbx', '    mov rbx, rdi', '    call valen_gc_heap_lock', '    lea rax, [rip+valen_gc_roots]', '.Lgc_root_pop_find:', '    mov rcx, QWORD PTR [rax]', '    test rcx, rcx', '    je .Lgc_root_pop_done', '    cmp rcx, rbx', '    je .Lgc_root_pop_remove', '    mov rax, rcx', '    jmp .Lgc_root_pop_find', '.Lgc_root_pop_remove:', '    mov rcx, QWORD PTR [rbx]', '    mov QWORD PTR [rax], rcx', '    dec QWORD PTR [rip+valen_gc_root_count]', '.Lgc_root_pop_done:', '    mov DWORD PTR [rip+valen_gc_lock], 0', '    pop rbx', '    ret', '',
             '.globl valen_gc_native_handle_finalize', 'valen_gc_native_handle_finalize:', '    cmp QWORD PTR [rdi+16], 0', '    jl .Lgc_native_handle_finalized', '    mov r10, rdi', '    mov rdi, QWORD PTR [rdi+16]', '    mov eax, 3', '    syscall', '    mov QWORD PTR [r10+16], -1', '    mov QWORD PTR [r10+8], 0', '.Lgc_native_handle_finalized:', '    ret', '',
             '.globl valen_gc_mark', 'valen_gc_mark:', '    test rdi, rdi', '    je .Lgc_mark_done', '    mov rax, QWORD PTR [rip+valen_gc_heap]', '.Lgc_mark_find:', '    test rax, rax', '    je .Lgc_mark_done', '    lea rcx, [rax+48]', '    cmp rcx, rdi', '    je .Lgc_mark_found', '    mov rax, QWORD PTR [rax]', '    jmp .Lgc_mark_find', '.Lgc_mark_found:', '    push rbx', '    mov rbx, rax', '    lea rax, [rip+valen_string_finalize]', '    cmp QWORD PTR [rbx+40], rax', '    je .Lgc_mark_live', '    lea rax, [rip+valen_gc_native_handle_finalize]', '    cmp QWORD PTR [rbx+40], rax', '    jne .Lgc_mark_object', '    cmp QWORD PTR [rdi+16], 0', '    jge .Lgc_mark_live', '    jmp .Lgc_mark_pop', '.Lgc_mark_object:', '    cmp QWORD PTR [rdi+8], 0', '    je .Lgc_mark_pop', '.Lgc_mark_live:',
             '    cmp QWORD PTR [rbx+32], 0', '    jne .Lgc_mark_pop',
@@ -2389,7 +2423,7 @@ export class X86_64Backend {
             '.Lgc_collect_target_ready:', '    mov DWORD PTR [rip+valen_gc_target], eax', '    mov DWORD PTR [rip+valen_gc_state_guard], 0', '.Lgc_collect_wait:', '    mov eax, DWORD PTR [rip+valen_gc_parked]', '    cmp eax, DWORD PTR [rip+valen_gc_target]', '    jae .Lgc_collect_begin_multi', '    mov edx, eax',
             '    mov eax, 202', '    lea rdi, [rip+valen_gc_parked]', '    xor esi, esi', '    xor r10d, r10d', '    xor r8d, r8d', '    xor r9d, r9d', '    syscall', '    jmp .Lgc_collect_wait',
             '.Lgc_collect_begin_multi:', '    jmp .Lgc_collect_begin', '.Lgc_collect_begin_single:',
-            '.Lgc_collect_begin:', '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    push r13', '    push r14',
+            '.Lgc_collect_begin:', '    lock inc QWORD PTR [rip+valen_gc_collections]', '    push rbp', '    mov rbp, rsp', '    push rbx', '    push r12', '    push r13', '    push r14',
             '    mov r12, QWORD PTR [rip+valen_gc_roots]', '.Lgc_root_frame:', '    test r12, r12', '    je .Lgc_weak_start', '    mov rax, QWORD PTR [r12+8]', '    mov rdi, QWORD PTR [r12+16]', '    call rax',
             '    mov r12, QWORD PTR [r12]', '    jmp .Lgc_root_frame',
             '.Lgc_weak_start:', '    mov r12, QWORD PTR [rip+valen_gc_heap]', '.Lgc_weak_next:', '    test r12, r12', '    je .Lgc_sweep_start',
@@ -2397,13 +2431,18 @@ export class X86_64Backend {
             '.Lgc_weak_advance:', '    mov r12, QWORD PTR [r12]', '    jmp .Lgc_weak_next',
             '.Lgc_sweep_start:', '    lea r12, [rip+valen_gc_heap]', '    mov QWORD PTR [rip+valen_gc_bytes], 0', '.Lgc_sweep_next:', '    mov rbx, QWORD PTR [r12]', '    test rbx, rbx', '    je .Lgc_done',
             '    cmp QWORD PTR [rbx+32], 0', '    je .Lgc_reclaim', '    mov QWORD PTR [rbx+32], 0', '    mov rax, QWORD PTR [rbx+8]', '    add QWORD PTR [rip+valen_gc_bytes], rax', '    mov r12, rbx', '    jmp .Lgc_sweep_next',
-            '.Lgc_reclaim:', '    mov r14, QWORD PTR [rbx]', '    mov QWORD PTR [r12], r14', '    mov rax, QWORD PTR [rbx+40]', '    test rax, rax', '    je .Lgc_unmap', '    lea rdi, [rbx+48]', '    call rax',
+            '.Lgc_reclaim:', '    lock dec QWORD PTR [rip+valen_gc_objects]', '    lock inc QWORD PTR [rip+valen_gc_reclaimed_objects]',
+            '    mov rax, QWORD PTR [rbx+8]', '    lock add QWORD PTR [rip+valen_gc_reclaimed_bytes], rax',
+            '    mov r14, QWORD PTR [rbx]', '    mov QWORD PTR [r12], r14', '    mov rax, QWORD PTR [rbx+40]', '    test rax, rax', '    je .Lgc_unmap', '    lea rdi, [rbx+48]', '    call rax',
             '.Lgc_unmap:', '    mov rsi, QWORD PTR [rbx+8]', '    mov rdi, rbx', '    mov eax, 11', '    syscall', '    jmp .Lgc_sweep_next',
             '.Lgc_done:', '    mov rax, QWORD PTR [rip+valen_gc_bytes]', '    shl rax, 1', '    cmp rax, 1048576', '    jae .Lgc_threshold_store', '    mov eax, 1048576', '.Lgc_threshold_store:', '    mov QWORD PTR [rip+valen_gc_threshold], rax',
             '    cmp DWORD PTR [rip+valen_gc_collecting], 0', '    je .Lgc_collect_finish', '    mov DWORD PTR [rip+valen_gc_request], 0', '    mov eax, 202', '    lea rdi, [rip+valen_gc_request]', '    mov esi, 1', '    mov edx, 2147483647', '    xor r10d, r10d', '    xor r8d, r8d', '    xor r9d, r9d', '    syscall',
             '.Lgc_collect_release_wait:', '    cmp DWORD PTR [rip+valen_gc_parked], 0', '    je .Lgc_collect_release_done', '    mov edx, DWORD PTR [rip+valen_gc_parked]', '    mov eax, 202', '    lea rdi, [rip+valen_gc_parked]', '    xor esi, esi', '    xor r10d, r10d', '    xor r8d, r8d', '    xor r9d, r9d', '    syscall', '    jmp .Lgc_collect_release_wait',
             '.Lgc_collect_release_done:', '    mov DWORD PTR [rip+valen_gc_collecting], 0', '.Lgc_collect_finish:', '    pop r14', '    pop r13', '    pop r12', '    pop rbx', '    leave', '.Lgc_collect_return:', '    ret', ''
         ];
+        if (this.runtimeMetrics) return lines;
+        const metricStorage = /valen_gc_(allocated_bytes|objects|root_count|peak_roots|collections|reclaimed_objects|reclaimed_bytes)/;
+        return lines.filter(line => !metricStorage.test(line));
     }
 
     gcArrayRuntime() {
@@ -2470,7 +2509,10 @@ export class X86_64Backend {
     }
 
     gcData() {
-        return ['.section .bss', '.align 8', 'valen_gc_roots:', '    .zero 8', 'valen_gc_heap:', '    .zero 8', 'valen_gc_bytes:', '    .zero 8', 'valen_gc_workers:', '    .zero 8', 'valen_gc_mutators:', '    .zero 8',
+        return ['.section .bss', '.align 8', 'valen_gc_roots:', '    .zero 8', 'valen_gc_heap:', '    .zero 8', 'valen_gc_bytes:', '    .zero 8',
+            ...(this.runtimeMetrics ? ['valen_gc_allocated_bytes:', '    .zero 8', 'valen_gc_objects:', '    .zero 8', 'valen_gc_root_count:', '    .zero 8', 'valen_gc_peak_roots:', '    .zero 8',
+                'valen_gc_collections:', '    .zero 8', 'valen_gc_reclaimed_objects:', '    .zero 8', 'valen_gc_reclaimed_bytes:', '    .zero 8'] : []),
+            'valen_gc_workers:', '    .zero 8', 'valen_gc_mutators:', '    .zero 8',
             'valen_gc_lock:', '    .zero 4', 'valen_gc_state_guard:', '    .zero 4', 'valen_gc_request:', '    .zero 4', 'valen_gc_parked:', '    .zero 4', 'valen_gc_target:', '    .zero 4', 'valen_gc_collecting:', '    .zero 4',
             'valen_arena_cursor:', '    .zero 8', 'valen_arena_remaining:', '    .zero 8', 'valen_arena_lock:', '    .zero 4', 'valen_arena_enabled:', '    .zero 4',
             '.section .data', '.align 8', 'valen_gc_threshold:', '    .quad 1048576', '.text'];

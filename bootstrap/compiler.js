@@ -54,23 +54,23 @@ export class Compiler {
         return {objectPath, metadataPath: `${objectPath}.vmeta`, metadata};
     }
 
-    emitObject(sourcePath, objectPath, {assemblyPath = `${objectPath}.s`, sourceRoot, optimizationLevel = 1, target: targetName} = {}) {
+    emitObject(sourcePath, objectPath, {assemblyPath = `${objectPath}.s`, sourceRoot, optimizationLevel = 1, runtimeMetrics = false, target: targetName} = {}) {
         const target = resolveTarget(targetName);
         const {Backend, Assembler} = targetTools(target);
         const graph = new ModuleLoader({sourceRoot, target, sysroot: process.env.VALEN_SYSROOT ?? defaultSysroot(bootstrapRoot, target)}).load(sourcePath);
         new ModuleInterfaceCache(process.env.VALEN_CACHE_PATH ?? process.env.ARGON_CACHE_PATH,
             process.env.VALEN_CACHE_TRACE != null || process.env.ARGON_CACHE_TRACE != null).prepare(graph);
         const ir = new IrGenerator().generate(new SemanticAnalyzer().analyzeModules(graph));
-        const assembly = new Backend().generate(ir, {optimizationLevel});
+        const assembly = new Backend().generate(ir, {optimizationLevel, runtimeMetrics});
         fs.writeFileSync(assemblyPath, assembly);
         fs.writeFileSync(objectPath, new Assembler().assemble(assembly));
         return {ir, assembly, assemblyPath, objectPath, graph, target};
     }
 
-    compile(sourcePath, outputPath, {assemblyPath = `${outputPath}.s`, objectPath = `${outputPath}.o`, sourceRoot, linker = 'auto', optimizationLevel = 1, target: targetName} = {}) {
+    compile(sourcePath, outputPath, {assemblyPath = `${outputPath}.s`, objectPath = `${outputPath}.o`, sourceRoot, linker = 'auto', optimizationLevel = 1, runtimeMetrics = false, target: targetName} = {}) {
         const target = resolveTarget(targetName);
         const {Backend, Assembler} = targetTools(target);
-        const emitted = this.emitObject(sourcePath, objectPath, {assemblyPath, sourceRoot, optimizationLevel, target: target.name});
+        const emitted = this.emitObject(sourcePath, objectPath, {assemblyPath, sourceRoot, optimizationLevel, runtimeMetrics, target: target.name});
         if (!['auto', 'native', 'system'].includes(linker)) throw new Error(`Unsupported linker '${linker}'`);
         const {ir} = emitted;
         const internalThreadLibraries = target.name === 'aarch64-linux' && ir.externals.some(item => item.runtimeSymbol === 'valen_Operations_threadStart')
@@ -83,7 +83,7 @@ export class Compiler {
             const entryModule = ir.functions.find(fn => fn.name === ir.entry)?.moduleId;
             const objects = moduleIds.length > 1 ? moduleIds.map(moduleId => {
                 const assembly = new Backend().generate(structuredClone(ir), {
-                    optimizationLevel, moduleId, includeRuntime: moduleId === entryModule
+                    optimizationLevel, runtimeMetrics, moduleId, includeRuntime: moduleId === entryModule
                 });
                 return new Assembler().assembleObject(assembly);
             }) : [new Assembler().assembleObject(emitted.assembly)];
@@ -119,6 +119,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     const levelFlag = args.find(argument => /^-O/.test(argument));
     if (levelFlag && !['-O0', '-O1'].includes(levelFlag)) throw new Error(`Unsupported optimization level '${levelFlag}'`);
     const optimizationLevel = levelFlag === '-O0' ? 0 : 1;
+    const runtimeMetrics = args.includes('--runtime-metrics');
     const targetIndex = args.indexOf('--target');
     if (targetIndex >= 0 && !args[targetIndex + 1]) throw new Error('--target requires a target triple');
     const target = targetIndex >= 0 ? args[targetIndex + 1] : undefined;
@@ -131,7 +132,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     const versionIndex = args.indexOf('--library-version');
     if (versionIndex >= 0 && !args[versionIndex + 1]) throw new Error('--library-version requires a semantic version');
     const libraryVersion = versionIndex >= 0 ? args[versionIndex + 1] : undefined;
-    const positional = args.filter((argument, index) => argument !== levelFlag &&
+    const positional = args.filter((argument, index) => argument !== levelFlag && argument !== '--runtime-metrics' &&
         (targetIndex < 0 || index !== targetIndex && index !== targetIndex + 1) &&
         (sourceRootIndex < 0 || index !== sourceRootIndex && index !== sourceRootIndex + 1) &&
         (linkerIndex < 0 || index !== linkerIndex && index !== linkerIndex + 1) &&
@@ -144,6 +145,6 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     if (emitLibrary) {
         if (!libraryVersion) throw new Error('--emit-library requires --library-version <major.minor.patch>');
         new Compiler().emitLibrary(sourcePath, outputPath, libraryVersion, {optimizationLevel, sourceRoot, target});
-    } else if (emitObject) new Compiler().emitObject(sourcePath, outputPath, {optimizationLevel, sourceRoot, target});
-    else new Compiler().compile(sourcePath, outputPath, {optimizationLevel, sourceRoot, linker, target});
+    } else if (emitObject) new Compiler().emitObject(sourcePath, outputPath, {optimizationLevel, runtimeMetrics, sourceRoot, target});
+    else new Compiler().compile(sourcePath, outputPath, {optimizationLevel, runtimeMetrics, sourceRoot, linker, target});
 }

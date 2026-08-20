@@ -29,6 +29,7 @@ entry {{
         local configuredSourceRoot:string? = null
         local linkerMode:string = "auto"
         local backendName:string = "native"
+        local runtimeMetrics:bool = false
         local targetName = self.hostTarget()
         local environmentTarget = System.environmentVariable("VALEN_TARGET")
         if environmentTarget != null { targetName = environmentTarget! }
@@ -57,6 +58,8 @@ entry {{
             } else if argument == "--library-version" {
                 if argumentIndex + 1 >= arguments.length { System.writeError("valen: --library-version requires a semantic version\n"); return 64 }
                 libraryVersion = arguments[argumentIndex + 1]; argumentIndex = argumentIndex + 1
+            } else if argument == "--runtime-metrics" {
+                runtimeMetrics = true
             } else if argument == "-O0" {
                 optimizationLevel = 0
             } else if argument == "-O1" {
@@ -157,8 +160,8 @@ entry {{
         }
         if !self.validateCompiledArtifacts(graph, targetName) { return 65 }
         local cache = new CompilerCache.Cache(optimizationLevel, targetName)
-        if backendName == "native" && cache.enabled() { cache.prepareInterfaces(graph) }
-        if backendName == "native" && outputPath != null && cache.enabled() {
+        if backendName == "native" && !runtimeMetrics && cache.enabled() { cache.prepareInterfaces(graph) }
+        if backendName == "native" && !runtimeMetrics && outputPath != null && cache.enabled() {
             local cached = cache.load(graph)
             if cached != null {
                 if emitObjectOnly { return self.emitObject(cached!.assembly, outputPath!, targetName) }
@@ -215,7 +218,9 @@ entry {{
                 System.writeError("valen: LLVM toolchain exited with status "); System.writeError(llvmResult.toString()); System.writeError("; expected /usr/bin/clang\n")
                 return 69
             }
-            local runtimeBackend = new X86_64.Backend(ir, optimizationLevel, "<llvm-runtime>", true)
+            local runtimeBackend = new X86_64.Backend(ir, optimizationLevel, "<llvm-runtime>", true, false, runtimeMetrics)
+            local runtimeErrors = runtimeBackend.validateRuntime()
+            if runtimeErrors.length > 0 { for error in runtimeErrors { System.writeError("valen: target: ${error}\n") }; return 69 }
             local runtimeAssembly = runtimeBackend.generate()
             local runtimeObjectPath = outputPath! + ".runtime.o"
             if self.emitObject(runtimeAssembly, runtimeObjectPath, targetName) != 0 { return 69 }
@@ -230,15 +235,15 @@ entry {{
         local runtimeErrors = new Array<string>(0)
         local assembly = ""
         if targetName == "aarch64-linux" { local backend = new AArch64.Backend(ir, optimizationLevel, graph.entry!.path); runtimeErrors = backend.validateRuntime(); assembly = backend.generate(); if backend.error.length > 0 { runtimeErrors.append(backend.error) } }
-        else { local backend = new X86_64.Backend(ir, optimizationLevel); runtimeErrors = backend.validateRuntime(); assembly = backend.generate() }
+        else { local backend = new X86_64.Backend(ir, optimizationLevel, null, true, false, runtimeMetrics); runtimeErrors = backend.validateRuntime(); assembly = backend.generate() }
         if runtimeErrors.length > 0 {
             for error in runtimeErrors { System.writeError("valen: target: ${error}\n") }
             return 69
         }
         if outputPath != null {
-            if emissionModule == null { cache.store(graph, assembly, ir.foreignLibraries) }
+            if emissionModule == null && !runtimeMetrics { cache.store(graph, assembly, ir.foreignLibraries) }
             if emitObjectOnly { return self.emitObject(assembly, outputPath!, targetName) }
-            local linkResult = self.link(assembly, outputPath!, ir.foreignLibraries, linkerMode, ir, graph, optimizationLevel, cache, analysis, targetName)
+            local linkResult = self.link(assembly, outputPath!, ir.foreignLibraries, linkerMode, ir, graph, optimizationLevel, cache, analysis, targetName, runtimeMetrics)
             if linkResult != 0 {
                 System.writeError("valen: linker exited with status ")
                 System.writeError(linkResult.toString())
@@ -372,7 +377,7 @@ entry {{
         return 0
     }
 
-    link(assembly:string, outputPath:string, libraries:Array<string>, linkerMode:string, ir:Ir.Program?=null, graph:ModuleLoading.ModuleGraph?=null, optimizationLevel:i64=1, cache:CompilerCache.Cache?=null, analysis:Semantics.Analysis?=null, targetName:string="x86_64-linux") -> i64 {
+    link(assembly:string, outputPath:string, libraries:Array<string>, linkerMode:string, ir:Ir.Program?=null, graph:ModuleLoading.ModuleGraph?=null, optimizationLevel:i64=1, cache:CompilerCache.Cache?=null, analysis:Semantics.Analysis?=null, targetName:string="x86_64-linux", runtimeMetrics:bool=false) -> i64 {
         local structured = self.assembleObject(assembly, targetName)
         if structured == null {
             System.writeError("valen: native object encoder does not support generated assembly\n")
@@ -410,7 +415,7 @@ entry {{
                     local includeRuntime = graph!.entry != null && module.path == graph!.entry!.path
                     local moduleAssembly:string? = null
                     if includeRuntime { moduleAssembly = assembly }
-                    else if cache != null { moduleAssembly = cache!.loadModuleAssembly(module, false) }
+                    else if cache != null && !runtimeMetrics { moduleAssembly = cache!.loadModuleAssembly(module, false) }
                     if moduleAssembly == null {
                         local moduleIr = ir!
                         if analysis != null { local moduleGenerator = new Ir.Generator(analysis!, module.path); moduleIr = moduleGenerator.generate() }
@@ -420,8 +425,8 @@ entry {{
                             for error in moduleErrors { System.writeError("valen: invalid module IR: ${error}\n") }
                             return 70
                         }
-                        moduleAssembly = self.generateAssembly(moduleIr, targetName, optimizationLevel, module.path, includeRuntime)
-                        if cache != null { cache!.storeModuleAssembly(module, false, moduleAssembly!) }
+                        moduleAssembly = self.generateAssembly(moduleIr, targetName, optimizationLevel, module.path, includeRuntime, false, runtimeMetrics)
+                        if cache != null && !runtimeMetrics { cache!.storeModuleAssembly(module, false, moduleAssembly!) }
                     }
                     local moduleObject = self.assembleObject(moduleAssembly!, targetName)
                     if moduleObject == null { System.writeError("valen: native module object encoder failed\n"); return 69 }
@@ -439,9 +444,9 @@ entry {{
         return System.link(inputPath, outputPath, linkInputs)
     }
 
-    generateAssembly(ir:Ir.Program, targetName:string, optimizationLevel:i64, emissionModule:string?, includeRuntime:bool, includeModuleMetadata:bool=false) -> string {
+    generateAssembly(ir:Ir.Program, targetName:string, optimizationLevel:i64, emissionModule:string?, includeRuntime:bool, includeModuleMetadata:bool=false, runtimeMetrics:bool=false) -> string {
         if targetName == "aarch64-linux" { local backend = new AArch64.Backend(ir, optimizationLevel, emissionModule, includeRuntime, includeModuleMetadata); return backend.generate() }
-        local backend = new X86_64.Backend(ir, optimizationLevel, emissionModule, includeRuntime, includeModuleMetadata); return backend.generate()
+        local backend = new X86_64.Backend(ir, optimizationLevel, emissionModule, includeRuntime, includeModuleMetadata, runtimeMetrics); return backend.generate()
     }
 
     assembleObject(assembly:string, targetName:string) -> Elf.Object? {
@@ -499,6 +504,7 @@ entry {{
         System.write("  target: --target <x86_64-linux|aarch64-linux>\n")
         System.write("  backend: --backend native (default) or llvm (x86_64-linux)\n")
         System.write("  linker: --linker auto (default), native, or system\n")
+        System.write("  instrumentation: --runtime-metrics\n")
         System.write("  valen <source-file>\n")
         System.write("  valen <source-file> -o <executable>\n")
         System.write("  valen --check <source-file>\n")
