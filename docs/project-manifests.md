@@ -63,4 +63,12 @@ valen --validate-project --locked valen.project.json
 
 An explicit lockfile path may follow the manifest. Frozen validation checks package identity, normalized target, deterministic dependency order, declared source and metadata routes, compiler interface, ABI, and required fingerprints. It also loads each dependency's metadata, interface, object, and declared source and verifies their exact locked fingerprints before accepting the graph.
 
+The native compiler can build the frozen project graph directly:
+
+```sh
+valen --build-project valen.project.json
+```
+
+An explicit lockfile path may follow the manifest. The command never creates or updates a lockfile: it validates the exact graph, loads dependency declarations from their confined source routes, substitutes the verified locked objects during linking, and applies the manifest's target, optimization, source, and output settings. The output directory must already exist.
+
 The lockfile sorts dependencies by name and records exact compiler-interface, target, ABI, interface, implementation, and object fingerprints. It contains no timestamps or absolute host paths. Registry and Git transport are intentionally separate future extensions; direct source-file compilation remains available without project metadata.

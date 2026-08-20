@@ -264,10 +264,12 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                 {encoding: 'utf8', env: environment, cwd: projectRoot});
             assert.equal(emitted.status, 0, emitted.stderr);
             const metadata = LibraryMetadata.parse(fs.readFileSync(`${object}.vmeta`, 'utf8'));
+            const main = path.join(directory, 'artifact-main.ar');
+            fs.writeFileSync(main, "import Support from 'Support.ar'\nentry {{ __() -> i64 { return Support.value() } }}\n");
             const manifestPath = path.join(directory, 'artifact-project.json');
             const lockPath = path.join(directory, 'artifact-project.lock');
             fs.writeFileSync(manifestPath, JSON.stringify({format: 1, package: {name: 'artifact-app', version: '0.1.0'},
-                executable: {source: 'main.ar'}, dependencies: [
+                executable: {source: 'artifact-main.ar', output: 'artifact-app'}, dependencies: [
                     {name: 'Support', version: '1.0.0', source: 'Support.ar', metadata: 'Support.o.vmeta'}
                 ]}));
             fs.writeFileSync(lockPath, JSON.stringify({format: 1, package: {name: 'artifact-app', version: '0.1.0'},
@@ -279,6 +281,13 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                 ['--validate-project', '--locked', manifestPath, lockPath], {encoding: 'utf8', env: environment, cwd: projectRoot});
             const verified = verify();
             assert.equal(verified.status, 0, verified.stderr);
+            const built = spawnSync(compilerPath, ['--build-project', manifestPath, lockPath],
+                {encoding: 'utf8', env: environment, cwd: projectRoot});
+            assert.equal(built.status, 0, built.stderr);
+            assert.equal(spawnSync(path.join(directory, 'artifact-app')).status, 7);
+            const identity = BuildIdentity.inspect(path.join(directory, 'artifact-app.vbuild'));
+            assert.notEqual(identity.projectFingerprint, null);
+            assert.notEqual(identity.lockFingerprint, null);
             const objectBytes = fs.readFileSync(object);
             fs.writeFileSync(object, Buffer.concat([objectBytes, Buffer.from([0])]));
             const tamperedObject = verify();

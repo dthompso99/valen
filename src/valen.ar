@@ -42,8 +42,39 @@ entry {{
             if arguments.length == 5 && arguments[2] == "--locked" { return self.validateProjectManifest(arguments[3], arguments[4], targetName) }
             self.writeUsage(); return 64
         }
+        local projectManifest:ProjectManifest.Manifest? = null
+        local projectLock:ProjectManifest.Lock? = null
+        local projectRoot:string? = null
+        local projectManifestSource:string? = null
+        local projectLockSource:string? = null
+        local projectMode:bool = arguments.length >= 2 && arguments[1] == "--build-project"
         local libraryVersion:string? = null
         local argumentIndex:i64 = 1
+        if projectMode {
+            if arguments.length < 3 || arguments.length > 4 { self.writeUsage(); return 64 }
+            local cwd = System.currentDirectory(); if cwd == null { System.writeError("valen: could not determine current directory\n"); return 74 }
+            local manifestPath = arguments[2]; if manifestPath.length == 0 || manifestPath[0] != 47 { manifestPath = cwd! + "/" + manifestPath }
+            projectRoot = self.directoryName(manifestPath)
+            local lockPath = projectRoot! + "/valen.lock"; if arguments.length == 4 { lockPath = arguments[3]; if lockPath.length == 0 || lockPath[0] != 47 { lockPath = cwd! + "/" + lockPath } }
+            local manifestSource = Compiler.loadSource(manifestPath); local lockSource = Compiler.loadSource(lockPath)
+            if manifestSource == null { System.writeError("valen: project manifest is missing\n"); return 66 }
+            if lockSource == null { System.writeError("valen: project lockfile is missing\n"); return 66 }
+            local codec = new ProjectManifest.Codec(); local parsed = codec.parse(manifestSource!.content); local locked = codec.parseLock(lockSource!.content)
+            if !parsed.valid { System.writeError("valen: project manifest: "); System.writeError(parsed.message); System.writeError("\n"); return 65 }
+            if !locked.valid { System.writeError("valen: project lockfile: "); System.writeError(locked.message); System.writeError("\n"); return 65 }
+            projectManifest = parsed.manifest!; projectLock = locked.lock!
+            projectManifestSource = codec.serialize(projectManifest!); projectLockSource = codec.serializeLock(projectLock!)
+            local stale = codec.verify(projectManifest!, projectLock!, targetName)
+            if stale != null { System.writeError("valen: "); System.writeError(stale!); System.writeError("\n"); return 65 }
+            local artifactError = self.validateLockedArtifacts(projectLock!, projectRoot!)
+            if artifactError != null { System.writeError("valen: "); System.writeError(artifactError!); System.writeError("\n"); return 65 }
+            local dependencyIndex:i64 = 0
+            while dependencyIndex < projectManifest!.dependencies.length { if projectManifest!.dependencies[dependencyIndex].source == null { System.writeError("valen: project dependency '" + projectManifest!.dependencies[dependencyIndex].name + "' requires a source path for builds\n"); return 65 }; dependencyIndex = dependencyIndex + 1 }
+            targetName = projectLock!.target; optimizationLevel = projectManifest!.optimization; configuredSourceRoot = projectRoot!
+            compilerArguments.append(projectRoot! + "/" + projectManifest!.source)
+            compilerArguments.append("-o"); compilerArguments.append(projectRoot! + "/" + projectManifest!.output)
+            argumentIndex = arguments.length
+        }
         while argumentIndex < arguments.length {
             local argument = arguments[argumentIndex]
             if argument == "--linker" {
@@ -158,6 +189,14 @@ entry {{
         }
         local libraryPath = System.environmentVariable("VALEN_LIBRARY_PATH")
         if libraryPath == null { libraryPath = System.environmentVariable("ARGON_LIBRARY_PATH") }
+        if projectMode {
+            local dependencyIndex:i64 = 0
+            while dependencyIndex < projectManifest!.dependencies.length {
+                local dependencyRoot = self.directoryName(projectRoot! + "/" + projectManifest!.dependencies[dependencyIndex].source!)
+                if libraryPath == null || libraryPath!.length == 0 { libraryPath = dependencyRoot } else { libraryPath = libraryPath! + ":" + dependencyRoot }
+                dependencyIndex = dependencyIndex + 1
+            }
+        }
         local sysroot = System.environmentVariable("VALEN_SYSROOT")
         if sysroot == null {
             local executable = arguments[0]
@@ -172,6 +211,19 @@ entry {{
             Diagnostics.write(graph.diagnostics, diagnosticFormat)
             return 65
         }
+        if projectMode {
+            local dependencyIndex:i64 = 0
+            while dependencyIndex < projectManifest!.dependencies.length {
+                local dependency = projectManifest!.dependencies[dependencyIndex]
+                local expectedSource = loader.normalizePath(projectRoot! + "/" + dependency.source!)
+                local module = loader.find(expectedSource)
+                if module == null { System.writeError("valen: project dependency '" + dependency.name + "' source was not loaded by the executable graph\n"); return 65 }
+                local metadataPath = loader.normalizePath(projectRoot! + "/" + dependency.metadata)
+                local objectPath = metadataPath.slice(0, metadataPath.length - 6)
+                module!.compiledObjectPath = objectPath; module!.compiledMetadataPath = metadataPath; module!.compiledInterfacePath = objectPath + ".vmi"
+                dependencyIndex = dependencyIndex + 1
+            }
+        }
         if !self.validateCompiledArtifacts(graph, targetName) { return 65 }
         local cache = new CompilerCache.Cache(optimizationLevel, targetName)
         if backendName == "native" && !runtimeMetrics && cache.enabled() { cache.prepareInterfaces(graph) }
@@ -179,7 +231,7 @@ entry {{
             local cached = cache.load(graph)
             if cached != null {
                 if emitObjectOnly { return self.emitObject(cached!.assembly, outputPath!, targetName) }
-                local cachedLinkResult = self.link(cached!.assembly, outputPath!, cached!.libraries, linkerMode, null, graph, 1, null, null, targetName)
+                local cachedLinkResult = self.link(cached!.assembly, outputPath!, cached!.libraries, linkerMode, null, graph, optimizationLevel, null, null, targetName, false, projectManifestSource, projectLockSource)
                 if cachedLinkResult != 0 {
                     System.writeError("valen: linker exited with status ")
                     System.writeError(cachedLinkResult.toString())
@@ -260,7 +312,7 @@ entry {{
         if outputPath != null {
             if emissionModule == null && !runtimeMetrics { cache.store(graph, assembly, ir.foreignLibraries) }
             if emitObjectOnly { return self.emitObject(assembly, outputPath!, targetName) }
-            local linkResult = self.link(assembly, outputPath!, ir.foreignLibraries, linkerMode, ir, graph, optimizationLevel, cache, analysis, targetName, runtimeMetrics)
+            local linkResult = self.link(assembly, outputPath!, ir.foreignLibraries, linkerMode, ir, graph, optimizationLevel, cache, analysis, targetName, runtimeMetrics, projectManifestSource, projectLockSource)
             if linkResult != 0 {
                 System.writeError("valen: linker exited with status ")
                 System.writeError(linkResult.toString())
@@ -448,7 +500,7 @@ entry {{
         return null
     }
 
-    link(assembly:string, outputPath:string, libraries:Array<string>, linkerMode:string, ir:Ir.Program?=null, graph:ModuleLoading.ModuleGraph?=null, optimizationLevel:i64=1, cache:CompilerCache.Cache?=null, analysis:Semantics.Analysis?=null, targetName:string="x86_64-linux", runtimeMetrics:bool=false) -> i64 {
+    link(assembly:string, outputPath:string, libraries:Array<string>, linkerMode:string, ir:Ir.Program?=null, graph:ModuleLoading.ModuleGraph?=null, optimizationLevel:i64=1, cache:CompilerCache.Cache?=null, analysis:Semantics.Analysis?=null, targetName:string="x86_64-linux", runtimeMetrics:bool=false, projectSource:string?=null, lockSource:string?=null) -> i64 {
         local identity:BuildIdentity.Builder? = null
         local structured = self.assembleObject(assembly, targetName)
         if structured == null {
@@ -474,7 +526,7 @@ entry {{
         local nativeLink:bool = linkerMode == "native" || (linkerMode == "auto" && linkInputs.length == 0)
         local selectedLinker = "system"
         if nativeLink { selectedLinker = "native" }
-        if graph != null { identity = new BuildIdentity.Builder(graph!, targetName, optimizationLevel, "native", selectedLinker, runtimeMetrics, libraries) }
+        if graph != null { identity = new BuildIdentity.Builder(graph!, targetName, optimizationLevel, "native", selectedLinker, runtimeMetrics, libraries); if projectSource != null && lockSource != null { identity!.setProject(projectSource!, lockSource!) } }
         if nativeLink {
             if linkInputs.length > 0 {
                 System.writeError("valen: native linker cannot resolve external object inputs or foreign libraries; use --linker system\n")
@@ -593,5 +645,6 @@ entry {{
         System.write("  valen --library-version <semver> --emit-library <source-file> -o <object-file>\n")
         System.write("  valen --validate-library <object-file>.vmeta\n")
         System.write("  valen --validate-project [--locked] <valen.project.json> [valen.lock]\n")
+        System.write("  valen --build-project <valen.project.json> [valen.lock]\n")
     }
 }}

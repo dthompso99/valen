@@ -224,6 +224,38 @@ library ProjectManifest {{
             return null
         }
 
+        serialize(manifest:Manifest) -> string {
+            local output = new StringBuilder(); output.append("{\"format\":1,\"package\":{\"name\":"); output.append(Json.quote(manifest.name))
+            output.append(",\"version\":"); output.append(Json.quote(manifest.version)); output.append("},\"executable\":{\"source\":"); output.append(Json.quote(manifest.source))
+            output.append(",\"output\":"); output.append(Json.quote(manifest.output)); output.append(",\"target\":")
+            if manifest.target == null { output.append("null") } else { output.append(Json.quote(manifest.target!)) }
+            output.append(",\"optimization\":"); output.append(manifest.optimization); output.append("},\"dependencies\":[")
+            local index:i64 = 0
+            while index < manifest.dependencies.length {
+                if index > 0 { output.append(",") }; local dependency = manifest.dependencies[index]
+                output.append("{\"name\":"); output.append(Json.quote(dependency.name)); output.append(",\"version\":"); output.append(Json.quote(dependency.version)); output.append(",\"source\":")
+                if dependency.source == null { output.append("null") } else { output.append(Json.quote(dependency.source!)) }
+                output.append(",\"metadata\":"); output.append(Json.quote(dependency.metadata)); output.append("}"); index = index + 1
+            }
+            output.append("]}"); return output.build()
+        }
+
+        serializeLock(lock:Lock) -> string {
+            local output = new StringBuilder(); output.append("{\"format\":1,\"package\":{\"name\":"); output.append(Json.quote(lock.name))
+            output.append(",\"version\":"); output.append(Json.quote(lock.version)); output.append("},\"target\":"); output.append(Json.quote(lock.target)); output.append(",\"dependencies\":[")
+            local index:i64 = 0
+            while index < lock.dependencies.length {
+                if index > 0 { output.append(",") }; local dependency = lock.dependencies[index]
+                output.append("{\"name\":"); output.append(Json.quote(dependency.name)); output.append(",\"version\":"); output.append(Json.quote(dependency.version)); output.append(",\"source\":")
+                if dependency.source == null { output.append("null") } else { output.append(Json.quote(dependency.source!)) }
+                output.append(",\"metadata\":"); output.append(Json.quote(dependency.metadata)); output.append(",\"compiler\":"); output.append(Json.quote(dependency.compiler))
+                output.append(",\"target\":"); output.append(Json.quote(dependency.target)); output.append(",\"abi\":"); output.append(Json.quote(dependency.abi))
+                output.append(",\"interfaceFingerprint\":"); output.append(Json.quote(dependency.interfaceFingerprint)); output.append(",\"implementationFingerprint\":"); output.append(Json.quote(dependency.implementationFingerprint))
+                output.append(",\"objectFingerprint\":"); output.append(Json.quote(dependency.objectFingerprint)); output.append("}"); index = index + 1
+            }
+            output.append("]}"); return output.build()
+        }
+
         requiredString(value:Json.Value, key:string, where:string) -> string? {
             local selected = value.get(key)
             if selected == null || selected!.kind != Json.Kind.String || selected!.text.length == 0 { return null }

@@ -13,10 +13,13 @@ library BuildIdentity {{
         member entryInterface:string
         member modules:string
         member foreignLibraries:Array<string>
+        member projectFingerprint:string?
+        member lockFingerprint:string?
 
         __(graph:ModuleLoading.ModuleGraph, target:string, optimization:i64, backend:string, linker:string, runtimeMetrics:bool, libraries:Array<string>) -> void {
             self.target = target; self.optimization = optimization; self.backend = backend; self.linker = linker; self.runtimeMetrics = runtimeMetrics
             self.foreignLibraries = self.sortedStrings(libraries)
+            self.projectFingerprint = null; self.lockFingerprint = null
             local interfaceBuilder = new ModuleInterfaces.Builder()
             self.entryInterface = ""
             if graph.entry != null { self.entryInterface = self.hex(interfaceBuilder.create(graph.entry!).interfaceFingerprint) }
@@ -50,6 +53,8 @@ library BuildIdentity {{
             output.append("]"); self.modules = output.build()
         }
 
+        setProject(manifest:string, lock:string) -> void { self.projectFingerprint = self.hash(manifest); self.lockFingerprint = self.hash(lock) }
+
         write(path:string, artifact:string) -> bool {
             local artifactFingerprint = self.hash(artifact)
             local remainder = self.remainder(artifactFingerprint)
@@ -72,7 +77,9 @@ library BuildIdentity {{
             while index < self.foreignLibraries.length { if index > 0 { output.append(",") }; output.append(Diagnostics.jsonString(self.foreignLibraries[index])); index = index + 1 }
             output.append("],\"artifactFingerprint\":"); output.append(Diagnostics.jsonString(artifactFingerprint))
             output.append(",\"entryInterface\":"); output.append(Diagnostics.jsonString(self.entryInterface))
-            output.append(",\"projectFingerprint\":null,\"lockFingerprint\":null,\"modules\":"); output.append(self.modules)
+            output.append(",\"projectFingerprint\":"); if self.projectFingerprint == null { output.append("null") } else { output.append(Diagnostics.jsonString(self.projectFingerprint!)) }
+            output.append(",\"lockFingerprint\":"); if self.lockFingerprint == null { output.append("null") } else { output.append(Diagnostics.jsonString(self.lockFingerprint!)) }
+            output.append(",\"modules\":"); output.append(self.modules)
             return output.build()
         }
 
