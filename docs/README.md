@@ -16,6 +16,7 @@ If you are new to the project, read these in order:
 12. [Runtime metrics](runtime-metrics.md) — inspect managed allocation, root, collection, and reclamation counters.
 13. [Bounded fuzzing](fuzzing.md) — run deterministic tokenizer/parser campaigns and retain minimized regressions.
 14. [Core specification](specification/README.md) — read the normative rules and compatibility policy.
+15. [Build identity](build-identity.md) — inspect deterministic compiler inputs and output fingerprints.
 
 For compiler contributors:
 

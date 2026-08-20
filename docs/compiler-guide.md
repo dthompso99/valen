@@ -106,6 +106,11 @@ matches its manifest. These names are explicit compatibility epochs; changing th
 implementation alone does not invalidate a library, while a compiler-interface, target, or ABI
 change does.
 
+Generation-zero executable builds also write an adjacent `.vbuild` identity containing the compiler
+interface, target/ABI, optimization/backend/linker choices, instrumentation state, module and dependency
+fingerprints, optional project/lock fingerprints, and final executable fingerprint. Inspect it with
+`node bootstrap/compiler.js --inspect-build <output>.vbuild`. See [build identity](build-identity.md).
+
 Object emission and linking are separate policy choices. Direct ELF emission does not imply a
 freestanding executable: the emitted object may be linked without foreign libraries for the
 self-contained Linux runtime, or passed to the hosted system linker with the explicit libraries

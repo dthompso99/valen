@@ -14,6 +14,7 @@ import {ElfObject} from './elf.js';
 import {defaultSysroot, resolveTarget} from './target.js';
 import {AArch64Backend} from './aarch64.js';
 import {AArch64Assembler} from './aarch64-assembler.js';
+import {BuildIdentity} from './build-identity.js';
 
 const bootstrapRoot = path.dirname(fileURLToPath(import.meta.url));
 
@@ -92,6 +93,9 @@ export class Compiler {
             }
             fs.writeFileSync(outputPath, new ElfLinker().linkObjects(objects));
             fs.chmodSync(outputPath, 0o755);
+            BuildIdentity.write(outputPath, BuildIdentity.create(emitted.graph, {target, optimizationLevel,
+                backend: 'native', linker: 'native', runtimeMetrics, sourceRoot, foreignLibraries,
+                artifact: fs.readFileSync(outputPath)}));
             return {...emitted, outputPath, linker: 'native'};
         }
         const compiledObjects = [...emitted.graph.modules.values()].filter(module => module.compiledArtifact)
@@ -100,6 +104,9 @@ export class Compiler {
         const result = spawnSync('cc', ['-nostdlib', '-no-pie', objectPath, ...compiledObjects, '-o', outputPath, ...libraries], {encoding: 'utf8'});
         if (result.error) throw result.error;
         if (result.status !== 0) throw new Error(result.stderr || `cc exited with status ${result.status}`);
+        BuildIdentity.write(outputPath, BuildIdentity.create(emitted.graph, {target, optimizationLevel,
+            backend: 'native', linker: 'system', runtimeMetrics, sourceRoot, foreignLibraries,
+            artifact: fs.readFileSync(outputPath)}));
         return {...emitted, outputPath, linker};
     }
 }
@@ -114,6 +121,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
         const actualObject = LibraryMetadata.create({...metadata, object: fs.readFileSync(objectPath)}).objectFingerprint;
         if (actualObject !== metadata.objectFingerprint) throw new Error('Compiled library object fingerprint does not match metadata');
         process.stdout.write(`${metadata.name} ${metadata.version}\n`);
+        process.exit(0);
+    }
+    if (args[0] === '--inspect-build') {
+        if (!args[1] || args.length !== 2) throw new Error('Usage: --inspect-build <artifact.vbuild>');
+        fs.writeSync(1, BuildIdentity.serialize(BuildIdentity.inspect(args[1])));
         process.exit(0);
     }
     const levelFlag = args.find(argument => /^-O/.test(argument));
