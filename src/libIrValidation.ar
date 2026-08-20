@@ -9,6 +9,20 @@ library IrValidation {{
         __(name:string, value:i64, typeName:string) -> void { self.name = name; self.value = value; self.typeName = typeName }
     }}
 
+    PropagatedValue {{
+        member name:string
+        member value:Ir.Value
+        member active:bool
+        __(name:string, value:Ir.Value) -> void { self.name = name; self.value = value; self.active = true }
+    }}
+
+    TemporaryUseLocation {{
+        member name:string
+        member blockIndex:i64
+        member crossesBlocks:bool
+        __(name:string, blockIndex:i64) -> void { self.name = name; self.blockIndex = blockIndex; self.crossesBlocks = false }
+    }}
+
     Pass {{
         prepare(program:Ir.Program, optimize:bool=true, requireEntry:bool=true) -> Array<string> {
             self.canonicalize(program, optimize)
@@ -41,10 +55,107 @@ library IrValidation {{
                     self.foldConstants(functionNode)
                     self.simplifyControlFlow(functionNode)
                     self.removeUnreachable(functionNode)
+                    self.propagateLocalValues(functionNode)
                     self.removeDeadValues(functionNode)
                 }
                 functionIndex = functionIndex + 1
             }
+        }
+
+        propagateLocalValues(functionNode:Ir.Function) -> void {
+            local useLocations = self.temporaryUseLocations(functionNode)
+            local blockIndex:i64 = 0
+            while blockIndex < functionNode.blocks.length {
+                local locals = new Array<PropagatedValue>(0)
+                local aliases = new Array<PropagatedValue>(0)
+                local retained = new Array<ref Ir.Instruction>(0)
+                local instructionIndex:i64 = 0
+                while instructionIndex < functionNode.blocks[blockIndex].instructions.length {
+                    local instruction = functionNode.blocks[blockIndex].instructions[instructionIndex]
+                    instruction.first = self.resolvePropagated(instruction.first, aliases)
+                    instruction.second = self.resolvePropagated(instruction.second, aliases)
+                    instruction.third = self.resolvePropagated(instruction.third, aliases)
+                    local argumentIndex:i64 = 0
+                    while argumentIndex < instruction.arguments.length { instruction.arguments[argumentIndex] = self.resolvePropagated(instruction.arguments[argumentIndex], aliases)!; argumentIndex = argumentIndex + 1 }
+                    local removed:bool = false
+                    if instruction.op == "load_local" && instruction.result != null && self.foldableInteger(instruction.result!.typeName) && self.temporaryUsedOnlyInBlock(useLocations, instruction.result!.name, blockIndex) {
+                        local value = self.findPropagated(locals, instruction.name!)
+                        if value != null { self.setPropagated(aliases, instruction.result!.name, value!); removed = true }
+                    }
+                    if instruction.op == "declare_local" || instruction.op == "store_local" {
+                        if instruction.first != null && self.foldableInteger(instruction.first!.typeName) { self.setPropagated(locals, instruction.name!, instruction.first!) }
+                        else { self.removePropagated(locals, instruction.name!) }
+                    }
+                    if !removed { retained.append(instruction) }
+                    instructionIndex = instructionIndex + 1
+                }
+                functionNode.blocks[blockIndex].instructions = retained
+                blockIndex = blockIndex + 1
+            }
+        }
+
+        temporaryUseLocations(functionNode:Ir.Function) -> Array<TemporaryUseLocation> {
+            local locations = new Array<TemporaryUseLocation>(0)
+            local blockIndex:i64 = 0
+            while blockIndex < functionNode.blocks.length {
+                local instructionIndex:i64 = 0
+                while instructionIndex < functionNode.blocks[blockIndex].instructions.length {
+                    local instruction = functionNode.blocks[blockIndex].instructions[instructionIndex]
+                    self.recordTemporaryUse(locations, instruction.first, blockIndex); self.recordTemporaryUse(locations, instruction.second, blockIndex); self.recordTemporaryUse(locations, instruction.third, blockIndex)
+                    local argumentIndex:i64 = 0
+                    while argumentIndex < instruction.arguments.length { self.recordTemporaryUse(locations, instruction.arguments[argumentIndex], blockIndex); argumentIndex = argumentIndex + 1 }
+                    instructionIndex = instructionIndex + 1
+                }
+                blockIndex = blockIndex + 1
+            }
+            return locations
+        }
+
+        recordTemporaryUse(locations:Array<TemporaryUseLocation>, value:Ir.Value?, blockIndex:i64) -> void {
+            if value == null || value!.kind != "temporary" { return }
+            local index:i64 = 0
+            while index < locations.length {
+                if locations[index].name == value!.name { if locations[index].blockIndex != blockIndex { locations[index].crossesBlocks = true }; return }
+                index = index + 1
+            }
+            locations.append(new TemporaryUseLocation(value!.name, blockIndex))
+        }
+
+        temporaryUsedOnlyInBlock(locations:Array<TemporaryUseLocation>, name:string, blockIndex:i64) -> bool {
+            local index:i64 = 0
+            while index < locations.length { if locations[index].name == name { return !locations[index].crossesBlocks && locations[index].blockIndex == blockIndex }; index = index + 1 }
+            return false
+        }
+
+        resolvePropagated(value:Ir.Value?, aliases:Array<PropagatedValue>) -> ref Ir.Value? {
+            if value == null || value!.kind != "temporary" { return value }
+            local current = value!
+            local remaining = aliases.length + 1
+            while remaining > 0 {
+                local replacement = self.findPropagated(aliases, current.name)
+                if replacement == null { return current }
+                current = replacement!
+                if current.kind != "temporary" { return current }
+                remaining = remaining - 1
+            }
+            return current
+        }
+
+        findPropagated(values:Array<PropagatedValue>, name:string) -> ref Ir.Value? {
+            local index = values.length
+            while index > 0 { index = index - 1; if values[index].active && values[index].name == name { return values[index].value } }
+            return null
+        }
+
+        setPropagated(values:Array<PropagatedValue>, name:string, value:Ir.Value) -> void {
+            local index:i64 = 0
+            while index < values.length { if values[index].name == name { values[index].value = value; values[index].active = true; return }; index = index + 1 }
+            values.append(new PropagatedValue(name, value))
+        }
+
+        removePropagated(values:Array<PropagatedValue>, name:string) -> void {
+            local index:i64 = 0
+            while index < values.length { if values[index].name == name { values[index].active = false }; index = index + 1 }
         }
 
         simplifyControlFlow(functionNode:Ir.Function) -> void {

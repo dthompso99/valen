@@ -1342,6 +1342,22 @@ test('IR optimization bypasses jump-only blocks and folds identical branch targe
     assert.deepEqual(unoptimized.blocks.map(block => block.label), ['entry', 'left', 'right', 'exit']);
 });
 
+test('IR optimization propagates block-local primitive values without crossing control flow', () => {
+    const value = {kind: 'temporary', name: '%0', type: 'i64'};
+    const loaded = {kind: 'temporary', name: '%1', type: 'i64'};
+    const fn = {name: 'entry.__', owner: 'entry', parameters: [], returnType: 'i64', blocks: [
+        {label: 'entry', instructions: [
+            {op: 'constant', result: '%0', type: 'i64', value: '7'},
+            {op: 'declare_local', name: 'value#0', type: 'i64', value},
+            {op: 'load_local', result: '%1', type: 'i64', name: 'value#0'},
+            {op: 'return', value: loaded}
+        ]}
+    ]};
+    new IrCanonicalizer().canonicalizeFunction(fn, true);
+    assert.deepEqual(fn.blocks[0].instructions.map(instruction => instruction.op), ['constant', 'declare_local', 'return']);
+    assert.equal(fn.blocks[0].instructions.at(-1).value.name, '%0');
+});
+
 test('IR validation rejects malformed control flow and calls before assembly', () => {
     const fn = {name: 'entry.__', owner: 'entry', parameters: [{name: 'self', type: 'entry'}], returnType: 'void', blocks: [
         {label: 'entry', instructions: [

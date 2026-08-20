@@ -33,7 +33,53 @@ export class IrCanonicalizer {
             this.foldConstants(fn);
             this.simplifyControlFlow(fn);
             this.removeUnreachable(fn);
+            this.propagateLocalValues(fn);
             this.removeDeadValues(fn);
+        }
+    }
+
+    propagateLocalValues(fn) {
+        const useBlocks = new Map();
+        for (const block of fn.blocks) for (const item of block.instructions) {
+            for (const value of new IrValidator().values(item)) if (value.kind === 'temporary') {
+                const locations = useBlocks.get(value.name) ?? new Set();
+                locations.add(block);
+                useBlocks.set(value.name, locations);
+            }
+        }
+        for (const block of fn.blocks) {
+            const locals = new Map();
+            const aliases = new Map();
+            const resolve = value => {
+                const visited = new Set();
+                while (value?.kind === 'temporary' && aliases.has(value.name) && !visited.has(value.name)) {
+                    visited.add(value.name);
+                    value = aliases.get(value.name);
+                }
+                return value;
+            };
+            const retained = [];
+            for (const instruction of block.instructions) {
+                const replace = value => {
+                    if (!value || typeof value !== 'object') return value;
+                    if (value.kind) return resolve(value);
+                    if (Array.isArray(value)) return value.map(replace);
+                    for (const [key, item] of Object.entries(value)) if (key !== 'result') value[key] = replace(item);
+                    return value;
+                };
+                for (const [key, value] of Object.entries(instruction)) if (key !== 'result') instruction[key] = replace(value);
+                const localUses = instruction.result ? useBlocks.get(instruction.result) : null;
+                if (instruction.op === 'load_local' && instruction.result && localUses?.size === 1 && localUses.has(block) && locals.has(instruction.name) && integerTypes.has(instruction.type)) {
+                    aliases.set(instruction.result, locals.get(instruction.name));
+                    continue;
+                }
+                if (instruction.op === 'declare_local' || instruction.op === 'store_local') {
+                    if (instruction.value && integerTypes.has(instruction.value.type)) locals.set(instruction.name, instruction.value);
+                    else locals.delete(instruction.name);
+                }
+                retained.push(instruction);
+            }
+            block.instructions = retained;
         }
     }
 
