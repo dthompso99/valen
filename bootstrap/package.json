@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node test/elf.test.js && node test/library-metadata.test.js && node test/stdlib-package.test.js && node test/pipeline.test.js && node test/formatter.test.js && node test/lsp.test.js && node test/clippy.test.js && node test/generation1.test.js"
+    "test": "node test/elf.test.js && node test/library-metadata.test.js && node test/project-manifest.test.js && node test/stdlib-package.test.js && node test/pipeline.test.js && node test/formatter.test.js && node test/lsp.test.js && node test/clippy.test.js && node test/generation1.test.js"
   },
   "author": "",
   "license": "ISC",
