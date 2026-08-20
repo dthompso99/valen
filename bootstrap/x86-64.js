@@ -72,7 +72,9 @@ export class X86_64Backend {
             'valen_System_collectGarbage',
             'valen_System_gcTrackedBytes', 'valen_System_gcTrackedAllocatedBytes', 'valen_System_gcHeapObjects',
             'valen_System_gcRoots', 'valen_System_gcPeakRoots', 'valen_System_gcCollections',
-            'valen_System_gcReclaimedObjects', 'valen_System_gcTrackedReclaimedBytes', 'valen_System_processArenaEnabled',
+            'valen_System_gcReclaimedObjects', 'valen_System_gcTrackedReclaimedBytes',
+            'valen_System_gcWeakReferencesCleared', 'valen_System_gcWeakReferencesRetained',
+            'valen_System_gcNativeHandlesOpen', 'valen_System_gcNativeHandlesFinalized', 'valen_System_processArenaEnabled',
             'valen_System_enableProcessArena',
             'valen_System_enableShutdownSignals',
             'valen_System_shutdownRequested',
@@ -199,14 +201,14 @@ export class X86_64Backend {
             '    test rax, rax', '    js .Lnetwork_close_error_pop2',
             '    mov eax, 50', '    mov rdi, r10', '    mov esi, ebx', '    syscall',
             '    test rax, rax', '    js .Lnetwork_close_error_pop2', '    mov r12, r10',
-            '    mov edi, 24', '    xor esi, esi', '    xor edx, edx', '    lea rcx, [rip+valen_gc_native_handle_finalize]', '    call valen_gc_alloc', '    mov QWORD PTR [rax+8], 1', '    mov QWORD PTR [rax+16], r12',
+            '    mov edi, 24', '    xor esi, esi', '    xor edx, edx', '    lea rcx, [rip+valen_gc_native_handle_finalize]', '    call valen_gc_alloc', ...(this.runtimeMetrics ? ['    lock inc QWORD PTR [rip+valen_gc_native_handles_open]'] : []), '    mov QWORD PTR [rax+8], 1', '    mov QWORD PTR [rax+16], r12',
             '    mov QWORD PTR [rip+valen_network_error], 0', '    pop r13', '    pop r12', '    pop rbx', '    ret',
             '.Lnetwork_close_error_pop2:', '    mov r12, rax', '    mov eax, 3', '    mov rdi, r10', '    syscall', '    mov rax, r12',
             '.Lnetwork_error_pop2:', '    neg rax', '    mov QWORD PTR [rip+valen_network_error], rax', '    xor eax, eax', '    pop r13', '    pop r12', '    pop rbx', '    ret', '',
             '.globl valen_Network_accept', 'valen_Network_accept:',
             '    mov rdi, QWORD PTR [rdi+16]', '    mov eax, 43', '    xor esi, esi', '    xor edx, edx', '    syscall',
             '    test rax, rax', '    js .Lnetwork_error', '    push rbx', '    mov rbx, rax', '    mov edi, 24', '    xor esi, esi', '    xor edx, edx', '    lea rcx, [rip+valen_gc_native_handle_finalize]', '    call valen_gc_alloc',
-            '    mov QWORD PTR [rax+8], 1', '    mov QWORD PTR [rax+16], rbx', '    pop rbx', '    mov QWORD PTR [rip+valen_network_error], 0', '    ret',
+            ...(this.runtimeMetrics ? ['    lock inc QWORD PTR [rip+valen_gc_native_handles_open]'] : []), '    mov QWORD PTR [rax+8], 1', '    mov QWORD PTR [rax+16], rbx', '    pop rbx', '    mov QWORD PTR [rip+valen_network_error], 0', '    ret',
             '.globl valen_Network_receive', 'valen_Network_receive:',
             '    test rsi, rsi', '    js .Lnetwork_invalid', '    push rbx', '    push r12', '    push r13',
             '    mov r12, QWORD PTR [rdi+16]', '    mov r13, rsi', '    mov rdi, r13', '    call valen_string_new', '    mov rbx, rax',
@@ -250,7 +252,11 @@ export class X86_64Backend {
             ['valen_System_gcPeakRoots', 'valen_gc_peak_roots'],
             ['valen_System_gcCollections', 'valen_gc_collections'],
             ['valen_System_gcReclaimedObjects', 'valen_gc_reclaimed_objects'],
-            ['valen_System_gcTrackedReclaimedBytes', 'valen_gc_reclaimed_bytes']
+            ['valen_System_gcTrackedReclaimedBytes', 'valen_gc_reclaimed_bytes'],
+            ['valen_System_gcWeakReferencesCleared', 'valen_gc_weak_cleared'],
+            ['valen_System_gcWeakReferencesRetained', 'valen_gc_weak_retained'],
+            ['valen_System_gcNativeHandlesOpen', 'valen_gc_native_handles_open'],
+            ['valen_System_gcNativeHandlesFinalized', 'valen_gc_native_handles_finalized']
         ]);
         const lines = [];
         for (const [symbol, storage] of metrics) if (runtimeSymbols.has(symbol)) {
@@ -2412,7 +2418,7 @@ export class X86_64Backend {
             '    inc QWORD PTR [rip+valen_gc_root_count]', '    mov rax, QWORD PTR [rip+valen_gc_root_count]', '    cmp rax, QWORD PTR [rip+valen_gc_peak_roots]', '    jbe .Lgc_root_push_counted',
             '    mov QWORD PTR [rip+valen_gc_peak_roots], rax', '.Lgc_root_push_counted:', '    mov DWORD PTR [rip+valen_gc_lock], 0', '    pop rbx', '    ret', '',
             'valen_gc_root_pop:', '    push rbx', '    mov rbx, rdi', '    call valen_gc_heap_lock', '    lea rax, [rip+valen_gc_roots]', '.Lgc_root_pop_find:', '    mov rcx, QWORD PTR [rax]', '    test rcx, rcx', '    je .Lgc_root_pop_done', '    cmp rcx, rbx', '    je .Lgc_root_pop_remove', '    mov rax, rcx', '    jmp .Lgc_root_pop_find', '.Lgc_root_pop_remove:', '    mov rcx, QWORD PTR [rbx]', '    mov QWORD PTR [rax], rcx', '    dec QWORD PTR [rip+valen_gc_root_count]', '.Lgc_root_pop_done:', '    mov DWORD PTR [rip+valen_gc_lock], 0', '    pop rbx', '    ret', '',
-            '.globl valen_gc_native_handle_finalize', 'valen_gc_native_handle_finalize:', '    cmp QWORD PTR [rdi+16], 0', '    jl .Lgc_native_handle_finalized', '    mov r10, rdi', '    mov rdi, QWORD PTR [rdi+16]', '    mov eax, 3', '    syscall', '    mov QWORD PTR [r10+16], -1', '    mov QWORD PTR [r10+8], 0', '.Lgc_native_handle_finalized:', '    ret', '',
+            '.globl valen_gc_native_handle_finalize', 'valen_gc_native_handle_finalize:', '    cmp QWORD PTR [rdi+16], 0', '    jl .Lgc_native_handle_finalized', '    mov r10, rdi', '    mov rdi, QWORD PTR [rdi+16]', '    mov eax, 3', '    syscall', '    mov QWORD PTR [r10+16], -1', '    mov QWORD PTR [r10+8], 0', ...(this.runtimeMetrics ? ['    lock dec QWORD PTR [rip+valen_gc_native_handles_open]', '    lock inc QWORD PTR [rip+valen_gc_native_handles_finalized]'] : []), '.Lgc_native_handle_finalized:', '    ret', '',
             '.globl valen_gc_mark', 'valen_gc_mark:', '    test rdi, rdi', '    je .Lgc_mark_done', '    mov rax, QWORD PTR [rip+valen_gc_heap]', '.Lgc_mark_find:', '    test rax, rax', '    je .Lgc_mark_done', '    lea rcx, [rax+48]', '    cmp rcx, rdi', '    je .Lgc_mark_found', '    mov rax, QWORD PTR [rax]', '    jmp .Lgc_mark_find', '.Lgc_mark_found:', '    push rbx', '    mov rbx, rax', '    lea rax, [rip+valen_string_finalize]', '    cmp QWORD PTR [rbx+40], rax', '    je .Lgc_mark_live', '    lea rax, [rip+valen_gc_native_handle_finalize]', '    cmp QWORD PTR [rbx+40], rax', '    jne .Lgc_mark_object', '    cmp QWORD PTR [rdi+16], 0', '    jge .Lgc_mark_live', '    jmp .Lgc_mark_pop', '.Lgc_mark_object:', '    cmp QWORD PTR [rdi+8], 0', '    je .Lgc_mark_pop', '.Lgc_mark_live:',
             '    cmp QWORD PTR [rbx+32], 0', '    jne .Lgc_mark_pop',
             '    mov QWORD PTR [rbx+32], 1', '    mov rax, QWORD PTR [rbx+16]', '    test rax, rax', '    je .Lgc_mark_pop', '    call rax',
@@ -2441,7 +2447,7 @@ export class X86_64Backend {
             '.Lgc_collect_release_done:', '    mov DWORD PTR [rip+valen_gc_collecting], 0', '.Lgc_collect_finish:', '    pop r14', '    pop r13', '    pop r12', '    pop rbx', '    leave', '.Lgc_collect_return:', '    ret', ''
         ];
         if (this.runtimeMetrics) return lines;
-        const metricStorage = /valen_gc_(allocated_bytes|objects|root_count|peak_roots|collections|reclaimed_objects|reclaimed_bytes)/;
+        const metricStorage = /valen_gc_(allocated_bytes|objects|root_count|peak_roots|collections|reclaimed_objects|reclaimed_bytes|weak_cleared|weak_retained|native_handles_open|native_handles_finalized)/;
         return lines.filter(line => !metricStorage.test(line));
     }
 
@@ -2472,9 +2478,11 @@ export class X86_64Backend {
             for (const field of type.fields) {
                 if (field.ownership !== 'member-weak') continue;
                 const layout = this.fieldOffsets.get(field.symbol);
-                const keep = `.Lgc_weak_keep_${this.runtimeLabel++}`;
-                lines.push(`    mov rax, QWORD PTR [rbx+${layout.offset}]`, '    test rax, rax', `    je ${keep}`, '    sub rax, 48',
-                    '    cmp QWORD PTR [rax+32], 0', `    jne ${keep}`, `    mov QWORD PTR [rbx+${layout.offset}], 0`, `${keep}:`);
+                const live = `.Lgc_weak_live_${this.runtimeLabel++}`, done = `.Lgc_weak_done_${this.runtimeLabel++}`;
+                lines.push(`    mov rax, QWORD PTR [rbx+${layout.offset}]`, '    test rax, rax', `    je ${done}`, '    sub rax, 48',
+                    '    cmp QWORD PTR [rax+32], 0', `    jne ${live}`, `    mov QWORD PTR [rbx+${layout.offset}], 0`,
+                    ...(this.runtimeMetrics ? ['    lock inc QWORD PTR [rip+valen_gc_weak_cleared]'] : []), `    jmp ${done}`, `${live}:`,
+                    ...(this.runtimeMetrics ? ['    lock inc QWORD PTR [rip+valen_gc_weak_retained]'] : []), `${done}:`);
             }
             lines.push('    pop rbx', '    ret', '');
         }
@@ -2500,7 +2508,9 @@ export class X86_64Backend {
                 const weakLoop = `${this.gcArrayWeakLabel(type)}_loop`, weakNext = `${this.gcArrayWeakLabel(type)}_next`, weakDone = `${this.gcArrayWeakLabel(type)}_done`;
                 lines.push(`${weakLoop}:`, '    cmp rbx, QWORD PTR [r12]', `    jae ${weakDone}`, `    imul rax, rbx, ${size}`,
                     '    add rax, QWORD PTR [r12+16]', '    mov rcx, QWORD PTR [rax]', '    test rcx, rcx', `    je ${weakNext}`,
-                    '    sub rcx, 48', '    cmp QWORD PTR [rcx+32], 0', `    jne ${weakNext}`, '    mov QWORD PTR [rax], 0',
+                    '    sub rcx, 48', '    cmp QWORD PTR [rcx+32], 0', `    jne ${weakNext}_retained`, '    mov QWORD PTR [rax], 0',
+                    ...(this.runtimeMetrics ? ['    lock inc QWORD PTR [rip+valen_gc_weak_cleared]'] : []), `    jmp ${weakNext}`, `${weakNext}_retained:`,
+                    ...(this.runtimeMetrics ? ['    lock inc QWORD PTR [rip+valen_gc_weak_retained]'] : []),
                     `${weakNext}:`, '    inc rbx', `    jmp ${weakLoop}`, `${weakDone}:`);
             }
             lines.push('    pop r12', '    pop rbx', '    ret', '');
@@ -2511,7 +2521,8 @@ export class X86_64Backend {
     gcData() {
         return ['.section .bss', '.align 8', 'valen_gc_roots:', '    .zero 8', 'valen_gc_heap:', '    .zero 8', 'valen_gc_bytes:', '    .zero 8',
             ...(this.runtimeMetrics ? ['valen_gc_allocated_bytes:', '    .zero 8', 'valen_gc_objects:', '    .zero 8', 'valen_gc_root_count:', '    .zero 8', 'valen_gc_peak_roots:', '    .zero 8',
-                'valen_gc_collections:', '    .zero 8', 'valen_gc_reclaimed_objects:', '    .zero 8', 'valen_gc_reclaimed_bytes:', '    .zero 8'] : []),
+                'valen_gc_collections:', '    .zero 8', 'valen_gc_reclaimed_objects:', '    .zero 8', 'valen_gc_reclaimed_bytes:', '    .zero 8',
+                'valen_gc_weak_cleared:', '    .zero 8', 'valen_gc_weak_retained:', '    .zero 8', 'valen_gc_native_handles_open:', '    .zero 8', 'valen_gc_native_handles_finalized:', '    .zero 8'] : []),
             'valen_gc_workers:', '    .zero 8', 'valen_gc_mutators:', '    .zero 8',
             'valen_gc_lock:', '    .zero 4', 'valen_gc_state_guard:', '    .zero 4', 'valen_gc_request:', '    .zero 4', 'valen_gc_parked:', '    .zero 4', 'valen_gc_target:', '    .zero 4', 'valen_gc_collecting:', '    .zero 4',
             'valen_arena_cursor:', '    .zero 8', 'valen_arena_remaining:', '    .zero 8', 'valen_arena_lock:', '    .zero 4', 'valen_arena_enabled:', '    .zero 4',

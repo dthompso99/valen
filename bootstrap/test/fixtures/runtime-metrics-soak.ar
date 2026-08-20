@@ -1,0 +1,26 @@
+import System from '/src/libSystem.ar'
+
+Sample {{ member value:i64 }}
+
+entry {{
+    churn(count:i64) -> void {
+        local index:i64 = 0
+        while index < count { local sample = new Sample(); sample.value = index; index = index + 1 }
+    }
+
+    sample(phase:i64) -> void {
+        local metrics = System.runtimeMetrics()
+        System.print(phase); System.print(metrics.trackedBytes); System.print(metrics.trackedAllocatedBytes)
+        System.print(metrics.heapObjects); System.print(metrics.roots); System.print(metrics.peakRoots)
+        System.print(metrics.collections); System.print(metrics.reclaimedObjects); System.print(metrics.trackedReclaimedBytes)
+        System.print(metrics.weakReferencesCleared); System.print(metrics.weakReferencesRetained)
+        System.print(metrics.nativeHandlesOpen); System.print(metrics.nativeHandlesFinalized)
+    }
+
+    __() -> i32 {
+        self.sample(0)
+        local cycle:i64 = 1
+        while cycle <= 4 { self.churn(128); self.sample(cycle * 2 - 1); System.collectGarbage(); self.sample(cycle * 2); cycle = cycle + 1 }
+        return 0
+    }
+}}

@@ -337,6 +337,7 @@ library X86_64 {{
             if name == "valen_System_lastError" || name == "valen_System_currentDirectory" || name == "valen_System_environmentVariable" || name == "valen_System_collectGarbage" { return true }
             if name == "valen_System_gcTrackedBytes" || name == "valen_System_gcTrackedAllocatedBytes" || name == "valen_System_gcHeapObjects" || name == "valen_System_gcRoots" { return true }
             if name == "valen_System_gcPeakRoots" || name == "valen_System_gcCollections" || name == "valen_System_gcReclaimedObjects" || name == "valen_System_gcTrackedReclaimedBytes" { return true }
+            if name == "valen_System_gcWeakReferencesCleared" || name == "valen_System_gcWeakReferencesRetained" || name == "valen_System_gcNativeHandlesOpen" || name == "valen_System_gcNativeHandlesFinalized" { return true }
             if name == "valen_System_processArenaEnabled" { return true }
             if name == "valen_System_enableProcessArena" || name == "valen_System_enableShutdownSignals" || name == "valen_System_shutdownRequested" { return true }
             if name == "valen_System_link" || name == "valen_System_compileLlvm" || name == "valen_System_memoryCopy" || name == "valen_System_memoryCompare" { return true }
@@ -1632,7 +1633,7 @@ library X86_64 {{
             self.writer.line("valen_gc_root_pop:"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rdi"); self.writer.line("    call valen_gc_heap_lock"); self.writer.line("    lea rax, [rip+valen_gc_roots]"); self.writer.line(".Lgc_root_pop_find:"); self.writer.line("    mov rcx, QWORD PTR [rax]"); self.writer.line("    test rcx, rcx"); self.writer.line("    je .Lgc_root_pop_done"); self.writer.line("    cmp rcx, rbx"); self.writer.line("    je .Lgc_root_pop_remove"); self.writer.line("    mov rax, rcx"); self.writer.line("    jmp .Lgc_root_pop_find"); self.writer.line(".Lgc_root_pop_remove:"); self.writer.line("    mov rcx, QWORD PTR [rbx]"); self.writer.line("    mov QWORD PTR [rax], rcx")
             if self.runtimeMetrics { self.writer.line("    dec QWORD PTR [rip+valen_gc_root_count]") }
             self.writer.line(".Lgc_root_pop_done:"); self.writer.line("    mov DWORD PTR [rip+valen_gc_lock], 0"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("")
-            self.writer.line(".globl valen_gc_native_handle_finalize"); self.writer.line("valen_gc_native_handle_finalize:"); self.writer.line("    cmp QWORD PTR [rdi+16], 0"); self.writer.line("    jl .Lgc_native_handle_finalized"); self.writer.line("    mov r10, rdi"); self.writer.line("    mov rdi, QWORD PTR [rdi+16]"); self.writer.line("    mov eax, 3"); self.writer.line("    syscall"); self.writer.line("    mov QWORD PTR [r10+16], -1"); self.writer.line("    mov QWORD PTR [r10+8], 0"); self.writer.line(".Lgc_native_handle_finalized:"); self.writer.line("    ret")
+            self.writer.line(".globl valen_gc_native_handle_finalize"); self.writer.line("valen_gc_native_handle_finalize:"); self.writer.line("    cmp QWORD PTR [rdi+16], 0"); self.writer.line("    jl .Lgc_native_handle_finalized"); self.writer.line("    mov r10, rdi"); self.writer.line("    mov rdi, QWORD PTR [rdi+16]"); self.writer.line("    mov eax, 3"); self.writer.line("    syscall"); self.writer.line("    mov QWORD PTR [r10+16], -1"); self.writer.line("    mov QWORD PTR [r10+8], 0"); if self.runtimeMetrics { self.writer.line("    lock dec QWORD PTR [rip+valen_gc_native_handles_open]"); self.writer.line("    lock inc QWORD PTR [rip+valen_gc_native_handles_finalized]") }; self.writer.line(".Lgc_native_handle_finalized:"); self.writer.line("    ret")
             self.writer.line(".globl valen_gc_mark"); self.writer.line("valen_gc_mark:"); self.writer.line("    test rdi, rdi"); self.writer.line("    je .Lgc_mark_done"); self.writer.line("    mov rax, QWORD PTR [rip+valen_gc_heap]"); self.writer.line(".Lgc_mark_find:"); self.writer.line("    test rax, rax"); self.writer.line("    je .Lgc_mark_done"); self.writer.line("    lea rcx, [rax+48]"); self.writer.line("    cmp rcx, rdi"); self.writer.line("    je .Lgc_mark_found"); self.writer.line("    mov rax, QWORD PTR [rax]"); self.writer.line("    jmp .Lgc_mark_find"); self.writer.line(".Lgc_mark_found:"); self.writer.line("    push rbx"); self.writer.line("    mov rbx, rax"); self.writer.line("    lea rax, [rip+valen_string_finalize]"); self.writer.line("    cmp QWORD PTR [rbx+40], rax"); self.writer.line("    je .Lgc_mark_live"); self.writer.line("    lea rax, [rip+valen_gc_native_handle_finalize]"); self.writer.line("    cmp QWORD PTR [rbx+40], rax"); self.writer.line("    jne .Lgc_mark_object"); self.writer.line("    cmp QWORD PTR [rdi+16], 0"); self.writer.line("    jge .Lgc_mark_live"); self.writer.line("    jmp .Lgc_mark_pop"); self.writer.line(".Lgc_mark_object:"); self.writer.line("    cmp QWORD PTR [rdi+8], 0"); self.writer.line("    je .Lgc_mark_pop"); self.writer.line(".Lgc_mark_live:"); self.writer.line("    cmp QWORD PTR [rbx+32], 0"); self.writer.line("    jne .Lgc_mark_pop"); self.writer.line("    mov QWORD PTR [rbx+32], 1"); self.writer.line("    mov rax, QWORD PTR [rbx+16]"); self.writer.line("    test rax, rax"); self.writer.line("    je .Lgc_mark_pop"); self.writer.line("    call rax"); self.writer.line(".Lgc_mark_pop:"); self.writer.line("    pop rbx"); self.writer.line(".Lgc_mark_done:"); self.writer.line("    ret"); self.writer.line("")
             self.writer.line(".globl valen_gc_collect"); self.writer.line("valen_gc_collect:"); self.writer.line("    cmp DWORD PTR [rip+valen_arena_enabled], 0"); self.writer.line("    jne .Lgc_collect_return"); self.writer.line("    cmp QWORD PTR [rip+valen_gc_workers], 0"); self.writer.line("    je .Lgc_collect_begin_single"); self.writer.line("    xor eax, eax"); self.writer.line("    mov edx, 1"); self.writer.line("    lock cmpxchg DWORD PTR [rip+valen_gc_collecting], edx"); self.writer.line("    jne valen_gc_safepoint")
             self.writer.line("    call valen_gc_state_lock"); self.writer.line("    mov DWORD PTR [rip+valen_gc_request], 1"); self.writer.line("    mov rax, QWORD PTR [rip+valen_gc_mutators]"); self.writer.line("    dec eax"); self.writer.line("    jns .Lgc_collect_target_ready"); self.writer.line("    xor eax, eax"); self.writer.line(".Lgc_collect_target_ready:"); self.writer.line("    mov DWORD PTR [rip+valen_gc_target], eax"); self.writer.line("    mov DWORD PTR [rip+valen_gc_state_guard], 0")
@@ -1660,6 +1661,10 @@ library X86_64 {{
             self.metricRuntime("valen_System_gcCollections", "valen_gc_collections")
             self.metricRuntime("valen_System_gcReclaimedObjects", "valen_gc_reclaimed_objects")
             self.metricRuntime("valen_System_gcTrackedReclaimedBytes", "valen_gc_reclaimed_bytes")
+            self.metricRuntime("valen_System_gcWeakReferencesCleared", "valen_gc_weak_cleared")
+            self.metricRuntime("valen_System_gcWeakReferencesRetained", "valen_gc_weak_retained")
+            self.metricRuntime("valen_System_gcNativeHandlesOpen", "valen_gc_native_handles_open")
+            self.metricRuntime("valen_System_gcNativeHandlesFinalized", "valen_gc_native_handles_finalized")
             self.writer.line(".globl valen_System_processArenaEnabled"); self.writer.line("valen_System_processArenaEnabled:"); self.writer.line("    mov eax, DWORD PTR [rip+valen_arena_enabled]"); self.writer.line("    ret"); self.writer.line("")
         }
 
@@ -1689,8 +1694,9 @@ library X86_64 {{
                     local field = typeNode.fields[fieldIndex]
                     if field.ownership == "member-weak" {
                         local layout = self.findField(field.qualifiedName)
-                        local keep = ".Lgc_weak_keep_" + self.nextLabel.toString(); self.nextLabel = self.nextLabel + 1
-                        self.writer.line("    mov rax, QWORD PTR [rbx+" + layout!.offset.toString() + "]"); self.writer.line("    test rax, rax"); self.writer.line("    je " + keep); self.writer.line("    sub rax, 48"); self.writer.line("    cmp QWORD PTR [rax+32], 0"); self.writer.line("    jne " + keep); self.writer.line("    mov QWORD PTR [rbx+" + layout!.offset.toString() + "], 0"); self.writer.line(keep + ":")
+                        local live = ".Lgc_weak_live_" + self.nextLabel.toString(); self.nextLabel = self.nextLabel + 1
+                        local done = ".Lgc_weak_done_" + self.nextLabel.toString(); self.nextLabel = self.nextLabel + 1
+                        self.writer.line("    mov rax, QWORD PTR [rbx+" + layout!.offset.toString() + "]"); self.writer.line("    test rax, rax"); self.writer.line("    je " + done); self.writer.line("    sub rax, 48"); self.writer.line("    cmp QWORD PTR [rax+32], 0"); self.writer.line("    jne " + live); self.writer.line("    mov QWORD PTR [rbx+" + layout!.offset.toString() + "], 0"); if self.runtimeMetrics { self.writer.line("    lock inc QWORD PTR [rip+valen_gc_weak_cleared]") }; self.writer.line("    jmp " + done); self.writer.line(live + ":"); if self.runtimeMetrics { self.writer.line("    lock inc QWORD PTR [rip+valen_gc_weak_retained]") }; self.writer.line(done + ":")
                     }
                     fieldIndex = fieldIndex + 1
                 }
@@ -1720,7 +1726,8 @@ library X86_64 {{
                 local weakDone = weakLabel + "_done"
                 if self.emissionModule != null && self.emissionModule! == "<llvm-runtime>" { self.writer.line(".globl " + weakLabel) }; self.writer.line(weakLabel + ":"); self.writer.line("    push rbx"); self.writer.line("    push r12"); self.writer.line("    xor ebx, ebx"); self.writer.line("    mov r12, rdi")
                 if ownership == "weak" && self.isManagedReferenceType(element) {
-                    self.writer.line(weakLoop + ":"); self.writer.line("    cmp rbx, QWORD PTR [r12]"); self.writer.line("    jae " + weakDone); self.writer.line("    imul rax, rbx, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]"); self.writer.line("    mov rcx, QWORD PTR [rax]"); self.writer.line("    test rcx, rcx"); self.writer.line("    je " + weakNext); self.writer.line("    sub rcx, 48"); self.writer.line("    cmp QWORD PTR [rcx+32], 0"); self.writer.line("    jne " + weakNext); self.writer.line("    mov QWORD PTR [rax], 0"); self.writer.line(weakNext + ":"); self.writer.line("    inc rbx"); self.writer.line("    jmp " + weakLoop); self.writer.line(weakDone + ":")
+                    local retained = weakNext + "_retained"
+                    self.writer.line(weakLoop + ":"); self.writer.line("    cmp rbx, QWORD PTR [r12]"); self.writer.line("    jae " + weakDone); self.writer.line("    imul rax, rbx, " + self.sizeOf(element).toString()); self.writer.line("    add rax, QWORD PTR [r12+16]"); self.writer.line("    mov rcx, QWORD PTR [rax]"); self.writer.line("    test rcx, rcx"); self.writer.line("    je " + weakNext); self.writer.line("    sub rcx, 48"); self.writer.line("    cmp QWORD PTR [rcx+32], 0"); self.writer.line("    jne " + retained); self.writer.line("    mov QWORD PTR [rax], 0"); if self.runtimeMetrics { self.writer.line("    lock inc QWORD PTR [rip+valen_gc_weak_cleared]") }; self.writer.line("    jmp " + weakNext); self.writer.line(retained + ":"); if self.runtimeMetrics { self.writer.line("    lock inc QWORD PTR [rip+valen_gc_weak_retained]") }; self.writer.line(weakNext + ":"); self.writer.line("    inc rbx"); self.writer.line("    jmp " + weakLoop); self.writer.line(weakDone + ":")
                 }
                 self.writer.line("    pop r12"); self.writer.line("    pop rbx"); self.writer.line("    ret"); self.writer.line("")
                 arrayIndex = arrayIndex + 1
@@ -2454,7 +2461,7 @@ library X86_64 {{
             self.writer.line("    js .Lnetwork_close_error_pop2")
             self.writer.line("    mov r12, r10")
             self.writer.line("    mov edi, 24"); self.writer.line("    xor esi, esi"); self.writer.line("    xor edx, edx"); self.writer.line("    lea rcx, [rip+valen_gc_native_handle_finalize]")
-            self.writer.line("    call valen_gc_alloc"); self.writer.line("    mov QWORD PTR [rax+8], 1"); self.writer.line("    mov QWORD PTR [rax+16], r12")
+            self.writer.line("    call valen_gc_alloc"); if self.runtimeMetrics { self.writer.line("    lock inc QWORD PTR [rip+valen_gc_native_handles_open]") }; self.writer.line("    mov QWORD PTR [rax+8], 1"); self.writer.line("    mov QWORD PTR [rax+16], r12")
             self.writer.line("    mov QWORD PTR [rip+valen_network_error], 0")
             self.writer.line("    pop r13")
             self.writer.line("    pop r12")
@@ -2486,7 +2493,7 @@ library X86_64 {{
             self.writer.line("    push rbx")
             self.writer.line("    mov rbx, rax")
             self.writer.line("    mov edi, 24"); self.writer.line("    xor esi, esi"); self.writer.line("    xor edx, edx"); self.writer.line("    lea rcx, [rip+valen_gc_native_handle_finalize]")
-            self.writer.line("    call valen_gc_alloc"); self.writer.line("    mov QWORD PTR [rax+8], 1"); self.writer.line("    mov QWORD PTR [rax+16], rbx")
+            self.writer.line("    call valen_gc_alloc"); if self.runtimeMetrics { self.writer.line("    lock inc QWORD PTR [rip+valen_gc_native_handles_open]") }; self.writer.line("    mov QWORD PTR [rax+8], 1"); self.writer.line("    mov QWORD PTR [rax+16], rbx")
             self.writer.line("    pop rbx")
             self.writer.line("    mov QWORD PTR [rip+valen_network_error], 0")
             self.writer.line("    ret")
@@ -3098,6 +3105,14 @@ library X86_64 {{
             self.writer.line("valen_gc_reclaimed_objects:")
             self.writer.line("    .zero 8")
             self.writer.line("valen_gc_reclaimed_bytes:")
+            self.writer.line("    .zero 8")
+            self.writer.line("valen_gc_weak_cleared:")
+            self.writer.line("    .zero 8")
+            self.writer.line("valen_gc_weak_retained:")
+            self.writer.line("    .zero 8")
+            self.writer.line("valen_gc_native_handles_open:")
+            self.writer.line("    .zero 8")
+            self.writer.line("valen_gc_native_handles_finalized:")
             self.writer.line("    .zero 8")
             }
             self.writer.line("valen_gc_workers:")

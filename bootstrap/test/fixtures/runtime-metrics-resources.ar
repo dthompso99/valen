@@ -1,0 +1,31 @@
+import System from '/src/libSystem.ar'
+import Network from '/src/libNetwork.ar'
+
+Engine {{}}
+Observer {{ member weak engine:Engine? }}
+
+entry {{
+    assign(observer:Observer) -> void { local engine = new Engine(); observer.engine = engine }
+
+    __() -> i32 {
+        local observer = new Observer()
+        local liveEngine = new Engine()
+        observer.engine = liveEngine
+        System.collectGarbage()
+        local retainedMetrics = System.runtimeMetrics()
+        if retainedMetrics.weakReferencesRetained < 1 { return 1 }
+        self.assign(observer)
+        System.collectGarbage()
+        local weakMetrics = System.runtimeMetrics()
+        if observer.engine != null || weakMetrics.weakReferencesCleared < 1 { return 2 }
+
+        local listener = Network.listen(0, 1)
+        if listener == null { return 0 }
+        local opened = System.runtimeMetrics()
+        if opened.nativeHandlesOpen < 1 { return 3 }
+        Network.closeListener(listener!)
+        local closed = System.runtimeMetrics()
+        if closed.nativeHandlesOpen != opened.nativeHandlesOpen - 1 || closed.nativeHandlesFinalized <= opened.nativeHandlesFinalized { return 4 }
+        return 0
+    }
+}}

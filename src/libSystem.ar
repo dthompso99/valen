@@ -29,6 +29,10 @@ library System {{
     native gcCollections() -> i64
     native gcReclaimedObjects() -> i64
     native gcTrackedReclaimedBytes() -> i64
+    native gcWeakReferencesCleared() -> i64
+    native gcWeakReferencesRetained() -> i64
+    native gcNativeHandlesOpen() -> i64
+    native gcNativeHandlesFinalized() -> i64
     native processArenaEnabled() -> bool
     native enableProcessArena() -> void
     native enableShutdownSignals() -> bool
@@ -42,7 +46,8 @@ library System {{
 
     runtimeMetrics() -> RuntimeMetrics {
         return new RuntimeMetrics(gcTrackedBytes(), gcTrackedAllocatedBytes(), gcHeapObjects(), gcRoots(),
-            gcPeakRoots(), gcCollections(), gcReclaimedObjects(), gcTrackedReclaimedBytes(), processArenaEnabled())
+            gcPeakRoots(), gcCollections(), gcReclaimedObjects(), gcTrackedReclaimedBytes(), gcWeakReferencesCleared(),
+            gcWeakReferencesRetained(), gcNativeHandlesOpen(), gcNativeHandlesFinalized(), processArenaEnabled())
     }
 
     RuntimeMetrics {{
@@ -54,9 +59,13 @@ library System {{
         member collections:i64
         member reclaimedObjects:i64
         member trackedReclaimedBytes:i64
+        member weakReferencesCleared:i64
+        member weakReferencesRetained:i64
+        member nativeHandlesOpen:i64
+        member nativeHandlesFinalized:i64
         member arenaEnabled:bool
 
-        __(trackedBytes:i64, trackedAllocatedBytes:i64, heapObjects:i64, roots:i64, peakRoots:i64, collections:i64, reclaimedObjects:i64, trackedReclaimedBytes:i64, arenaEnabled:bool) -> void {
+        __(trackedBytes:i64, trackedAllocatedBytes:i64, heapObjects:i64, roots:i64, peakRoots:i64, collections:i64, reclaimedObjects:i64, trackedReclaimedBytes:i64, weakReferencesCleared:i64, weakReferencesRetained:i64, nativeHandlesOpen:i64, nativeHandlesFinalized:i64, arenaEnabled:bool) -> void {
             self.trackedBytes = trackedBytes
             self.trackedAllocatedBytes = trackedAllocatedBytes
             self.heapObjects = heapObjects
@@ -65,6 +74,10 @@ library System {{
             self.collections = collections
             self.reclaimedObjects = reclaimedObjects
             self.trackedReclaimedBytes = trackedReclaimedBytes
+            self.weakReferencesCleared = weakReferencesCleared
+            self.weakReferencesRetained = weakReferencesRetained
+            self.nativeHandlesOpen = nativeHandlesOpen
+            self.nativeHandlesFinalized = nativeHandlesFinalized
             self.arenaEnabled = arenaEnabled
         }
     }}

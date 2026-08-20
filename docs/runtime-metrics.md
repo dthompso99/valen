@@ -20,6 +20,10 @@ Without the flag, generated runtimes omit the optional counter storage and updat
 | `collections` | Collection cycles started. |
 | `reclaimedObjects` | Cumulative managed objects reclaimed. |
 | `trackedReclaimedBytes` | Cumulative tracked mapping bytes reclaimed. |
+| `weakReferencesCleared` | Cumulative non-null weak entries cleared during collection. |
+| `weakReferencesRetained` | Cumulative non-null weak entries retained during collection. |
+| `nativeHandlesOpen` | Native file/socket handles currently open through the tracked handle finalizer. |
+| `nativeHandlesFinalized` | Cumulative tracked handles closed explicitly or by collection. |
 | `arenaEnabled` | Whether process-arena allocation is enabled. |
 
 Current-value counters (`trackedBytes`, `heapObjects`, and `roots`) may rise or fall. The allocation, peak, collection, and reclamation counters are monotonic for the life of the process. A snapshot is not an atomic transaction across threads, so individual fields can reflect adjacent runtime events in a concurrent program.
@@ -44,4 +48,4 @@ entry {{
 }}
 ```
 
-Weak-reference and native-handle counts, process-level RSS sampling, and a standard long-running soak reporter remain **WIP**.
+Run `node scripts/runtime-metrics-soak.mjs` for deterministic newline-free JSON samples from the bootstrap native backend. Pass `--compiler <native-valen> --backend native|llvm` to compare self-hosted backends. Samples cover fixed allocation churn before and after four explicit collections and validate monotonic counter invariants. RSS/working-set sampling remains an external operating-system observation rather than a Valen runtime counter.

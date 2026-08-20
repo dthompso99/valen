@@ -1076,20 +1076,22 @@ test('runtime GC metrics count allocations, roots, collections, and reclamation'
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     const ir = new IrGenerator().generate(semantic);
     const disabled = new X86_64Backend().generate(structuredClone(ir));
-    assert.doesNotMatch(disabled, /valen_gc_(allocated_bytes|objects|root_count|peak_roots|collections|reclaimed_objects|reclaimed_bytes)/);
+    assert.doesNotMatch(disabled, /valen_gc_(allocated_bytes|objects|root_count|peak_roots|collections|reclaimed_objects|reclaimed_bytes|weak_cleared|weak_retained|native_handles_open|native_handles_finalized)/);
     const assembly = new X86_64Backend().generate(ir, {runtimeMetrics: true});
     assert.match(assembly, /valen_System_gcTrackedBytes:[\s\S]*valen_gc_bytes/);
     assert.match(assembly, /valen_gc_alloc:[\s\S]*valen_gc_allocated_bytes[\s\S]*valen_gc_objects/);
     assert.match(assembly, /valen_gc_root_push:[\s\S]*valen_gc_root_count[\s\S]*valen_gc_peak_roots/);
     assert.match(assembly, /\.Lgc_collect_begin:[\s\S]*valen_gc_collections/);
     assert.match(assembly, /\.Lgc_reclaim:[\s\S]*valen_gc_reclaimed_objects[\s\S]*valen_gc_reclaimed_bytes/);
+    assert.match(assembly, /valen_System_gcWeakReferencesCleared:[\s\S]*valen_gc_weak_cleared/);
+    assert.match(assembly, /valen_gc_native_handle_finalize:[\s\S]*valen_gc_native_handles_open[\s\S]*valen_gc_native_handles_finalized/);
 });
 
 test('production runtime omits metrics storage and counter updates', () => {
     const semantic = new SemanticAnalyzer().analyzeFile(path.join(projectRoot, 'bootstrap/test/fixtures/garbage-collection-repeated.ar'), {sourceRoot: projectRoot, libraryPath: path.join(projectRoot, 'lib')});
     assert.equal(semantic.success, true, JSON.stringify(semantic.diagnostics));
     const assembly = new X86_64Backend().generate(new IrGenerator().generate(semantic));
-    assert.doesNotMatch(assembly, /valen_gc_(allocated_bytes|objects|root_count|peak_roots|collections|reclaimed_objects|reclaimed_bytes)/);
+    assert.doesNotMatch(assembly, /valen_gc_(allocated_bytes|objects|root_count|peak_roots|collections|reclaimed_objects|reclaimed_bytes|weak_cleared|weak_retained|native_handles_open|native_handles_finalized)/);
 });
 
 test('shutdown signals lower to async-safe flags checked by application safe points', () => {
