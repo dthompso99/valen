@@ -1,6 +1,6 @@
 # Language guide
 
-This guide documents syntax implemented by the current compiler. Features marked **WIP** are planned or incomplete and should not be used as if they were stable.
+This guide teaches syntax implemented by the current compiler. The [core specification](specification/README.md) is authoritative where it defines a rule. Features marked **WIP** are planned or incomplete and should not be used as if they were stable.
 
 ## Files, imports, and libraries
 

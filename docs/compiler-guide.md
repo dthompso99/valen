@@ -1,5 +1,7 @@
 # Compiler developer guide
 
+Implementation work must preserve the [core specification](specification/README.md) or revise its rule and conformance mapping under the documented compatibility policy.
+
 ## The bootstrap model
 
 Valen is developed through two compiler implementations:

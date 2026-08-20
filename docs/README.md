@@ -15,6 +15,7 @@ If you are new to the project, read these in order:
 11. [Project manifests and lockfiles](project-manifests.md) — describe and verify deterministic local dependency graphs.
 12. [Runtime metrics](runtime-metrics.md) — inspect managed allocation, root, collection, and reclamation counters.
 13. [Bounded fuzzing](fuzzing.md) — run deterministic tokenizer/parser campaigns and retain minimized regressions.
+14. [Core specification](specification/README.md) — read the normative rules and compatibility policy.
 
 For compiler contributors:
 
