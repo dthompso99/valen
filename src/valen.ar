@@ -406,8 +406,12 @@ entry {{
                 while fieldIndex < typeNode.fields.length {
                     local field = typeNode.fields[fieldIndex]
                     local fieldType = field.typeName
-                    if field.ownership == "member-weak" { return "cannot yet own weak object fields" }
-                    if fieldType != "bool" && fieldType != "i8" && fieldType != "u8" && fieldType != "i16" && fieldType != "u16" && fieldType != "i32" && fieldType != "u32" && fieldType != "i64" && fieldType != "u64" && fieldType != "f32" && fieldType != "f64" && fieldType != "string" { return "cannot yet own object or array reference fields" }
+                    local knownObject:bool = false
+                    local baseFieldType = fieldType
+                    if baseFieldType.length > 0 { if baseFieldType[baseFieldType.length - 1] == 63 { baseFieldType = baseFieldType.slice(0, baseFieldType.length - 1) } }
+                    local knownIndex:i64 = 0
+                    while knownIndex < ir.types.length { if ir.types[knownIndex].name == baseFieldType { knownObject = true }; knownIndex = knownIndex + 1 }
+                    if fieldType != "bool" && fieldType != "i8" && fieldType != "u8" && fieldType != "i16" && fieldType != "u16" && fieldType != "i32" && fieldType != "u32" && fieldType != "i64" && fieldType != "u64" && fieldType != "f32" && fieldType != "f64" && fieldType != "string" && !knownObject { return "cannot yet own array reference fields" }
                     fieldIndex = fieldIndex + 1
                 }
             }

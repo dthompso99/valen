@@ -127,10 +127,11 @@ The self-hosted compiler can stop at the same boundary with
 Select `--backend llvm` to have clang lower the module-scoped LLVM IR into an x86-64 relocatable
 object. Stateless libraries can also use `--backend llvm --library-version <version> --emit-library`
 to produce the same object, `.vmi`, and `.vmeta` contract as the native backend. LLVM libraries may
-own simple objects containing primitive and strong string fields; their type descriptors, GC hooks,
-and contextual structural equality/hash/copy helpers are emitted in the module object. Inheritance,
-object/array references, weak fields, and specialized arrays remain rejected until their cycle- and
-weak-aware metadata helpers are available. Stateless compiled-library objects are ABI-interoperable in
+own objects containing primitive, strong string, and strong object-reference fields; their type
+descriptors, GC hooks, and cycle-aware contextual structural equality/hash/copy helpers are emitted
+in the module object. Weak object fields receive module-owned clearing hooks compatible with the
+tracing collector. Inheritance and specialized arrays remain rejected until their richer metadata
+helpers are available. Stateless compiled-library objects are ABI-interoperable in
 both directions: native executables may consume LLVM libraries, and LLVM executables may consume
 native libraries.
 

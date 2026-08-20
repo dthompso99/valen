@@ -49,6 +49,7 @@ library LLVM {{
             self.writer.line("target triple = \"x86_64-unknown-linux-gnu\"")
             self.writer.line("")
             self.writer.line("declare ptr @\"valen_gc_alloc\"(i64, ptr, ptr, ptr)")
+            self.writer.line("declare ptr @\"valen_alloc\"(i64)")
             self.writer.line("declare void @\"valen_gc_mark\"(ptr)")
             self.writer.line("declare void @\"valen_gc_root_push\"(ptr)")
             self.writer.line("declare void @\"valen_gc_root_pop\"(ptr)")
@@ -154,6 +155,15 @@ library LLVM {{
 
         ownsType(typeNode:Ir.Type) -> bool { return self.includeModuleMetadata && self.emissionModule != null && typeNode.modulePath == self.emissionModule! }
 
+        isObjectReference(typeName:string) -> bool {
+            local base = self.baseType(typeName)
+            local index:i64 = 0
+            while index < self.program.types.length { if self.program.types[index].name == base { return true }; index = index + 1 }
+            return false
+        }
+
+        isMetadataReference(field:Ir.Field) -> bool { return field.ownership != "member-weak" && (field.typeName == "string" || self.isObjectReference(field.typeName)) }
+
         writeModuleTypeMetadata() -> void {
             local index:i64 = 0
             while index < self.program.types.length {
@@ -202,7 +212,7 @@ library LLVM {{
             local traceIndex:i64 = 0
             while traceIndex < typeNode.fields.length {
                 local traceField = typeNode.fields[traceIndex]
-                if traceField.typeName == "string" && traceField.ownership != "member-weak" {
+                if self.isMetadataReference(traceField) {
                     local traceAddress = "%\"trace.address." + traceIndex.toString() + "\""
                     local traceValue = "%\"trace.value." + traceIndex.toString() + "\""
                     self.writer.line("    " + traceAddress + " = getelementptr i8, ptr %object, i64 " + self.fieldOffset(traceField).toString())
@@ -215,7 +225,46 @@ library LLVM {{
             self.writer.line("}")
             self.writer.line("define void " + self.gcWeakGlobal(typeNode.name) + "(ptr %object) {")
             self.writer.line("entry:")
-            self.writer.line("    ret void")
+            local weakCount:i64 = 0
+            local weakScan:i64 = 0
+            while weakScan < typeNode.fields.length { if typeNode.fields[weakScan].ownership == "member-weak" { weakCount = weakCount + 1 }; weakScan = weakScan + 1 }
+            if weakCount == 0 { self.writer.line("    ret void") }
+            else {
+                self.writer.line("    br label %\"weak.0.check\"")
+                local weakIndex:i64 = 0
+                local emittedWeak:i64 = 0
+                while weakIndex < typeNode.fields.length {
+                    local weakField = typeNode.fields[weakIndex]
+                    if weakField.ownership == "member-weak" {
+                        local prefix = "weak." + emittedWeak.toString()
+                        local next = "weak.done"
+                        if emittedWeak + 1 < weakCount { next = "weak." + (emittedWeak + 1).toString() + ".check" }
+                        self.writer.line("\"" + prefix + ".check\":")
+                        local address = "%\"" + prefix + ".address\""
+                        local value = "%\"" + prefix + ".value\""
+                        local missing = "%\"" + prefix + ".missing\""
+                        self.writer.line("    " + address + " = getelementptr i8, ptr %object, i64 " + self.fieldOffset(weakField).toString())
+                        self.writer.line("    " + value + " = load ptr, ptr " + address)
+                        self.writer.line("    " + missing + " = icmp eq ptr " + value + ", null")
+                        self.writer.line("    br i1 " + missing + ", label %\"" + next + "\", label %\"" + prefix + ".marked\"")
+                        self.writer.line("\"" + prefix + ".marked\":")
+                        local markAddress = "%\"" + prefix + ".mark.address\""
+                        local mark = "%\"" + prefix + ".mark\""
+                        local live = "%\"" + prefix + ".live\""
+                        self.writer.line("    " + markAddress + " = getelementptr i8, ptr " + value + ", i64 -16")
+                        self.writer.line("    " + mark + " = load i64, ptr " + markAddress)
+                        self.writer.line("    " + live + " = icmp ne i64 " + mark + ", 0")
+                        self.writer.line("    br i1 " + live + ", label %\"" + next + "\", label %\"" + prefix + ".clear\"")
+                        self.writer.line("\"" + prefix + ".clear\":")
+                        self.writer.line("    store ptr null, ptr " + address)
+                        self.writer.line("    br label %\"" + next + "\"")
+                        emittedWeak = emittedWeak + 1
+                    }
+                    weakIndex = weakIndex + 1
+                }
+                self.writer.line("\"weak.done\":")
+                self.writer.line("    ret void")
+            }
             self.writer.line("}")
             self.writer.line("define i1 " + equality + "(ptr %left, ptr %right, ptr %context) {")
             self.writer.line("entry:")
@@ -234,6 +283,7 @@ library LLVM {{
                 self.writer.line("    " + leftValue + " = load " + self.llvmType(field.typeName) + ", ptr " + leftAddress)
                 self.writer.line("    " + rightValue + " = load " + self.llvmType(field.typeName) + ", ptr " + rightAddress)
                 if field.typeName == "string" { self.writer.line("    " + compared + " = call i1 @\"valen_string_equal_context\"(ptr " + leftValue + ", ptr " + rightValue + ", ptr %context)") }
+                else if self.isObjectReference(field.typeName) { self.writer.line("    " + compared + " = call i1 @\"valen_object_equal\"(ptr " + leftValue + ", ptr " + rightValue + ", ptr %context)") }
                 else if field.typeName == "f32" || field.typeName == "f64" { self.writer.line("    " + compared + " = fcmp oeq " + self.llvmType(field.typeName) + " " + leftValue + ", " + rightValue) }
                 else { self.writer.line("    " + compared + " = icmp eq " + self.llvmType(field.typeName) + " " + leftValue + ", " + rightValue) }
                 if fieldIndex > 0 {
@@ -259,6 +309,9 @@ library LLVM {{
                 if field.typeName == "string" {
                     bits = "%\"hash.bits." + fieldIndex.toString() + "\""
                     self.writer.line("    " + bits + " = call i64 @\"valen_string_hash_context\"(ptr " + loaded + ", ptr %context)")
+                } else if self.isObjectReference(field.typeName) {
+                    bits = "%\"hash.bits." + fieldIndex.toString() + "\""
+                    self.writer.line("    " + bits + " = call i64 @\"valen_object_hash\"(ptr " + loaded + ", ptr %context)")
                 } else if field.typeName == "f64" {
                     bits = "%\"hash.bits." + fieldIndex.toString() + "\""
                     self.writer.line("    " + bits + " = bitcast double " + loaded + " to i64")
@@ -286,6 +339,14 @@ library LLVM {{
             self.writer.line("    store ptr " + self.typeGlobal(typeNode.name) + ", ptr %copy")
             self.writer.line("    %\"copy.count.address\" = getelementptr i8, ptr %copy, i64 8")
             self.writer.line("    store i64 1, ptr %\"copy.count.address\"")
+            self.writer.line("    %\"copy.mapping\" = call ptr @\"valen_alloc\"(i64 24)")
+            self.writer.line("    store ptr %source, ptr %\"copy.mapping\"")
+            self.writer.line("    %\"copy.mapping.target\" = getelementptr i8, ptr %\"copy.mapping\", i64 8")
+            self.writer.line("    store ptr %copy, ptr %\"copy.mapping.target\"")
+            self.writer.line("    %\"copy.mapping.next\" = getelementptr i8, ptr %\"copy.mapping\", i64 16")
+            self.writer.line("    %\"copy.mapping.head\" = load ptr, ptr %context")
+            self.writer.line("    store ptr %\"copy.mapping.head\", ptr %\"copy.mapping.next\"")
+            self.writer.line("    store ptr %\"copy.mapping\", ptr %context")
             fieldIndex = 0
             while fieldIndex < typeNode.fields.length {
                 local field = typeNode.fields[fieldIndex]
@@ -299,6 +360,10 @@ library LLVM {{
                 if field.typeName == "string" {
                     local copiedValue = "%\"copy.string." + fieldIndex.toString() + "\""
                     self.writer.line("    " + copiedValue + " = call ptr @\"valen_string_copy_context\"(ptr " + value + ", ptr %context)")
+                    self.writer.line("    store ptr " + copiedValue + ", ptr " + targetAddress)
+                } else if self.isObjectReference(field.typeName) {
+                    local copiedValue = "%\"copy.object." + fieldIndex.toString() + "\""
+                    self.writer.line("    " + copiedValue + " = call ptr @\"valen_object_copy\"(ptr " + value + ", ptr %context)")
                     self.writer.line("    store ptr " + copiedValue + ", ptr " + targetAddress)
                 } else { self.writer.line("    store " + self.llvmType(field.typeName) + " " + value + ", ptr " + targetAddress) }
                 fieldIndex = fieldIndex + 1

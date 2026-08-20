@@ -274,7 +274,7 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             assert.equal(spawnSync(nativeConsumer).status, 7, 'native executable did not consume the LLVM compiled library');
 
             const recordsSource = path.join(sourceRoot, 'Records.ar');
-            fs.writeFileSync(recordsSource, 'library Records {{ Record {{ member value:i64; member label:string; member score:f64; __(value:i64, label:string, score:f64) -> void { self.value = value; self.label = label; self.score = score }; get() -> i64 { return self.value }; name() -> string { return self.label } }}; create(value:i64) -> Record { return new Record(value, "record", 1.5) } }}\n');
+            fs.writeFileSync(recordsSource, 'library Records {{ Child {{ member value:i64; __(value:i64) -> void { self.value = value }; get() -> i64 { return self.value } }}; Record {{ member child:Child; member label:string; member score:f64; __(child:Child, label:string, score:f64) -> void { self.child = child; self.label = label; self.score = score }; get() -> i64 { return self.child.get() }; name() -> string { return self.label } }}; WeakHolder {{ member weak child:Child?; watch(value:Child) -> void { self.child = value }; expired() -> bool { return self.child == null } }}; create(value:i64) -> Record { return new Record(new Child(value), "record", 1.5) }; weakExpires(value:i64) -> bool { local child = new Child(value); local holder = new WeakHolder(); holder.watch(child); delete child; return holder.expired() } }}\n');
             const recordsObject = path.join(objects, 'Records.o');
             const recordsLibrary = spawnSync(compilerPath,
                 ['--source-root', sourceRoot, '--backend', 'llvm', '--library-version', '1.0.0', '--emit-library', recordsSource, '-o', recordsObject],
@@ -283,7 +283,7 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             fs.copyFileSync(`${recordsObject}.vmeta`, path.join(metadata, 'Records.o.vmeta'));
             fs.copyFileSync(`${recordsObject}.vmi`, path.join(interfaces, 'Records.vmi'));
             const recordsMain = path.join(objectProjectRoot, 'records-main.ar');
-            fs.writeFileSync(recordsMain, "import Records from 'Records.ar'\nentry {{ __() -> i64 { local value = Records.create(7); if value.name() == \"record\" { return value.get() }; return 1 } }}\n");
+            fs.writeFileSync(recordsMain, "import Records from 'Records.ar'\nentry {{ __() -> i64 { local value = Records.create(7); if value.name() == \"record\" && Records.weakExpires(1) { return value.get() }; return 1 } }}\n");
             const recordsConsumer = path.join(objectProjectRoot, 'records-consumer');
             const recordsLinked = spawnSync(compilerPath,
                 ['--source-root', objectProjectRoot, recordsMain, '-o', recordsConsumer],
@@ -291,13 +291,13 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             assert.equal(recordsLinked.status, 0, recordsLinked.stderr);
             assert.equal(spawnSync(recordsConsumer).status, 7, 'native executable did not consume LLVM object metadata');
 
-            const ownedSource = path.join(sourceRoot, 'OwnedReference.ar');
-            fs.writeFileSync(ownedSource, 'library OwnedReference {{ Item {{}}; Holder {{ member value:Item; __(value:Item) -> void { self.value = value } }} }}\n');
+            const ownedSource = path.join(sourceRoot, 'OwnedArray.ar');
+            fs.writeFileSync(ownedSource, 'library OwnedArray {{ Holder {{ member values:Array<i64>; __(values:Array<i64>) -> void { self.values = values } }} }}\n');
             const unsupported = spawnSync(compilerPath,
                 ['--source-root', sourceRoot, '--backend', 'llvm', '--library-version', '1.0.0', '--emit-library', ownedSource, '-o', path.join(directory, 'OwnedReference.o')],
                 {encoding: 'utf8', env: environment, cwd: projectRoot});
             assert.equal(unsupported.status, 69);
-            assert.match(unsupported.stderr, /cannot yet own object or array reference fields/);
+            assert.match(unsupported.stderr, /cannot yet own array reference fields|cannot yet own specialized array metadata/);
         });
 
         await t.test('native compiler parses and validates project manifests', () => {
