@@ -1,0 +1,4 @@
+{
+  "version": 1,
+  "inputs": ["valid.vmi", "valid.vmeta", "valid-elf.base64", "truncated-elf.base64", "elf-invalid-symbol-link.base64"]
+}

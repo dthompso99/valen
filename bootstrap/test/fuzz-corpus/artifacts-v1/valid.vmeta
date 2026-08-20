@@ -1,0 +1,11 @@
+VALEN-LIBRARY-1
+name=Fixture
+version=1.0.0
+compiler=valen-interface-1
+target=x86_64-linux
+abi=valen-native-1
+interface=11
+implementation=22
+object=33
+VALEN-LIBRARY-END
+

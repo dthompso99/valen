@@ -3,12 +3,18 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {Parser} from './parser.js';
 import {Tokenizer} from './tokenizer.js';
+import {ModuleInterface} from './module-interface.js';
+import {LibraryMetadata} from './library-metadata.js';
+import {ElfObject} from './elf.js';
 
 export const corpusVersion = 1;
 
 const targets = {
     tokenizer(source) { new Tokenizer(source, '<fuzz>').parse(); },
-    parser(source) { new Parser().parse(source, '<fuzz>'); }
+    parser(source) { new Parser().parse(source, '<fuzz>'); },
+    vmi(source) { ModuleInterface.parse(source); },
+    vmeta(source) { LibraryMetadata.parse(source); },
+    elf(source) { ElfObject.parse(Buffer.from(source, 'base64')); }
 };
 
 const randomGenerator = seed => {
@@ -30,7 +36,8 @@ const mutate = (source, random) => {
     return source.slice(0, offset) + alphabet[random(alphabet.length)] + source.slice(offset + 1);
 };
 
-const expectedRejection = error => error instanceof SyntaxError;
+const expectedRejection = (target, error) => target === 'tokenizer' || target === 'parser'
+    ? error instanceof SyntaxError : error?.constructor === Error || error instanceof SyntaxError;
 
 export const minimize = (source, fails) => {
     let result = source;
@@ -52,7 +59,7 @@ export const runFuzz = ({target = 'parser', seed = 1, iterations = 1000, corpus 
     const seeds = corpus.length ? corpus : ['', 'entry {{ __() -> i32 { return 0 } }}', '"${nested { value }}"'];
     const run = source => {
         try { evaluate(source); return null; }
-        catch (error) { return expectedRejection(error) ? null : error; }
+        catch (error) { return expectedRejection(target, error) ? null : error; }
     };
     for (const source of seeds) {
         const error = run(source);

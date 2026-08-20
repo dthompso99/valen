@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {loadCorpus, runFuzz} from '../fuzz.js';
 
 const corpusDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fuzz-corpus', 'syntax-v1');
+const artifactCorpusDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fuzz-corpus', 'artifacts-v1');
 
 test('retained syntax corpus replays through tokenizer and parser', () => {
     const corpus = loadCorpus(corpusDirectory);
@@ -25,4 +26,11 @@ test('synthetic crash is discovered and minimized for replay', () => {
     }});
     assert.equal(failure.error.message, 'synthetic defect');
     assert.equal(failure.source, 'CRASH');
+});
+
+test('retained compiler-artifact corpus replays through VMI, VMeta, and ELF parsers', () => {
+    const [vmi, vmeta, elf, truncatedElf, invalidSymbolLink] = loadCorpus(artifactCorpusDirectory);
+    assert.equal(runFuzz({target: 'vmi', iterations: 0, corpus: [vmi]}), null);
+    assert.equal(runFuzz({target: 'vmeta', iterations: 0, corpus: [vmeta]}), null);
+    assert.equal(runFuzz({target: 'elf', iterations: 0, corpus: [elf, truncatedElf, invalidSymbolLink]}), null);
 });

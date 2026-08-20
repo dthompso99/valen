@@ -130,6 +130,9 @@ export class ElfObject {
         const symbolHeader = headers.find(header => header.type === SHT.SYMTAB);
         const symbols = [null];
         if (symbolHeader) {
+            if (!headers[symbolHeader.link] || headers[symbolHeader.link].type !== SHT.STRTAB) {
+                throw new Error('Malformed compiled-library symbol string table');
+            }
             const table = bytes(symbolHeader), strings = bytes(headers[symbolHeader.link]);
             if (symbolHeader.entrySize !== 24 || table.length % 24 !== 0) throw new Error('Malformed compiled-library symbol table');
             for (let offset = 24; offset < table.length; offset += 24) {
