@@ -93,7 +93,7 @@ test('language server finds references across modules and unsaved overlays', () 
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-lsp-references-'));
     const libraryPath = path.join(directory, 'math.ar'), mainPath = path.join(directory, 'main.ar'), reportPath = path.join(directory, 'report.ar');
     const libraryUri = pathToFileURL(libraryPath).href, mainUri = pathToFileURL(mainPath).href, reportUri = pathToFileURL(reportPath).href;
-    const library = `library Math {{ value() -> i64 { return 42 } }}\n`;
+    const library = `library Math {{ value() -> i64 { return 42 } sum() -> i64 { return 0 } }}\n`;
     const main = `import Math from './math.ar'\nentry {{ __() -> i32 { local answer = Math.value(); return 0 } }}\n`;
     const report = `import Math from './math.ar'\nentry {{ __() -> i32 { local total = Math.value(); return 0 } }}\n`;
     server.handle({jsonrpc: '2.0', id: 1, method: 'initialize', params: {rootUri: pathToFileURL(directory).href}});
@@ -105,5 +105,30 @@ test('language server finds references across modules and unsaved overlays', () 
     assert.deepEqual(sent.at(-1).result.map(location => location.uri), [libraryUri, mainUri, reportUri].sort());
     server.handle({jsonrpc: '2.0', id: 3, method: 'textDocument/references', params: {textDocument: {uri: libraryUri}, position: positionOf(library, 'value'), context: {includeDeclaration: false}}});
     assert.deepEqual(sent.at(-1).result.map(location => location.uri), [mainUri, reportUri].sort());
+    server.handle({jsonrpc: '2.0', id: 4, method: 'textDocument/prepareRename', params: {textDocument: {uri: mainUri}, position: positionOf(main, 'value')}});
+    assert.equal(sent.at(-1).result.placeholder, 'value');
+    assert.equal(main.slice(main.indexOf('value'), main.indexOf('value') + 5), 'value');
+    server.handle({jsonrpc: '2.0', id: 5, method: 'textDocument/rename', params: {textDocument: {uri: mainUri}, position: positionOf(main, 'value'), newName: 'compute'}});
+    assert.deepEqual(Object.keys(sent.at(-1).result.changes).sort(), [libraryUri, mainUri, reportUri].sort());
+    assert.deepEqual(Object.values(sent.at(-1).result.changes).map(edits => edits.length), [1, 1, 1]);
+    server.handle({jsonrpc: '2.0', id: 6, method: 'textDocument/rename', params: {textDocument: {uri: mainUri}, position: positionOf(main, 'value'), newName: 'sum'}});
+    assert.match(sent.at(-1).error.message, /conflict/);
+    server.handle({jsonrpc: '2.0', id: 7, method: 'textDocument/rename', params: {textDocument: {uri: mainUri}, position: positionOf(main, 'value'), newName: 'not-valid'}});
+    assert.match(sent.at(-1).error.message, /Invalid Valen identifier/);
+    fs.rmSync(directory, {recursive: true});
+});
+
+test('language server refuses rename outside the workspace root', () => {
+    const sent = [], directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-lsp-rename-root-'));
+    const workspace = path.join(directory, 'workspace'), externalPath = path.join(directory, 'external.ar');
+    fs.mkdirSync(workspace);
+    const externalUri = pathToFileURL(externalPath).href, source = `library External {{ value() -> i64 { return 1 } }}\n`;
+    const server = new LanguageServer(message => sent.push(message));
+    server.handle({jsonrpc: '2.0', id: 1, method: 'initialize', params: {rootUri: pathToFileURL(workspace).href}});
+    server.handle({jsonrpc: '2.0', method: 'textDocument/didOpen', params: {textDocument: {uri: externalUri, text: source}}});
+    server.handle({jsonrpc: '2.0', id: 2, method: 'textDocument/prepareRename', params: {textDocument: {uri: externalUri}, position: positionOf(source, 'value')}});
+    assert.equal(sent.at(-1).result, null);
+    server.handle({jsonrpc: '2.0', id: 3, method: 'textDocument/rename', params: {textDocument: {uri: externalUri}, position: positionOf(source, 'value'), newName: 'compute'}});
+    assert.match(sent.at(-1).error.message, /outside the workspace root/);
     fs.rmSync(directory, {recursive: true});
 });

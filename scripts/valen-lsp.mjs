@@ -50,6 +50,16 @@ function symbolKey(symbol) {
     const span = symbol?.declaration?.span;
     return span ? `${symbol.kind}\0${span.source}\0${span.start}\0${span.end}` : null;
 }
+function nameSpan(node, symbol, source) {
+    const name = symbol?.name;
+    if (!name) return null;
+    if (node.kind === 'MemberExpression' && node.member === name) {
+        return {...node.span, start: node.span.end - name.length};
+    }
+    const text = source.slice(node.span.start, node.span.end);
+    const match = text.match(new RegExp(`\\b${name}\\b`));
+    return match ? {...node.span, start: node.span.start + match.index, end: node.span.start + match.index + name.length} : null;
+}
 
 export class LanguageServer {
     constructor(send) {
@@ -68,7 +78,7 @@ export class LanguageServer {
         if (method === 'initialize') {
             const root = params.rootUri ? uriPath(params.rootUri) : params.rootPath;
             if (root) this.rootPath = root;
-            this.respond(id, {capabilities: {textDocumentSync: 1, hoverProvider: true, definitionProvider: true, referencesProvider: true, documentSymbolProvider: true, codeActionProvider: true, documentFormattingProvider: true}});
+            this.respond(id, {capabilities: {textDocumentSync: 1, hoverProvider: true, definitionProvider: true, referencesProvider: true, renameProvider: {prepareProvider: true}, documentSymbolProvider: true, codeActionProvider: true, documentFormattingProvider: true}});
         } else if (method === 'shutdown') this.respond(id, null);
         else if (method === 'exit') process.exit(0);
         else if (method === 'textDocument/didOpen') {
@@ -80,6 +90,12 @@ export class LanguageServer {
         } else if (method === 'textDocument/hover') this.respond(id, this.hover(params));
         else if (method === 'textDocument/definition') this.respond(id, this.definition(params));
         else if (method === 'textDocument/references') this.respond(id, this.references(params));
+        else if (method === 'textDocument/prepareRename') this.respond(id, this.prepareRename(params));
+        else if (method === 'textDocument/rename') {
+            const renamed = this.rename(params);
+            if (renamed.error) this.send({jsonrpc: '2.0', id, error: renamed.error});
+            else this.respond(id, renamed.result);
+        }
         else if (method === 'textDocument/documentSymbol') this.respond(id, this.documentSymbols(params));
         else if (method === 'textDocument/codeAction') this.respond(id, this.codeActions(params));
         else if (method === 'textDocument/formatting') this.respond(id, this.formatDocument(params));
@@ -138,6 +154,17 @@ export class LanguageServer {
         const declaration = target.declaration.span;
         const includeDeclaration = params.context?.includeDeclaration === true;
         const locations = new Map();
+        for (const {node, source} of this.referenceNodes(targetKey)) {
+            if (!includeDeclaration && node.span.source === declaration.source && node.span.start === declaration.start && node.span.end === declaration.end) continue;
+            const span = nameSpan(node, target, source) ?? node.span;
+            const key = `${span.source}\0${span.start}\0${span.end}`;
+            locations.set(key, {uri: fileUri(span.source), range: spanRange(span, source)});
+        }
+        return [...locations.values()].sort((left, right) => left.uri.localeCompare(right.uri) || left.range.start.line - right.range.start.line || left.range.start.character - right.range.start.character);
+    }
+
+    referenceNodes(targetKey) {
+        const matches = new Map();
         for (const entryPath of this.documents.keys()) {
             let analysis;
             try {
@@ -147,12 +174,73 @@ export class LanguageServer {
             }
             for (const module of analysis.modules.values()) walk(module.program, node => {
                 if (symbolKey(node.semanticSymbol) !== targetKey) return;
-                if (!includeDeclaration && node.span.source === declaration.source && node.span.start === declaration.start && node.span.end === declaration.end) return;
                 const key = `${node.span.source}\0${node.span.start}\0${node.span.end}`;
-                locations.set(key, {uri: fileUri(node.span.source), range: spanRange(node.span, this.sourceFor(node.span.source, module.source))});
+                matches.set(key, {node, source: this.sourceFor(node.span.source, module.source)});
             });
         }
-        return [...locations.values()].sort((left, right) => left.uri.localeCompare(right.uri) || left.range.start.line - right.range.start.line || left.range.start.character - right.range.start.character);
+        return matches.values();
+    }
+
+    prepareRename(params) {
+        const context = this.context(params);
+        const symbol = context?.node?.semanticSymbol;
+        if (!symbolKey(symbol) || !this.insideRoot(symbol.declaration.span.source)) return null;
+        const span = nameSpan(context.node, symbol, context.result.source);
+        return span ? {range: spanRange(span, context.result.source), placeholder: symbol.name} : null;
+    }
+
+    rename(params) {
+        const context = this.context(params);
+        const symbol = context?.node?.semanticSymbol;
+        const targetKey = symbolKey(symbol);
+        if (!targetKey) return this.renameError('This symbol cannot be renamed');
+        if (!this.insideRoot(symbol.declaration.span.source)) return this.renameError('Cannot rename a symbol declared outside the workspace root');
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(params.newName ?? '')) return this.renameError(`Invalid Valen identifier '${params.newName ?? ''}'`);
+        const edits = new Map();
+        for (const {node, source} of this.referenceNodes(targetKey)) {
+            if (!this.insideRoot(node.span.source)) return this.renameError('Rename would modify a file outside the workspace root');
+            const span = nameSpan(node, symbol, source);
+            if (!span) return this.renameError(`Cannot identify the name of ${symbol.kind.toLowerCase()} '${symbol.name}'`);
+            const fileEdits = edits.get(span.source) ?? [];
+            fileEdits.push({span, source});
+            edits.set(span.source, fileEdits);
+        }
+        if (edits.size === 0) return this.renameError('No rename locations were found');
+        const renamedDocuments = new Map(this.documents);
+        for (const [filePath, fileEdits] of edits) {
+            let source = fileEdits[0].source;
+            for (const {span} of [...fileEdits].sort((left, right) => right.span.start - left.span.start)) {
+                source = source.slice(0, span.start) + params.newName + source.slice(span.end);
+            }
+            renamedDocuments.set(filePath, source);
+        }
+        for (const entryPath of this.documents.keys()) {
+            const before = this.errorCount(entryPath, this.documents);
+            const after = this.errorCount(entryPath, renamedDocuments);
+            if (after > before) return this.renameError(`Rename to '${params.newName}' introduces a declaration or binding conflict`);
+        }
+        const changes = {};
+        for (const [filePath, fileEdits] of edits) changes[fileUri(filePath)] = fileEdits
+            .map(({span, source}) => ({range: spanRange(span, source), newText: params.newName}))
+            .sort((left, right) => left.range.start.line - right.range.start.line || left.range.start.character - right.range.start.character);
+        return {result: {changes}};
+    }
+
+    insideRoot(filePath) {
+        const relative = path.relative(path.resolve(this.rootPath), path.resolve(filePath));
+        return relative === '' || relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+    }
+
+    errorCount(entryPath, documents) {
+        try {
+            return new SemanticAnalyzer().analyzeFile(entryPath, {sourceRoot: this.rootPath, documents}).diagnostics.filter(item => item.severity === 'error').length;
+        } catch {
+            return Number.POSITIVE_INFINITY;
+        }
+    }
+
+    renameError(message) {
+        return {error: {code: -32602, message}};
     }
 
     documentSymbols(params) {
