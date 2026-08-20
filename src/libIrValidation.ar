@@ -39,11 +39,45 @@ library IrValidation {{
                 }
                 if optimize {
                     self.foldConstants(functionNode)
+                    self.simplifyControlFlow(functionNode)
                     self.removeUnreachable(functionNode)
                     self.removeDeadValues(functionNode)
                 }
                 functionIndex = functionIndex + 1
             }
+        }
+
+        simplifyControlFlow(functionNode:Ir.Function) -> void {
+            local blockIndex:i64 = 0
+            while blockIndex < functionNode.blocks.length {
+                local block = functionNode.blocks[blockIndex]
+                if block.instructions.length > 0 {
+                    local end = block.instructions[block.instructions.length - 1]
+                    if end.op == "jump" { end.target = self.resolveJumpTarget(functionNode, end.target!) }
+                    if end.op == "branch" {
+                        end.target = self.resolveJumpTarget(functionNode, end.target!)
+                        end.alternateTarget = self.resolveJumpTarget(functionNode, end.alternateTarget!)
+                        if end.target! == end.alternateTarget! {
+                            end.op = "jump"; end.first = null; end.alternateTarget = null
+                        }
+                    }
+                }
+                blockIndex = blockIndex + 1
+            }
+        }
+
+        resolveJumpTarget(functionNode:Ir.Function, start:string) -> string {
+            local label = start
+            local visited = new Array<string>(0)
+            while !self.contains(visited, label) {
+                visited.append(label)
+                local block = self.findBlock(functionNode, label)
+                if block == null || block!.instructions.length != 1 { return label }
+                local instruction = block!.instructions[0]
+                if instruction.op != "jump" { return label }
+                label = instruction.target!
+            }
+            return label
         }
 
         foldConstants(functionNode:Ir.Function) -> void {

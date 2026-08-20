@@ -1324,6 +1324,24 @@ test('IR optimization folds constants, simplifies branches, and removes dead pur
     assert.doesNotThrow(() => new IrValidator().validate(program));
 });
 
+test('IR optimization bypasses jump-only blocks and folds identical branch targets', () => {
+    const condition = {kind: 'parameter', name: 'condition', type: 'bool'};
+    const create = () => ({name: 'entry.__', owner: 'entry', parameters: [condition], returnType: 'void', blocks: [
+        {label: 'entry', instructions: [{op: 'branch', condition, thenTarget: 'left', elseTarget: 'right'}]},
+        {label: 'left', instructions: [{op: 'jump', target: 'exit'}]},
+        {label: 'right', instructions: [{op: 'jump', target: 'exit'}]},
+        {label: 'exit', instructions: [{op: 'return'}]}
+    ]});
+    const optimized = create();
+    new IrCanonicalizer().canonicalizeFunction(optimized, true);
+    assert.deepEqual(optimized.blocks.map(block => block.label), ['entry', 'exit']);
+    assert.deepEqual(optimized.blocks[0].instructions, [{op: 'jump', target: 'exit'}]);
+    const unoptimized = create();
+    new IrCanonicalizer().canonicalizeFunction(unoptimized, false);
+    assert.equal(unoptimized.blocks[0].instructions[0].op, 'branch');
+    assert.deepEqual(unoptimized.blocks.map(block => block.label), ['entry', 'left', 'right', 'exit']);
+});
+
 test('IR validation rejects malformed control flow and calls before assembly', () => {
     const fn = {name: 'entry.__', owner: 'entry', parameters: [{name: 'self', type: 'entry'}], returnType: 'void', blocks: [
         {label: 'entry', instructions: [

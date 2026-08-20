@@ -293,11 +293,10 @@ test('generation 1 passes the native compiler conformance suite', async t => {
 
             const ownedSource = path.join(sourceRoot, 'OwnedArray.ar');
             fs.writeFileSync(ownedSource, 'library OwnedArray {{ Holder {{ member values:Array<i64>; __(values:Array<i64>) -> void { self.values = values } }} }}\n');
-            const unsupported = spawnSync(compilerPath,
+            const ownedLibrary = spawnSync(compilerPath,
                 ['--source-root', sourceRoot, '--backend', 'llvm', '--library-version', '1.0.0', '--emit-library', ownedSource, '-o', path.join(directory, 'OwnedReference.o')],
                 {encoding: 'utf8', env: environment, cwd: projectRoot});
-            assert.equal(unsupported.status, 69);
-            assert.match(unsupported.stderr, /cannot yet own array reference fields|cannot yet own specialized array metadata/);
+            assert.equal(ownedLibrary.status, 0, ownedLibrary.stderr);
         });
 
         await t.test('native compiler parses and validates project manifests', () => {

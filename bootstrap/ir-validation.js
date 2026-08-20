@@ -31,8 +31,33 @@ export class IrCanonicalizer {
         }
         if (optimize) {
             this.foldConstants(fn);
+            this.simplifyControlFlow(fn);
             this.removeUnreachable(fn);
             this.removeDeadValues(fn);
+        }
+    }
+
+    simplifyControlFlow(fn) {
+        const byLabel = new Map(fn.blocks.map(block => [block.label, block]));
+        const resolve = start => {
+            let label = start;
+            const visited = new Set();
+            while (!visited.has(label)) {
+                visited.add(label);
+                const block = byLabel.get(label);
+                if (block?.instructions.length !== 1 || block.instructions[0].op !== 'jump') break;
+                label = block.instructions[0].target;
+            }
+            return label;
+        };
+        for (const block of fn.blocks) {
+            const end = block.instructions.at(-1);
+            if (end?.op === 'jump') end.target = resolve(end.target);
+            if (end?.op === 'branch') {
+                end.thenTarget = resolve(end.thenTarget);
+                end.elseTarget = resolve(end.elseTarget);
+                if (end.thenTarget === end.elseTarget) block.instructions[block.instructions.length - 1] = {op: 'jump', target: end.thenTarget};
+            }
         }
     }
 
