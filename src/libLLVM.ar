@@ -176,6 +176,14 @@ library LLVM {{
         prepareReachableFunctions() -> void {
             self.reachableFunctions = new Array<string>(0)
             if self.program.entry != null { self.addReachable(self.program.entry!) }
+            if self.emissionModule != null {
+                local functionIndex:i64 = 0
+                while functionIndex < self.program.functions.length {
+                    local function = self.program.functions[functionIndex]
+                    if function.modulePath == self.emissionModule! { self.addReachable(function.name) }
+                    functionIndex = functionIndex + 1
+                }
+            }
             local typeIndex:i64 = 0
             while typeIndex < self.program.types.length {
                 local typeNode = self.program.types[typeIndex]

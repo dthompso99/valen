@@ -256,6 +256,23 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             assert.equal(validated.status, 0, validated.stderr);
             assert.equal(validated.stdout, 'Support 1.0.0\n');
 
+            const llvmConsumer = path.join(objectProjectRoot, 'llvm-consumer');
+            const llvmLinked = spawnSync(compilerPath,
+                ['--source-root', objectProjectRoot, '--backend', 'llvm', main, '-o', llvmConsumer],
+                {encoding: 'utf8', env: {...environment, VALEN_SYSROOT: sysroot, VALEN_LIBRARY_PATH: sourceRoot}, cwd: projectRoot});
+            assert.equal(llvmLinked.status, 0, llvmLinked.stderr);
+            assert.equal(spawnSync(llvmConsumer).status, 7, 'LLVM executable did not consume the native compiled library');
+
+            fs.copyFileSync(llvmLibraryObject, path.join(objects, 'Support.o'));
+            fs.copyFileSync(`${llvmLibraryObject}.vmeta`, path.join(metadata, 'Support.o.vmeta'));
+            fs.copyFileSync(`${llvmLibraryObject}.vmi`, path.join(interfaces, 'Support.vmi'));
+            const nativeConsumer = path.join(objectProjectRoot, 'native-consumer');
+            const nativeLinked = spawnSync(compilerPath,
+                ['--source-root', objectProjectRoot, main, '-o', nativeConsumer],
+                {encoding: 'utf8', env: {...environment, VALEN_SYSROOT: sysroot, VALEN_LIBRARY_PATH: sourceRoot}, cwd: projectRoot});
+            assert.equal(nativeLinked.status, 0, nativeLinked.stderr);
+            assert.equal(spawnSync(nativeConsumer).status, 7, 'native executable did not consume the LLVM compiled library');
+
             const ownedSource = path.join(sourceRoot, 'Owned.ar');
             fs.writeFileSync(ownedSource, 'library Owned {{ Item {{ member value:i64 }} }}\n');
             const unsupported = spawnSync(compilerPath,

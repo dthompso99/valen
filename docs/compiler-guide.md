@@ -128,7 +128,9 @@ Select `--backend llvm` to have clang lower the module-scoped LLVM IR into an x8
 object. Stateless libraries can also use `--backend llvm --library-version <version> --emit-library`
 to produce the same object, `.vmi`, and `.vmeta` contract as the native backend. Libraries that own
 objects or specialized arrays are rejected until LLVM can emit their Valen GC, structural, array,
-and type-descriptor support symbols.
+and type-descriptor support symbols. Stateless compiled-library objects are ABI-interoperable in
+both directions: native executables may consume LLVM libraries, and LLVM executables may consume
+native libraries.
 
 `-O0` retains mandatory IR cleanup and validation while disabling optional optimizations. `-O1` is the default and enables constant folding, dead/unreachable elimination, conservative linear-scan register allocation, immediate selection, and peepholes. Unsupported levels are rejected instead of silently aliasing another mode.
 

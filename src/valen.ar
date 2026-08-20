@@ -298,6 +298,12 @@ entry {{
             if self.emitObject(runtimeAssembly, runtimeObjectPath, targetName) != 0 { return 69 }
             local llvmInputs = new Array<string>(0)
             llvmInputs.append("@" + llvmObjectPath)
+            local compiledIndex:i64 = 0
+            while compiledIndex < graph.modules.length {
+                local compiledModule = graph.modules[compiledIndex]
+                if compiledModule.compiledObjectPath != null { llvmInputs.append("@" + compiledModule.compiledObjectPath!) }
+                compiledIndex = compiledIndex + 1
+            }
             local llvmLibraryIndex:i64 = 0
             while llvmLibraryIndex < ir.foreignLibraries.length { llvmInputs.append(ir.foreignLibraries[llvmLibraryIndex]); llvmLibraryIndex = llvmLibraryIndex + 1 }
             local linkResult = System.link(runtimeObjectPath, outputPath!, llvmInputs)
