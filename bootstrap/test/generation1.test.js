@@ -164,9 +164,24 @@ test('generation 1 passes the native compiler conformance suite', async t => {
 
         await t.test('native compiler normalizes and validates explicit targets', () => {
             const source = path.join(projectRoot, 'bootstrap/test/fixtures/runtime-foundation.ar');
+            const defaultEnvironment = {...environment};
+            delete defaultEnvironment.VALEN_TARGET;
+            const defaulted = spawnSync(compilerPath,
+                ['--emit-object', source, '-o', path.join(directory, 'default-output.o')],
+                {encoding: 'utf8', env: defaultEnvironment, cwd: projectRoot});
+            assert.equal(defaulted.status, 0, defaulted.stderr);
+            const hostMachine = process.arch === 'arm64' ? 183 : 62;
+            assert.equal(fs.readFileSync(path.join(directory, 'default-output.o')).readUInt16LE(18), hostMachine);
+
+            const configured = spawnSync(compilerPath,
+                ['--emit-object', source, '-o', path.join(directory, 'configured-output.o')],
+                {encoding: 'utf8', env: {...defaultEnvironment, VALEN_TARGET: 'arm64-linux'}, cwd: projectRoot});
+            assert.equal(configured.status, 0, configured.stderr);
+            assert.equal(fs.readFileSync(path.join(directory, 'configured-output.o')).readUInt16LE(18), 183);
+
             const recognized = spawnSync(compilerPath,
                 ['--target', 'arm64-linux', source, '-o', path.join(directory, 'arm64-output')],
-                {encoding: 'utf8', env: environment, cwd: projectRoot});
+                {encoding: 'utf8', env: {...environment, VALEN_TARGET: 'x86_64-linux'}, cwd: projectRoot});
             assert.equal(recognized.status, 0, recognized.stderr);
             assert.equal(fs.readFileSync(path.join(directory, 'arm64-output')).readUInt16LE(18), 183);
 

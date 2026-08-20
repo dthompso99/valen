@@ -29,7 +29,7 @@ entry {{
         local configuredSourceRoot:string? = null
         local linkerMode:string = "auto"
         local backendName:string = "native"
-        local targetName:string = "x86_64-linux"
+        local targetName = self.hostTarget()
         local environmentTarget = System.environmentVariable("VALEN_TARGET")
         if environmentTarget != null { targetName = environmentTarget! }
         local libraryVersion:string? = null
@@ -249,6 +249,22 @@ entry {{
         }
         System.write(assembly)
         return 0
+    }
+
+    hostTarget() -> string {
+        local file = System.openRead("/proc/self/exe")
+        if file != null {
+            local header = System.read(file!, 20)
+            System.close(file!)
+            if header != null {
+                if header!.length >= 20 && header![0] == 127 && header![1] == 69 && header![2] == 76 && header![3] == 70 {
+                    local machine = (header![18] as i64) + (header![19] as i64) * 256
+                    if machine == 62 { return "x86_64-linux" }
+                    if machine == 183 { return "aarch64-linux" }
+                }
+            }
+        }
+        return "x86_64-linux"
     }
 
     emitObject(assembly:string, objectPath:string, targetName:string) -> i32 {
