@@ -13,6 +13,7 @@ library LLVM {{
         member program:Ir.Program
         member optimizationLevel:i64
         member emissionModule:string?
+        member includeModuleMetadata:bool
         member writer:Writer
         member emittedValues:Array<string>
         member nextInternal:i64
@@ -24,10 +25,11 @@ library LLVM {{
         member currentFunction:Ir.Function?
         member error:string
 
-        __(program:Ir.Program, optimizationLevel:i64=1, emissionModule:string?=null) -> void {
+        __(program:Ir.Program, optimizationLevel:i64=1, emissionModule:string?=null, includeModuleMetadata:bool=false) -> void {
             self.program = program
             self.optimizationLevel = optimizationLevel
             self.emissionModule = emissionModule
+            self.includeModuleMetadata = includeModuleMetadata
             self.writer = new Writer()
             self.emittedValues = new Array<string>(0)
             self.nextInternal = 0
@@ -91,11 +93,14 @@ library LLVM {{
             local typeIndex:i64 = 0
             while typeIndex < self.program.types.length {
                 local typeNode = self.program.types[typeIndex]
-                self.writer.line(self.typeGlobal(typeNode.name) + " = external global i8")
-                self.writer.line("declare void " + self.gcTraceGlobal(typeNode.name) + "(ptr)")
-                self.writer.line("declare void " + self.gcWeakGlobal(typeNode.name) + "(ptr)")
+                if !self.ownsType(typeNode) {
+                    self.writer.line(self.typeGlobal(typeNode.name) + " = external global i8")
+                    self.writer.line("declare void " + self.gcTraceGlobal(typeNode.name) + "(ptr)")
+                    self.writer.line("declare void " + self.gcWeakGlobal(typeNode.name) + "(ptr)")
+                }
                 typeIndex = typeIndex + 1
             }
+            if self.includeModuleMetadata { self.writeModuleTypeMetadata() }
             local declaredArrays = new Array<string>(0)
             local referencedIndex:i64 = 0
             while referencedIndex < self.program.referencedTypes.length {
@@ -145,6 +150,132 @@ library LLVM {{
                 index = index + 1
             }
             self.writer.line(declaration + ")")
+        }
+
+        ownsType(typeNode:Ir.Type) -> bool { return self.includeModuleMetadata && self.emissionModule != null && typeNode.modulePath == self.emissionModule! }
+
+        writeModuleTypeMetadata() -> void {
+            local index:i64 = 0
+            while index < self.program.types.length {
+                local typeNode = self.program.types[index]
+                if self.ownsType(typeNode) { self.writePrimitiveTypeMetadata(typeNode) }
+                index = index + 1
+            }
+        }
+
+        writePrimitiveTypeMetadata(typeNode:Ir.Type) -> void {
+            local contracts = self.typeSupportGlobal(typeNode.name, "contracts")
+            local equality = self.typeSupportGlobal(typeNode.name, "equal")
+            local hash = self.typeSupportGlobal(typeNode.name, "hash")
+            local copier = self.typeSupportGlobal(typeNode.name, "copy")
+            local contractType = "{ i64"
+            local contractValue = "{ i64 " + typeNode.contracts.length.toString()
+            local contractIndex:i64 = 0
+            while contractIndex < typeNode.contracts.length {
+                local contract = typeNode.contracts[contractIndex]
+                local table = self.typeSupportGlobal(typeNode.name, "contract_" + contractIndex.toString())
+                local tableType = "[" + contract.methods.length.toString() + " x ptr]"
+                local tableValue = "["
+                local contractMethodIndex:i64 = 0
+                while contractMethodIndex < contract.methods.length {
+                    if contractMethodIndex > 0 { tableValue = tableValue + ", " }
+                    tableValue = tableValue + "ptr " + self.globalName(contract.methods[contractMethodIndex].target)
+                    contractMethodIndex = contractMethodIndex + 1
+                }
+                self.writer.line(table + " = global " + tableType + " " + tableValue + "]")
+                contractType = contractType + ", ptr, ptr"
+                contractValue = contractValue + ", ptr " + self.typeGlobal(contract.name) + ", ptr " + table
+                contractIndex = contractIndex + 1
+            }
+            self.writer.line(contracts + " = global " + contractType + " } " + contractValue + " }")
+            local descriptorType = "{ ptr, ptr, ptr, ptr, ptr"
+            local descriptorValue = "{ ptr null, ptr " + contracts + ", ptr " + equality + ", ptr " + hash + ", ptr " + copier
+            local methodIndex:i64 = 0
+            while methodIndex < typeNode.virtualMethods.length {
+                descriptorType = descriptorType + ", ptr"
+                descriptorValue = descriptorValue + ", ptr " + self.globalName(typeNode.virtualMethods[methodIndex].target)
+                methodIndex = methodIndex + 1
+            }
+            self.writer.line(self.typeGlobal(typeNode.name) + " = global " + descriptorType + " } " + descriptorValue + " }")
+            self.writer.line("define void " + self.gcTraceGlobal(typeNode.name) + "(ptr %object) {")
+            self.writer.line("entry:")
+            self.writer.line("    ret void")
+            self.writer.line("}")
+            self.writer.line("define void " + self.gcWeakGlobal(typeNode.name) + "(ptr %object) {")
+            self.writer.line("entry:")
+            self.writer.line("    ret void")
+            self.writer.line("}")
+            self.writer.line("define i1 " + equality + "(ptr %left, ptr %right, ptr %context) {")
+            self.writer.line("entry:")
+            local previous = "true"
+            local fieldIndex:i64 = 0
+            while fieldIndex < typeNode.fields.length {
+                local field = typeNode.fields[fieldIndex]
+                local offset = self.fieldOffset(field)
+                local leftAddress = "%\"equal.left.address." + fieldIndex.toString() + "\""
+                local rightAddress = "%\"equal.right.address." + fieldIndex.toString() + "\""
+                local leftValue = "%\"equal.left.value." + fieldIndex.toString() + "\""
+                local rightValue = "%\"equal.right.value." + fieldIndex.toString() + "\""
+                local compared = "%\"equal.field." + fieldIndex.toString() + "\""
+                self.writer.line("    " + leftAddress + " = getelementptr i8, ptr %left, i64 " + offset.toString())
+                self.writer.line("    " + rightAddress + " = getelementptr i8, ptr %right, i64 " + offset.toString())
+                self.writer.line("    " + leftValue + " = load " + self.llvmType(field.typeName) + ", ptr " + leftAddress)
+                self.writer.line("    " + rightValue + " = load " + self.llvmType(field.typeName) + ", ptr " + rightAddress)
+                self.writer.line("    " + compared + " = icmp eq " + self.llvmType(field.typeName) + " " + leftValue + ", " + rightValue)
+                if fieldIndex > 0 {
+                    local combined = "%\"equal.combined." + fieldIndex.toString() + "\""
+                    self.writer.line("    " + combined + " = and i1 " + previous + ", " + compared)
+                    previous = combined
+                } else { previous = compared }
+                fieldIndex = fieldIndex + 1
+            }
+            self.writer.line("    ret i1 " + previous)
+            self.writer.line("}")
+            self.writer.line("define i64 " + hash + "(ptr %object, ptr %context) {")
+            self.writer.line("entry:")
+            local hashValue = "1469598103934665603"
+            fieldIndex = 0
+            while fieldIndex < typeNode.fields.length {
+                local field = typeNode.fields[fieldIndex]
+                local address = "%\"hash.address." + fieldIndex.toString() + "\""
+                local loaded = "%\"hash.value." + fieldIndex.toString() + "\""
+                local bits = loaded
+                self.writer.line("    " + address + " = getelementptr i8, ptr %object, i64 " + self.fieldOffset(field).toString())
+                self.writer.line("    " + loaded + " = load " + self.llvmType(field.typeName) + ", ptr " + address)
+                if self.llvmType(field.typeName) != "i64" {
+                    bits = "%\"hash.bits." + fieldIndex.toString() + "\""
+                    self.writer.line("    " + bits + " = zext " + self.llvmType(field.typeName) + " " + loaded + " to i64")
+                }
+                local mixed = "%\"hash.mixed." + fieldIndex.toString() + "\""
+                local multiplied = "%\"hash.multiplied." + fieldIndex.toString() + "\""
+                self.writer.line("    " + mixed + " = xor i64 " + hashValue + ", " + bits)
+                self.writer.line("    " + multiplied + " = mul i64 " + mixed + ", 1099511628211")
+                hashValue = multiplied
+                fieldIndex = fieldIndex + 1
+            }
+            self.writer.line("    ret i64 " + hashValue)
+            self.writer.line("}")
+            self.writer.line("define ptr " + copier + "(ptr %source, ptr %context) {")
+            self.writer.line("entry:")
+            self.writer.line("    %copy = call ptr @\"valen_gc_alloc\"(i64 " + self.typeSize(typeNode.name).toString() + ", ptr " + self.gcTraceGlobal(typeNode.name) + ", ptr " + self.gcWeakGlobal(typeNode.name) + ", ptr null)")
+            self.writer.line("    store ptr " + self.typeGlobal(typeNode.name) + ", ptr %copy")
+            self.writer.line("    %\"copy.count.address\" = getelementptr i8, ptr %copy, i64 8")
+            self.writer.line("    store i64 1, ptr %\"copy.count.address\"")
+            fieldIndex = 0
+            while fieldIndex < typeNode.fields.length {
+                local field = typeNode.fields[fieldIndex]
+                local sourceAddress = "%\"copy.source.address." + fieldIndex.toString() + "\""
+                local targetAddress = "%\"copy.target.address." + fieldIndex.toString() + "\""
+                local value = "%\"copy.value." + fieldIndex.toString() + "\""
+                local offset = self.fieldOffset(field).toString()
+                self.writer.line("    " + sourceAddress + " = getelementptr i8, ptr %source, i64 " + offset)
+                self.writer.line("    " + targetAddress + " = getelementptr i8, ptr %copy, i64 " + offset)
+                self.writer.line("    " + value + " = load " + self.llvmType(field.typeName) + ", ptr " + sourceAddress)
+                self.writer.line("    store " + self.llvmType(field.typeName) + " " + value + ", ptr " + targetAddress)
+                fieldIndex = fieldIndex + 1
+            }
+            self.writer.line("    ret ptr %copy")
+            self.writer.line("}")
         }
 
         declareFunction(function:Ir.Function) -> void {
@@ -1134,6 +1265,7 @@ library LLVM {{
         }
         globalName(name:string) -> string { return "@\"" + self.mangle(name) + "\"" }
         typeGlobal(name:string) -> string { return "@\"valen_type_" + self.mangle(name) + "\"" }
+        typeSupportGlobal(name:string, suffix:string) -> string { return "@\"valen_type_" + self.mangle(name) + "_" + suffix + "\"" }
         gcTraceGlobal(name:string) -> string { return "@\"valen_type_" + self.mangle(name) + "_gc_trace\"" }
         gcWeakGlobal(name:string) -> string { return "@\"valen_type_" + self.mangle(name) + "_gc_weak\"" }
         gcArrayTraceGlobal(name:string) -> string { return "@\"valen_gc_array_trace_" + self.mangle(name) + "\"" }

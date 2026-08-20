@@ -126,9 +126,11 @@ The self-hosted compiler can stop at the same boundary with
 `valen --emit-object <source> -o <output.o>`.
 Select `--backend llvm` to have clang lower the module-scoped LLVM IR into an x86-64 relocatable
 object. Stateless libraries can also use `--backend llvm --library-version <version> --emit-library`
-to produce the same object, `.vmi`, and `.vmeta` contract as the native backend. Libraries that own
-objects or specialized arrays are rejected until LLVM can emit their Valen GC, structural, array,
-and type-descriptor support symbols. Stateless compiled-library objects are ABI-interoperable in
+to produce the same object, `.vmi`, and `.vmeta` contract as the native backend. LLVM libraries may
+own simple objects containing integer and boolean fields; their type descriptors, GC hooks, and
+structural equality/hash/copy helpers are emitted in the module object. Inheritance, reference or
+floating-point fields, and specialized arrays remain rejected until their richer metadata helpers
+are available. Stateless compiled-library objects are ABI-interoperable in
 both directions: native executables may consume LLVM libraries, and LLVM executables may consume
 native libraries.
 

@@ -275,7 +275,7 @@ entry {{
             }
             local llvmEmissionModule = emissionModule
             if llvmEmissionModule == null && graph.entry != null { llvmEmissionModule = graph.entry!.path }
-            local backend = new LLVM.Backend(ir, optimizationLevel, llvmEmissionModule)
+            local backend = new LLVM.Backend(ir, optimizationLevel, llvmEmissionModule, emitLibrary)
             local llvm = backend.generate()
             if backend.error.length > 0 { System.writeError("valen: LLVM backend: "); System.writeError(backend.error); System.writeError("\n"); return 69 }
             if outputPath == null { System.write(llvm); return 0 }
@@ -399,7 +399,16 @@ entry {{
     unsupportedLlvmLibraryMetadata(ir:Ir.Program, modulePath:string) -> string? {
         local typeIndex:i64 = 0
         while typeIndex < ir.types.length {
-            if ir.types[typeIndex].modulePath == modulePath { return "cannot yet own object GC/type/structural metadata" }
+            local typeNode = ir.types[typeIndex]
+            if typeNode.modulePath == modulePath {
+                if typeNode.baseName != null { return "cannot yet own inherited object metadata from '" + typeNode.baseName! + "'" }
+                local fieldIndex:i64 = 0
+                while fieldIndex < typeNode.fields.length {
+                    local fieldType = typeNode.fields[fieldIndex].typeName
+                    if fieldType != "bool" && fieldType != "i8" && fieldType != "u8" && fieldType != "i16" && fieldType != "u16" && fieldType != "i32" && fieldType != "u32" && fieldType != "i64" && fieldType != "u64" { return "cannot yet own reference or floating-point object fields" }
+                    fieldIndex = fieldIndex + 1
+                }
+            }
             typeIndex = typeIndex + 1
         }
         local referencedIndex:i64 = 0
