@@ -3,9 +3,13 @@ import path from 'node:path';
 import fs from 'node:fs';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {SemanticAnalyzer} from '../bootstrap/semantic.js';
+import {Tokenizer} from '../bootstrap/tokenizer.js';
 import {formatValen} from './valen-formatter.mjs';
 
 const severity = {error: 1, warning: 2, note: 3};
+const semanticTokenTypes = ['namespace', 'type', 'class', 'enum', 'enumMember', 'function', 'method', 'property', 'variable', 'parameter', 'keyword', 'modifier'];
+const semanticTokenModifiers = ['declaration', 'readonly', 'native', 'unsafe', 'ownership', 'deprecated'];
+const ownershipKeywords = new Set(['OWN', 'REF', 'WEAK', 'COPY', 'DELETE']);
 
 function uriPath(uri) { return fileURLToPath(uri); }
 function fileUri(filePath) { return pathToFileURL(filePath).href; }
@@ -60,6 +64,29 @@ function nameSpan(node, symbol, source) {
     const match = text.match(new RegExp(`\\b${name}\\b`));
     return match ? {...node.span, start: node.span.start + match.index, end: node.span.start + match.index + name.length} : null;
 }
+function semanticNameSpan(node, symbol, source) {
+    if (node.kind === 'MemberExpression' && node.member === symbol?.name) return nameSpan(node, symbol, source);
+    if (node.name === symbol?.name) return nameSpan(node, symbol, source);
+    if (node.kind === 'TypeReference' && node.name?.split('.').at(-1) === symbol?.name) {
+        const text = source.slice(node.span.start, node.span.end);
+        const offset = text.lastIndexOf(symbol.name);
+        return offset < 0 ? null : {...node.span, start: node.span.start + offset, end: node.span.start + offset + symbol.name.length};
+    }
+    return null;
+}
+function semanticType(symbol) {
+    if (!symbol) return null;
+    if (symbol.kind === 'Library' || symbol.kind === 'Import') return 'namespace';
+    if (symbol.kind === 'Object') return 'class';
+    if (symbol.kind === 'Enum') return 'enum';
+    if (symbol.kind === 'EnumCase') return 'enumMember';
+    if (symbol.kind === 'Method') return symbol.owner?.kind === 'Library' ? 'function' : 'method';
+    if (symbol.kind === 'Field') return 'property';
+    if (symbol.kind === 'Local' || symbol.kind === 'Self') return 'variable';
+    if (symbol.kind === 'Parameter') return 'parameter';
+    if (symbol.kind === 'BuiltinType' || symbol.kind === 'ArrayType' || symbol.kind === 'StringBuilderType') return 'type';
+    return null;
+}
 
 export class LanguageServer {
     constructor(send) {
@@ -78,7 +105,7 @@ export class LanguageServer {
         if (method === 'initialize') {
             const root = params.rootUri ? uriPath(params.rootUri) : params.rootPath;
             if (root) this.rootPath = root;
-            this.respond(id, {capabilities: {textDocumentSync: 1, hoverProvider: true, definitionProvider: true, referencesProvider: true, renameProvider: {prepareProvider: true}, documentSymbolProvider: true, codeActionProvider: true, documentFormattingProvider: true}});
+            this.respond(id, {capabilities: {textDocumentSync: 1, hoverProvider: true, definitionProvider: true, referencesProvider: true, renameProvider: {prepareProvider: true}, semanticTokensProvider: {legend: {tokenTypes: semanticTokenTypes, tokenModifiers: semanticTokenModifiers}, full: true}, documentSymbolProvider: true, codeActionProvider: true, documentFormattingProvider: true}});
         } else if (method === 'shutdown') this.respond(id, null);
         else if (method === 'exit') process.exit(0);
         else if (method === 'textDocument/didOpen') {
@@ -96,6 +123,7 @@ export class LanguageServer {
             if (renamed.error) this.send({jsonrpc: '2.0', id, error: renamed.error});
             else this.respond(id, renamed.result);
         }
+        else if (method === 'textDocument/semanticTokens/full') this.respond(id, this.semanticTokens(params));
         else if (method === 'textDocument/documentSymbol') this.respond(id, this.documentSymbols(params));
         else if (method === 'textDocument/codeAction') this.respond(id, this.codeActions(params));
         else if (method === 'textDocument/formatting') this.respond(id, this.formatDocument(params));
@@ -241,6 +269,56 @@ export class LanguageServer {
 
     renameError(message) {
         return {error: {code: -32602, message}};
+    }
+
+    semanticTokens(params) {
+        const result = this.results.get(params.textDocument.uri);
+        if (!result?.program) return {data: []};
+        const tokens = new Map();
+        const add = (span, type, modifiers = []) => {
+            if (!span || span.end <= span.start) return;
+            const position = positionAt(result.source, span.start);
+            const key = `${position.line}\0${position.character}\0${span.end - span.start}`;
+            const modifierBits = modifiers.reduce((bits, modifier) => {
+                const index = semanticTokenModifiers.indexOf(modifier);
+                return index < 0 ? bits : bits | 1 << index;
+            }, 0);
+            tokens.set(key, {line: position.line, character: position.character, length: span.end - span.start,
+                type: semanticTokenTypes.indexOf(type), modifiers: modifierBits});
+        };
+        walk(result.program, node => {
+            const symbol = node.semanticSymbol;
+            const type = semanticType(symbol);
+            const span = type ? semanticNameSpan(node, symbol, result.source) : null;
+            if (!span) return;
+            const declaration = symbol.declaration?.span;
+            const modifiers = [];
+            if (declaration && node.span.source === declaration.source && node.span.start === declaration.start && node.span.end === declaration.end) modifiers.push('declaration');
+            if (symbol.kind === 'EnumCase') modifiers.push('readonly');
+            if (symbol.isNative || symbol.owner?.isNative) modifiers.push('native');
+            if (symbol.isUnsafe) modifiers.push('unsafe');
+            add(span, type, modifiers);
+        });
+        try {
+            for (const token of new Tokenizer(result.source, uriPath(params.textDocument.uri)).parse()) {
+                const span = {start: token.start, end: token.end};
+                if (ownershipKeywords.has(token.type)) add(span, 'modifier', ['ownership']);
+                else if (token.type === 'NATIVE') add(span, 'modifier', ['native']);
+                else if (token.type === 'UNSAFE') add(span, 'keyword', ['unsafe']);
+            }
+        } catch {}
+        const ordered = [...tokens.values()].filter(token => token.type >= 0)
+            .sort((left, right) => left.line - right.line || left.character - right.character || left.length - right.length);
+        const data = [];
+        let previousLine = 0, previousCharacter = 0;
+        for (const token of ordered) {
+            const deltaLine = token.line - previousLine;
+            const deltaCharacter = deltaLine === 0 ? token.character - previousCharacter : token.character;
+            data.push(deltaLine, deltaCharacter, token.length, token.type, token.modifiers);
+            previousLine = token.line;
+            previousCharacter = token.character;
+        }
+        return {data};
     }
 
     documentSymbols(params) {

@@ -98,6 +98,7 @@ test('language server finds references across modules and unsaved overlays', () 
     const report = `import Math from './math.ar'\nentry {{ __() -> i32 { local total = Math.value(); return 0 } }}\n`;
     server.handle({jsonrpc: '2.0', id: 1, method: 'initialize', params: {rootUri: pathToFileURL(directory).href}});
     assert.equal(sent.at(-1).result.capabilities.referencesProvider, true);
+    assert.equal(sent.at(-1).result.capabilities.semanticTokensProvider.full, true);
     server.handle({jsonrpc: '2.0', method: 'textDocument/didOpen', params: {textDocument: {uri: libraryUri, text: library}}});
     server.handle({jsonrpc: '2.0', method: 'textDocument/didOpen', params: {textDocument: {uri: mainUri, text: main}}});
     server.handle({jsonrpc: '2.0', method: 'textDocument/didOpen', params: {textDocument: {uri: reportUri, text: report}}});
@@ -115,6 +116,32 @@ test('language server finds references across modules and unsaved overlays', () 
     assert.match(sent.at(-1).error.message, /conflict/);
     server.handle({jsonrpc: '2.0', id: 7, method: 'textDocument/rename', params: {textDocument: {uri: mainUri}, position: positionOf(main, 'value'), newName: 'not-valid'}});
     assert.match(sent.at(-1).error.message, /Invalid Valen identifier/);
+    server.handle({jsonrpc: '2.0', id: 8, method: 'textDocument/semanticTokens/full', params: {textDocument: {uri: mainUri}}});
+    const legend = sent.find(message => message.id === 1).result.capabilities.semanticTokensProvider.legend;
+    const tokenTypes = sent.at(-1).result.data.filter((value, index) => index % 5 === 3).map(index => legend.tokenTypes[index]);
+    assert.ok(tokenTypes.includes('namespace'), 'imported library reference was not classified');
+    assert.ok(tokenTypes.includes('function'), 'imported library method was not classified');
+    assert.ok(tokenTypes.includes('variable'), 'local declaration was not classified');
+    fs.rmSync(directory, {recursive: true});
+});
+
+test('language server classifies ownership and native unsafe boundaries', () => {
+    const sent = [], directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-lsp-semantic-tokens-'));
+    const filePath = path.join(directory, 'native.ar'), uri = pathToFileURL(filePath).href;
+    const source = `Engine {{}}\nlibrary Native {{ unsafe native take(own input:ref Engine) -> void }}\n`;
+    const server = new LanguageServer(message => sent.push(message));
+    server.handle({jsonrpc: '2.0', id: 1, method: 'initialize', params: {rootUri: pathToFileURL(directory).href}});
+    const legend = sent.at(-1).result.capabilities.semanticTokensProvider.legend;
+    server.handle({jsonrpc: '2.0', method: 'textDocument/didOpen', params: {textDocument: {uri, text: source}}});
+    server.handle({jsonrpc: '2.0', id: 2, method: 'textDocument/semanticTokens/full', params: {textDocument: {uri}}});
+    const records = [];
+    for (let index = 0; index < sent.at(-1).result.data.length; index += 5) records.push(sent.at(-1).result.data.slice(index, index + 5));
+    const ownershipBit = 1 << legend.tokenModifiers.indexOf('ownership');
+    const nativeBit = 1 << legend.tokenModifiers.indexOf('native');
+    const unsafeBit = 1 << legend.tokenModifiers.indexOf('unsafe');
+    assert.ok(records.some(record => legend.tokenTypes[record[3]] === 'modifier' && (record[4] & ownershipBit) !== 0));
+    assert.ok(records.some(record => (record[4] & nativeBit) !== 0));
+    assert.ok(records.some(record => (record[4] & unsafeBit) !== 0));
     fs.rmSync(directory, {recursive: true});
 });
 
