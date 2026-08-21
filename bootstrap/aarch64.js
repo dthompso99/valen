@@ -13,7 +13,7 @@ export class AArch64Backend {
             'valen_System_gcPeakRoots', 'valen_System_gcCollections', 'valen_System_gcReclaimedObjects',
             'valen_System_gcTrackedReclaimedBytes', 'valen_System_gcWeakReferencesCleared',
             'valen_System_gcWeakReferencesRetained', 'valen_System_gcNativeHandlesOpen',
-            'valen_System_gcNativeHandlesFinalized', 'valen_System_print',
+            'valen_System_gcNativeHandlesFinalized', 'valen_System_processArenaEnabled', 'valen_System_print',
             'valen_System_write', 'valen_System_writeError', 'valen_System_exit', 'valen_System_openRead',
             'valen_System_openWrite', 'valen_System_read', 'valen_System_readDirectory', 'valen_System_writeFile', 'valen_System_close',
             'valen_System_lastError', 'valen_System_arguments', 'valen_System_currentDirectory',
@@ -105,14 +105,16 @@ export class AArch64Backend {
         for (let index = 0; index < loopScratchCount; index++) reserve(`loop-scratch:${index}`);
         const rootOffset = this.align(slotOffset, 16);
         const frameSize = this.align(rootOffset + 24, 16);
-        if (frameSize > 4064) throw new Error(`aarch64-linux bootstrap backend function '${fn.displayName}' needs an unsupported large stack frame`);
+        if (frameSize > 32752) throw new Error(`aarch64-linux bootstrap backend function '${fn.displayName}' needs an unsupported large stack frame`);
         const total = frameSize + 16;
         const symbol = this.symbols.get(fn.name);
         const end = `${symbol}__return`;
         const rootTrace = `${symbol}__gc_roots`;
         const roots = [...slotTypes].filter(([, type]) => this.isManagedReferenceType(type));
-        const lines = [`.globl ${symbol}`, `.type ${symbol}, %function`, `${symbol}:`, `    sub sp, sp, #${total}`,
-            `    str x29, [sp, #${frameSize}]`, `    str x30, [sp, #${frameSize + 8}]`, `    add x29, sp, #${frameSize}`];
+        const lines = [`.globl ${symbol}`, `.type ${symbol}, %function`, `${symbol}:`,
+            ...this.stackAdjustment('sub', total),
+            `    str x29, [sp, #${frameSize}]`, `    str x30, [sp, #${frameSize + 8}]`,
+            ...this.addOffset('x29', 'sp', frameSize)];
         for (let offset = this.outgoingSize; offset < slotOffset; offset += 8) lines.push(`    str xzr, [sp, #${offset}]`);
         for (const location of this.argumentLocations(fn.parameters)) {
             if (location.kind === 'stack') lines.push(`    ldr x9, [x29, #${16 + location.stackIndex * 8}]`,
@@ -127,11 +129,11 @@ export class AArch64Backend {
             `    str x10, [sp, #${rootOffset + 16}]`);
         if (this.threading) lines.push(...this.address('x9', 'valen_gc_workers'), '    ldr x10, [x9, #0]',
             `    cbnz x10, ${symbol}__gc_push_slow`, ...this.address('x9', 'valen_gc_roots'), '    ldr x10, [x9, #0]',
-            `    str x10, [sp, #${rootOffset}]`, `    add x10, sp, #${rootOffset}`, '    str x10, [x9, #0]',
-            `    b ${symbol}__gc_push_done`, `${symbol}__gc_push_slow:`, `    add x0, sp, #${rootOffset}`,
+            `    str x10, [sp, #${rootOffset}]`, ...this.addOffset('x10', 'sp', rootOffset), '    str x10, [x9, #0]',
+            `    b ${symbol}__gc_push_done`, `${symbol}__gc_push_slow:`, ...this.addOffset('x0', 'sp', rootOffset),
             '    bl valen_gc_root_push', `${symbol}__gc_push_done:`, '    bl valen_gc_safepoint');
         else lines.push(...this.address('x9', 'valen_gc_roots'), '    ldr x10, [x9, #0]',
-            `    str x10, [sp, #${rootOffset}]`, `    add x10, sp, #${rootOffset}`, '    str x10, [x9, #0]');
+            `    str x10, [sp, #${rootOffset}]`, ...this.addOffset('x10', 'sp', rootOffset), '    str x10, [x9, #0]');
         const blockOrder = new Map(fn.blocks.map((block, index) => [block.label, index]));
         for (let blockIndex = 0; blockIndex < fn.blocks.length; blockIndex++) {
             const block = fn.blocks[blockIndex];
@@ -148,11 +150,11 @@ export class AArch64Backend {
         if (this.threading) lines.push(...this.address('x9', 'valen_gc_workers'), '    ldr x10, [x9, #0]',
             `    cbnz x10, ${symbol}__gc_pop_slow`, ...this.address('x9', 'valen_gc_roots'),
             `    ldr x10, [sp, #${rootOffset}]`, '    str x10, [x9, #0]', `    b ${symbol}__gc_pop_done`,
-            `${symbol}__gc_pop_slow:`, `    str x0, [sp, #${rootOffset + 24}]`, `    add x0, sp, #${rootOffset}`,
+            `${symbol}__gc_pop_slow:`, `    str x0, [sp, #${rootOffset + 24}]`, ...this.addOffset('x0', 'sp', rootOffset),
             '    bl valen_gc_root_pop', `    ldr x0, [sp, #${rootOffset + 24}]`, `${symbol}__gc_pop_done:`);
         else lines.push(...this.address('x9', 'valen_gc_roots'), `    ldr x10, [sp, #${rootOffset}]`, '    str x10, [x9, #0]');
         lines.push(`    ldr x29, [sp, #${frameSize}]`, `    ldr x30, [sp, #${frameSize + 8}]`,
-            `    add sp, sp, #${total}`, '    ret', `.size ${symbol}, .-${symbol}`, '',
+            ...this.stackAdjustment('add', total), '    ret', `.size ${symbol}, .-${symbol}`, '',
             `.type ${rootTrace}, %function`, `${rootTrace}:`, '    sub sp, sp, #32', '    str x30, [sp, #24]',
             '    str x0, [sp, #16]');
         for (const [key] of roots) lines.push('    ldr x9, [sp, #16]', `    ldr x0, [x9, #${this.slots.get(key)}]`,
@@ -393,7 +395,7 @@ export class AArch64Backend {
                     ...this.load(instruction.value, 'x9'), `    ldr x10, ${this.temp(instruction.result)}`,
                     '    str x9, [x10, #16]'];
             case 'unwrap':
-                return [...this.load(instruction.value, 'x9'), '    cbz x9, .Loptional_unwrap_error',
+                return [...this.load(instruction.value, 'x9'), ...this.trapIfZero('x9', '.Loptional_unwrap_error'),
                     ...(instruction.optionalType && this.isPrimitiveOptional(instruction.optionalType)
                         ? ['    ldr x9, [x9, #16]', ...this.normalize('x9', instruction.type)] : []),
                     `    str x9, ${this.temp(instruction.result)}`];
@@ -426,7 +428,7 @@ export class AArch64Backend {
         const condition = this.isUnsigned(instruction.left.type) && unsignedCondition[instruction.operator]
             ? unsignedCondition[instruction.operator] : signedCondition[instruction.operator];
         if (operation) lines.push(`    ${operation} x9, x9, x10`);
-        else if (instruction.operator === '/') lines.push('    cbz x10, .Ldivision_by_zero_error',
+        else if (instruction.operator === '/') lines.push(...this.trapIfZero('x10', '.Ldivision_by_zero_error'),
             `    ${this.isUnsigned(instruction.left.type) ? 'udiv' : 'sdiv'} x9, x9, x10`);
         else if (condition) lines.push('    cmp x9, x10', `    cset x9, ${condition}`);
         else throw new Error(`aarch64-linux bootstrap backend does not yet support binary '${instruction.operator}'`);
@@ -472,17 +474,17 @@ export class AArch64Backend {
         if (!/^[iu](8|16|32|64)$/.test(to)) throw new Error(`aarch64-linux bootstrap backend cannot convert floating point to '${to}'`);
         const lines = [from === 'f32' ? '    fmov s0, w9' : '    fmov d0, x9'];
         if (from === 'f32') lines.push('    fcvt d0, s0');
-        lines.push('    fcmp d0, d0', '    b.vs .Lfloat_conversion_error');
+        lines.push('    fcmp d0, d0', ...this.trapIfCondition('vs', '.Lfloat_conversion_error'));
         const bits = Number(to.slice(1));
         if (to.startsWith('u')) {
             lines.push(...this.floatConstant('x10', 0, 'f64'), '    fmov d1, x10', '    fcmp d0, d1',
-                '    b.mi .Lfloat_conversion_error', ...this.floatConstant('x10', 2 ** bits, 'f64'),
-                '    fmov d1, x10', '    fcmp d0, d1', '    b.ge .Lfloat_conversion_error', '    fcvtzu x9, d0');
+                ...this.trapIfCondition('mi', '.Lfloat_conversion_error'), ...this.floatConstant('x10', 2 ** bits, 'f64'),
+                '    fmov d1, x10', '    fcmp d0, d1', ...this.trapIfCondition('ge', '.Lfloat_conversion_error'), '    fcvtzu x9, d0');
         } else {
             const boundary = 2 ** (bits - 1);
             lines.push(...this.floatConstant('x10', -boundary, 'f64'), '    fmov d1, x10', '    fcmp d0, d1',
-                '    b.mi .Lfloat_conversion_error', ...this.floatConstant('x10', boundary, 'f64'),
-                '    fmov d1, x10', '    fcmp d0, d1', '    b.ge .Lfloat_conversion_error', '    fcvtzs x9, d0');
+                ...this.trapIfCondition('mi', '.Lfloat_conversion_error'), ...this.floatConstant('x10', boundary, 'f64'),
+                '    fmov d1, x10', '    fcmp d0, d1', ...this.trapIfCondition('ge', '.Lfloat_conversion_error'), '    fcvtzs x9, d0');
         }
         lines.push(...this.normalize('x9', to));
         return lines;
@@ -1115,6 +1117,11 @@ export class AArch64Backend {
             'valen_System_enableProcessArena:', ...this.address('x9', 'valen_arena_enabled'),
             '    mov x10, #1', '    str x10, [x9, #0]', '    ret',
             '.size valen_System_enableProcessArena, .-valen_System_enableProcessArena', '');
+        if (this.runtimeSymbols.has('valen_System_processArenaEnabled')) lines.push(
+            '.globl valen_System_processArenaEnabled', '.type valen_System_processArenaEnabled, %function',
+            'valen_System_processArenaEnabled:', ...this.address('x9', 'valen_arena_enabled'),
+            '    ldr x0, [x9, #0]', '    ret',
+            '.size valen_System_processArenaEnabled, .-valen_System_processArenaEnabled', '');
         if (['valen_System_replaceFile', 'valen_System_removeFile', 'valen_System_makeExecutable', 'valen_System_link']
             .some(symbol => this.runtimeSymbols.has(symbol))) lines.push(...this.systemPathRuntime());
         if (this.runtimeSymbols.has('valen_System_link')) lines.push(...this.systemLinkRuntime());
@@ -1633,8 +1640,10 @@ export class AArch64Backend {
         const lines = this.loadCallArguments(instruction.arguments);
         if (dynamic) {
             if (!Number.isInteger(instruction.slot) || instruction.slot < 0) throw new Error('aarch64-linux virtual call has no dispatch slot');
-            lines.push('    ldr x9, [x0, #0]', '    cbz x9, .Lcontract_dispatch_error',
-                `    ldr x9, [x9, #${40 + instruction.slot * 8}]`, '    cbz x9, .Lcontract_dispatch_error', '    blr x9');
+            const id = this.runtimeLabel++;
+            lines.push('    ldr x9, [x0, #0]', `    cbnz x9, .Lvirtual_type_${id}`, '    b .Lcontract_dispatch_error',
+                `.Lvirtual_type_${id}:`, `    ldr x9, [x9, #${40 + instruction.slot * 8}]`,
+                `    cbnz x9, .Lvirtual_target_${id}`, '    b .Lcontract_dispatch_error', `.Lvirtual_target_${id}:`, '    blr x9');
         } else {
             const target = this.symbols.get(instruction.target);
             if (!target) throw new Error(`aarch64-linux bootstrap backend has no function symbol for '${instruction.target}'`);
@@ -1649,13 +1658,17 @@ export class AArch64Backend {
         const id = this.runtimeLabel++;
         const loop = `.Lcontract_call_${id}`;
         const found = `.Lcontract_found_${id}`;
-        const lines = [...this.load(instruction.arguments[0], 'x9'), '    cbz x9, .Lcontract_dispatch_error',
-            '    ldr x10, [x9, #0]', '    cbz x10, .Lcontract_dispatch_error', '    ldr x10, [x10, #8]',
+        const lines = [...this.load(instruction.arguments[0], 'x9'), `    cbnz x9, .Lcontract_object_${id}`,
+            '    b .Lcontract_dispatch_error', `.Lcontract_object_${id}:`,
+            '    ldr x10, [x9, #0]', `    cbnz x10, .Lcontract_type_${id}`, '    b .Lcontract_dispatch_error',
+            `.Lcontract_type_${id}:`, '    ldr x10, [x10, #8]',
             '    ldr x11, [x10, #0]', '    add x10, x10, #8', ...this.address('x12', this.typeLabel(instruction.contractType)),
-            `${loop}:`, '    cbz x11, .Lcontract_dispatch_error', '    ldr x13, [x10, #0]', '    cmp x13, x12',
+            `${loop}:`, `    cbnz x11, .Lcontract_scan_${id}`, '    b .Lcontract_dispatch_error',
+            `.Lcontract_scan_${id}:`, '    ldr x13, [x10, #0]', '    cmp x13, x12',
             `    b.eq ${found}`, '    add x10, x10, #16', '    sub x11, x11, #1', `    b ${loop}`, `${found}:`,
             '    ldr x11, [x10, #8]', `    ldr x11, [x11, #${instruction.slot * 8}]`,
-            '    cbz x11, .Lcontract_dispatch_error', ...this.loadCallArguments(instruction.arguments), '    blr x11',
+            `    cbnz x11, .Lcontract_target_${id}`, '    b .Lcontract_dispatch_error', `.Lcontract_target_${id}:`,
+            ...this.loadCallArguments(instruction.arguments), '    blr x11',
             ...this.storeCallResult(instruction)];
         return lines;
     }
@@ -2291,6 +2304,35 @@ export class AArch64Backend {
     temp(name) { return `[sp, #${this.slots.get(`temp:${name}`)}]`; }
     named(name) { return `[sp, #${this.slots.get(`name:${name}`)}]`; }
     blockLabel(label) { return `${this.symbols.get(this.fn.name)}__${this.mangle(label)}`; }
+    trapIfZero(register, target) {
+        const done = `.Ltrap_nonzero_${this.runtimeLabel++}`;
+        return [`    cbnz ${register}, ${done}`, `    b ${target}`, `${done}:`];
+    }
+    trapIfCondition(condition, target) {
+        const inverse = {vs: 'vc', mi: 'pl', ge: 'lt'}[condition];
+        if (!inverse) throw new Error(`aarch64-linux bootstrap backend cannot invert condition '${condition}'`);
+        const done = `.Ltrap_condition_${this.runtimeLabel++}`;
+        return [`    b.${inverse} ${done}`, `    b ${target}`, `${done}:`];
+    }
+    stackAdjustment(operation, amount) {
+        const lines = [];
+        for (let remaining = amount; remaining > 0;) {
+            const part = Math.min(remaining, 4095);
+            lines.push(`    ${operation} sp, sp, #${part}`);
+            remaining -= part;
+        }
+        return lines;
+    }
+    addOffset(register, base, amount) {
+        const first = Math.min(amount, 4095);
+        const lines = [`    add ${register}, ${base}, #${first}`];
+        for (let remaining = amount - first; remaining > 0;) {
+            const part = Math.min(remaining, 4095);
+            lines.push(`    add ${register}, ${register}, #${part}`);
+            remaining -= part;
+        }
+        return lines;
+    }
     align(value, alignment) { return Math.ceil(value / alignment) * alignment; }
     isUnsigned(type) { return type === 'bool' || type?.startsWith('u'); }
     isFloat(type) { return type === 'f32' || type === 'f64'; }

@@ -5,7 +5,7 @@ const runtimeNames = [
     'valen_System_collectGarbage', 'valen_System_print', 'valen_System_write', 'valen_System_writeError',
     'valen_System_exit', 'valen_System_openRead', 'valen_System_openWrite', 'valen_System_read', 'valen_System_readDirectory',
     'valen_System_writeFile', 'valen_System_close', 'valen_System_lastError', 'valen_System_arguments',
-    'valen_System_currentDirectory', 'valen_System_environmentVariable', 'valen_System_enableProcessArena',
+    'valen_System_currentDirectory', 'valen_System_environmentVariable', 'valen_System_enableProcessArena', 'valen_System_processArenaEnabled',
     'valen_System_writeBytes', 'valen_System_sync', 'valen_System_replaceFile', 'valen_System_removeFile',
     'valen_System_makeExecutable', 'valen_System_link', 'valen_System_memoryCopy', 'valen_System_memoryCompare',
     'valen_System_fileDescriptor', 'valen_System_makeFileNonblocking', 'valen_Network_listen',

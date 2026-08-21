@@ -141,13 +141,13 @@ test('bootstrap compiler cross-compiles scalar AArch64 floating point', t => {
     assert.match(result.assembly, /fcmp d0, d1/);
     assert.match(result.assembly, /fcvtzs x9, d0/);
     assert.match(result.assembly, /fcvtzu x9, d0/);
-    assert.match(result.assembly, /b\.vs \.Lfloat_conversion_error/);
+    assert.match(result.assembly, /b\.vc \.Ltrap_condition_[0-9]+\n    b \.Lfloat_conversion_error/);
 
     for (const fixture of ['float-conversion-failing.ar', 'aarch64-float-range-error.ar']) {
         const failing = new Compiler().compile(fileURLToPath(new URL(`fixtures/${fixture}`, import.meta.url)),
             path.join(directory, fixture), {target: 'aarch64-linux'});
         assert.match(failing.assembly, /mov x0, #76/);
-        assert.match(failing.assembly, /b\.ge \.Lfloat_conversion_error|b\.vs \.Lfloat_conversion_error/);
+        assert.match(failing.assembly, /b\.(?:lt|vc) \.Ltrap_condition_[0-9]+\n    b \.Lfloat_conversion_error/);
     }
 });
 
@@ -181,7 +181,7 @@ test('bootstrap compiler lays out and constructs basic AArch64 objects', t => {
     assert.match(result.assembly, /mov x0, #72/);
 });
 
-test('bootstrap compiler emits AArch64 type descriptors and virtual dispatch', t => {
+test('bootstrap compiler emits AArch64 type descriptors and method tables', t => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-dispatch-'));
     t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
     const source = fileURLToPath(new URL('fixtures/inheritance.ar', import.meta.url));
@@ -193,10 +193,7 @@ test('bootstrap compiler emits AArch64 type descriptors and virtual dispatch', t
     assert.ok(object.relocations.some(relocation => relocation.section === '.data' && relocation.type === 257));
     assert.ok(object.relocations.some(relocation => relocation.section === '.text' && relocation.type === 275));
     assert.ok(object.relocations.some(relocation => relocation.section === '.text' && relocation.type === 277));
-    assert.match(result.assembly, /ldr x9, \[x9, #40\]/);
-    assert.match(result.assembly, /ldr x9, \[x9, #48\]/);
-    assert.match(result.assembly, /ldr x9, \[x9, #56\]/);
-    assert.match(result.assembly, /blr x9/);
+    assert.match(result.assembly, /\.Lvalen_type_.*Child:[\s\S]*\.quad .*Child_copy[\s\S]*\.quad .*Base_2e_inherited[\s\S]*\.quad .*Child_2e_replaced[\s\S]*\.quad .*Child_2e_render/);
 });
 
 test('bootstrap compiler emits AArch64 contract dispatch and checked type relationships', t => {
@@ -216,7 +213,7 @@ test('bootstrap compiler emits AArch64 contract dispatch and checked type relati
     assert.match(subtypeResult.assembly, /\.Ltype_test_\d+:/);
     assert.match(subtypeResult.assembly, /ldr x12, \[x11, #8\]/);
     assert.match(subtypeResult.assembly, /mov x0, x9/);
-    assert.match(subtypeResult.assembly, /cbz x9, \.Loptional_unwrap_error/);
+    assert.match(subtypeResult.assembly, /cbnz x9, \.Ltrap_nonzero_[0-9]+\n    b \.Loptional_unwrap_error/);
 });
 
 test('bootstrap compiler emits fixed-size AArch64 arrays with checked indexing', t => {
@@ -609,4 +606,19 @@ test('bootstrap compiler emits checked AArch64 bulk-memory facilities', t => {
     assert.equal(fs.readFileSync(path.join(directory, 'memory')).readUInt16LE(18), 183);
     assert.match(result.assembly, /valen_System_memoryCopy:[\s\S]*\.Lsystem_memory_copy_next:/);
     assert.match(result.assembly, /valen_System_memoryCompare:[\s\S]*\.Lsystem_memory_compare_less:[\s\S]*\.Lsystem_memory_compare_greater:/);
+});
+
+test('bootstrap compiler emits AArch64 frames larger than one immediate', t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-aarch64-frame-'));
+    t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+    const source = path.join(directory, 'large-frame.ar');
+    const locals = Array.from({length: 520}, (_, index) => `local value${index}:i64 = ${index}`).join('; ');
+    fs.writeFileSync(source, `entry {{ __() -> i64 { ${locals}; return value519 } }}\n`);
+    const output = path.join(directory, 'large-frame');
+    const result = new Compiler().compile(source, output, {target: 'aarch64-linux', optimizationLevel: 0});
+
+    assert.equal(result.target.name, 'aarch64-linux');
+    assert.equal(fs.readFileSync(output).readUInt16LE(18), 183);
+    assert.match(result.assembly, /sub sp, sp, #4095\n    sub sp, sp, #[0-9]+/);
+    assert.match(result.assembly, /add x29, sp, #4095\n    add x29, x29, #[0-9]+/);
 });
