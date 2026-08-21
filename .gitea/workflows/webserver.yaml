@@ -29,6 +29,5 @@ jobs:
             -t $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:latest \
             -t $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:${{ github.sha }} \
             -f docker/Dockerfile.webserver .    
-          echo "$REGISTRY_PASSWORD" | docker login $REGISTRY_HOST -u "$REGISTRY_USERNAME" --password-stdin
           docker push $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:latest
           docker push $REGISTRY_HOST/$NAMESPACE/$IMAGE_AGENT:${{ github.sha }}      
