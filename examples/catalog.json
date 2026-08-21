@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "site": {"root":"examples/site","index":"examples/site/index.html"},
   "examples": [
     {"slug":"simple","title":"Hello Valen","order":10,"kind":"language","capabilities":["entrypoint","stdout"],"source":"examples/simple/simple.ar","documentation":"docs/quickstart.md"},
     {"slug":"cat","title":"cat","order":20,"kind":"cli","capabilities":["arguments","filesystem","errors"],"source":"examples/cat/cat.ar","documentation":"examples/cat/README.md"},

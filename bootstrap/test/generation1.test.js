@@ -851,11 +851,11 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                             const put = value => `PUT /value HTTP/1.1\r\nHost: localhost\r\nContent-Length: ${value.length}\r\n\r\n${value}`;
 
                             const initial = await runHttpService(executable, environment, statePath, [
-                                get('/health'), get('/config'), get('/value'), put('42')
+                                get('/'), get('/health'), get('/config'), put('42')
                             ]);
-                            assert.match(initial[0], /^HTTP\/1\.1 200 OK\r\n[\s\S]*\r\n\r\nok\n$/);
-                            assert.match(initial[1], /\r\n\r\nservice=conformance\n$/);
-                            assert.match(initial[2], /\r\n\r\n0\n$/);
+                            assert.match(initial[0], /^HTTP\/1\.1 200 OK\r\nContent-Type: text\/html; charset=utf-8\r\n[\s\S]*<h1>Valen<\/h1>[\s\S]*$/);
+                            assert.match(initial[1], /^HTTP\/1\.1 200 OK\r\n[\s\S]*\r\n\r\nok\n$/);
+                            assert.match(initial[2], /\r\n\r\nservice=conformance\n$/);
                             assert.match(initial[3], /^HTTP\/1\.1 200 OK\r\n[\s\S]*\r\n\r\n42\n$/);
                             assert.equal(fs.readFileSync(statePath, 'utf8'), '42\n');
 

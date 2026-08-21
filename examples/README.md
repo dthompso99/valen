@@ -8,6 +8,9 @@ Each entry has a stable slug, display order, capability tags, runnable source, a
 Documentation should state what the program demonstrates, how to build and run it, expected behavior,
 and important limitations.
 
+The catalog also identifies the [static documentation root](site/README.md) served by the native HTTP
+example. The future website can replace or expand that root while continuing to consume the catalog.
+
 ## Command-line programs
 
 - [cat](cat/README.md) copies files to standard output.

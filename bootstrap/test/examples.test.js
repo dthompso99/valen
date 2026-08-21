@@ -9,6 +9,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 test('example catalog has stable unique entries and valid local references', () => {
     const catalog = JSON.parse(fs.readFileSync(path.join(root, 'examples/catalog.json'), 'utf8'));
     assert.equal(catalog.version, 1);
+    assert.equal(catalog.site.root, 'examples/site');
+    assert.equal(catalog.site.index.startsWith(`${catalog.site.root}/`), true);
+    assert.equal(fs.existsSync(path.join(root, catalog.site.index)), true);
     assert.ok(Array.isArray(catalog.examples));
     const slugs = new Set(), orders = new Set();
     for (const example of catalog.examples) {

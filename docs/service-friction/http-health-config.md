@@ -3,6 +3,7 @@
 This report covers the first real-service milestone from issue #72. The service provides:
 
 - `GET /health`
+- `GET /`, serving the catalog-declared static documentation root
 - `GET /config`, configured through `VALEN_SERVICE_NAME`
 - explicit `404 Not Found` and `400 Bad Request` responses
 - a deterministic four-request lifetime for integration testing
@@ -16,6 +17,10 @@ Both self-hosted compiler generations build the service as a self-contained exec
 The original example mixed request parsing, response formatting, routing, and socket handling in one object. A small local `Http` module now owns request-line parsing and response serialization. This was a library-boundary problem; it did not require language syntax.
 
 The service exposes both `GET /health` as plain text and `GET /health.json` as a deterministic JSON response. The JSON route uses the standard quoting implementation for configured service names and gives the example corpus a small request-throughput and RSS target with stable output.
+
+The service loads `examples/site/index.html` at startup and serves it from `/`. `VALEN_DOCUMENT_ROOT`
+can select another directory, while a 3 KiB bound keeps the example response within its deliberately
+small fixed response limit. General static-file routing remains part of the website work in #81.
 
 The current network API still exposes listeners, connections, descriptor arrays, and readiness interests directly to the entrypoint. That is acceptable for this first transport example, but a reusable server library should eventually hide those mechanics from application orchestration.
 

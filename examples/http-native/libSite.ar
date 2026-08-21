@@ -1,0 +1,45 @@
+import System from'libSystem.ar'
+
+library Site {{
+    Document {{
+        member valid:bool
+        member content:string
+        member error:i64
+
+        __(valid:bool, content:string, error:i64) -> void {
+            self.valid = valid
+            self.content = content
+            self.error = error
+        }
+    }}
+
+    loadIndex(root:string, maximum:i64) -> Document {
+        local file = System.openRead(root + "/index.html")
+        if file == null { return new Document(false, "", System.lastError()) }
+        local content:string = ""
+        local reading:bool = true
+        while reading {
+            local remaining = maximum - content.length
+            if remaining <= 0 {
+                System.close(file!)
+                return new Document(false, "", 27)
+            }
+            local chunk = System.read(file!, remaining + 1)
+            if chunk == null {
+                local error = System.lastError()
+                System.close(file!)
+                return new Document(false, "", error)
+            }
+            if chunk!.length == 0 { reading = false }
+            else {
+                content = content + chunk!
+                if content.length > maximum {
+                    System.close(file!)
+                    return new Document(false, "", 27)
+                }
+            }
+        }
+        if System.close(file!) != 0 { return new Document(false, "", System.lastError()) }
+        return new Document(true, content, 0)
+    }
+}}
