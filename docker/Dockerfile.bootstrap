@@ -59,6 +59,7 @@ RUN ["./valen", "examples/nested/nested.ar", "-o", "dist/nested"]
 RUN ["dist/nested"]
 RUN ["./valen", "examples/sqlite-native/server.ar", "-o", "dist/sqlite-service"]
 RUN ["./valen", "examples/clippy/server.ar", "-o", "dist/clippy"]
+RUN ["./valen", "examples/http-native/server.ar", "-o", "dist/httpd"]
 RUN ["./valen", "tests/native-tests.ar", "-o", "dist/native-tests"]
 RUN ["dist/native-tests"]
 RUN ["./valen", "tests/native-tests-failing.ar", "-o", "dist/native-tests-failing"]
@@ -69,3 +70,8 @@ CMD ["/bin/sh"]
 FROM scratch AS scratch-runtime
 COPY --from=stage2 /app/dist/valen .
 ENTRYPOINT ["/valen"]
+
+FROM scratch AS valen-http
+COPY --from=stage3 /app/dist/httpd .
+RUN mkdir static
+ENTRYPOINT ["/httpd"]

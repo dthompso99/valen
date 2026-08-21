@@ -1,0 +1,16 @@
+FROM gitea.hallrd.click/dthompson/valen-builder:latest AS build
+WORKDIR /source
+COPY examples/http-native ./
+ENV VALEN_LIBRARY_PATH=/app/lib
+ENV VALEN_SYSROOT=/app/lib/valen/current/x86_64-linux
+RUN /app/valen ./server.ar -o /httpd
+
+FROM scratch
+COPY --from=build /httpd /httpd
+WORKDIR /static
+USER 65532:65532
+COPY examples/site .
+ENV PORT=18080
+ENV VALEN_DOCUMENT_ROOT=/static
+EXPOSE 18080
+ENTRYPOINT ["/httpd"]
