@@ -157,14 +157,44 @@ library Semantics {{
             name = name + ">"
             index = 0
             while index < program.declarations.length { if program.declarations[index].name == name { return name }; index = index + 1 }
-            local declaration = copy template
-            declaration.name = name
-            declaration.genericArguments = arguments
+            local members = new Array<Ast.MemberDeclaration>(0)
+            index = 0
+            while index < template.members.length { members.append(self.cloneGenericMember(template.members[index])); index = index + 1 }
+            local declaration = new Ast.Declaration(template.kind, name, members, template.span)
+            if template.inheritedType != null { declaration.inheritedType = copy template.inheritedType! }
+            declaration.implementedTypes = copy template.implementedTypes
+            declaration.typeConstraints = copy template.typeConstraints
+            declaration.genericArguments = copy arguments
             declaration.typeParameters = new Array<string>(0)
             self.substituteDeclaration(declaration, template.typeParameters, arguments)
             program.declarations.append(declaration)
             self.visitGenericDeclaration(program, declaration)
             return name
+        }
+
+        cloneGenericMember(source:Ast.MemberDeclaration) -> Ast.MemberDeclaration {
+            local memberNode = new Ast.MemberDeclaration(source.kind, source.name, source.span)
+            if source.declaredType != null { memberNode.declaredType = copy source.declaredType! }
+            if source.initializer != null { memberNode.initializer = copy source.initializer! }
+            memberNode.parameters = copy source.parameters
+            if source.returnType != null { memberNode.returnType = copy source.returnType! }
+            memberNode.returnReference = source.returnReference
+            if source.body != null { memberNode.body = copy source.body! }
+            memberNode.isNative = source.isNative
+            memberNode.isUnsafe = source.isUnsafe
+            if source.foreignLibrary != null { memberNode.foreignLibrary = copy source.foreignLibrary! }
+            if source.foreignSymbol != null { memberNode.foreignSymbol = copy source.foreignSymbol! }
+            memberNode.visibility = copy source.visibility
+            memberNode.reference = source.reference
+            memberNode.weakReference = source.weakReference
+            if source.inheritedType != null { memberNode.inheritedType = copy source.inheritedType! }
+            memberNode.implementedTypes = copy source.implementedTypes
+            memberNode.typeParameters = copy source.typeParameters
+            memberNode.typeConstraints = copy source.typeConstraints
+            memberNode.genericArguments = copy source.genericArguments
+            local index:i64 = 0
+            while index < source.members.length { memberNode.members.append(self.cloneGenericMember(source.members[index])); index = index + 1 }
+            return memberNode
         }
 
         renderGenericType(reference:Ast.TypeReference) -> string {
@@ -230,13 +260,12 @@ library Semantics {{
             local index:i64 = 0
             while index < parameters.length {
                 if reference.name == parameters[index] && reference.arguments.length == 0 {
-                    local replacement = copy arguments[index]
                     local optional = reference.optional
                     local ownership = reference.ownership
-                    reference.name = replacement.name
-                    reference.arguments = replacement.arguments
-                    reference.optional = optional || replacement.optional
-                    if ownership == "owned" { reference.ownership = replacement.ownership }
+                    reference.name = copy arguments[index].name
+                    reference.arguments = copy arguments[index].arguments
+                    reference.optional = optional || arguments[index].optional
+                    if ownership == "owned" { reference.ownership = copy arguments[index].ownership }
                     return
                 }
                 index = index + 1

@@ -623,6 +623,13 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                 {encoding: 'utf8', env: environment, cwd: projectRoot, timeout: 30000, maxBuffer: 64 * 1024 * 1024});
             assert.equal(selfhostCompile.status, 0, selfhostCompile.stderr || selfhostCompile.stdout || selfhostCompile.signal);
             assert.equal(spawnSync(selfhostProgram, [], {encoding: 'utf8', env: environment, cwd: projectRoot}).status, 0);
+            const selfhostCollections = path.join(directory, 'llvm-selfhost-collections');
+            const selfhostCollectionsCompile = spawnSync(llvmCompiler,
+                [path.join(projectRoot, 'bootstrap/test/fixtures/stdlib-collections.ar'), '-o', selfhostCollections],
+                {encoding: 'utf8', env: environment, cwd: projectRoot, timeout: 30000, maxBuffer: 64 * 1024 * 1024});
+            assert.equal(selfhostCollectionsCompile.status, 0,
+                selfhostCollectionsCompile.stderr || selfhostCollectionsCompile.stdout || selfhostCollectionsCompile.signal);
+            assert.equal(spawnSync(selfhostCollections, [], {encoding: 'utf8', env: environment, cwd: projectRoot}).status, 0);
 
             const unsupportedTarget = spawnSync(compilerPath,
                 ['--backend', 'llvm', '--target', 'aarch64-linux', path.join(projectRoot, 'examples/simple/simple.ar'), '-o', path.join(directory, 'llvm-aarch64')],
