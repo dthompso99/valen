@@ -3799,9 +3799,12 @@ library X86_64 {{
         }
 
         findImmediate(name:string) -> ref Immediate? {
-            local index = self.immediateIndex.get(name)
-            if index < 0 { return null }
-            return self.immediates[index]
+            local index:i64 = 0
+            while index < self.immediates.length {
+                if self.immediates[index].name == name { return self.immediates[index] }
+                index = index + 1
+            }
+            return null
         }
 
         recordAllocationUse(value:Ir.Value?, position:i64) -> void {
@@ -3921,15 +3924,21 @@ library X86_64 {{
         }
 
         findFunction(name:string) -> ref Ir.Function? {
-            local index = self.programFunctionIndex.get(name)
-            if index < 0 { return null }
-            return self.program.functions[index]
+            local index:i64 = 0
+            while index < self.program.functions.length {
+                if self.program.functions[index].name == name { return self.program.functions[index] }
+                index = index + 1
+            }
+            return null
         }
 
         findProgramType(name:string) -> ref Ir.Type? {
-            local index = self.programTypeIndex.get(name)
-            if index < 0 { return null }
-            return self.program.types[index]
+            local index:i64 = 0
+            while index < self.program.types.length {
+                if self.program.types[index].name == name { return self.program.types[index] }
+                index = index + 1
+            }
+            return null
         }
 
         findAssemblySymbol(name:string) -> ref FunctionSymbol? {
