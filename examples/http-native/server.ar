@@ -23,7 +23,7 @@ entry {{
             System.writeError("\n")
             return 78
         }
-        local requestLimit:i64 = 4
+        local requestLimit:i64 = 0
         local configuredLimit = System.environmentVariable("VALEN_REQUEST_LIMIT")
         if configuredLimit != null {
             local parsedLimit = System.parseInteger(configuredLimit!)
@@ -43,7 +43,7 @@ entry {{
         System.write("valen-http: ready on http://127.0.0.1:18080\n")
         local loop = new Service.Loop()
         local completed:i64 = 0
-        while completed < requestLimit {
+        while requestLimit == 0 || completed < requestLimit {
             local descriptors = loop.descriptors(listener!)
             local interests = loop.interests()
             local ready = EventLoop.wait(descriptors, interests, 50)

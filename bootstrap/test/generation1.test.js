@@ -28,7 +28,7 @@ async function runHttpService(executable, environment, statePath, requests, phas
     assert.equal(requests.length, 4, 'the deterministic service test requires exactly four requests');
     const child = spawn(executable, [], {
         cwd: projectRoot,
-        env: {...environment, VALEN_SERVICE_NAME: 'conformance', VALEN_STATE_PATH: statePath}
+        env: {...environment, VALEN_SERVICE_NAME: 'conformance', VALEN_STATE_PATH: statePath, VALEN_REQUEST_LIMIT: '4'}
     });
     let stdout = '';
     let stderr = '';

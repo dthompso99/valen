@@ -6,7 +6,8 @@ This report covers the first real-service milestone from issue #72. The service 
 - `GET /`, serving the catalog-declared static documentation root
 - `GET /config`, configured through `VALEN_SERVICE_NAME`
 - explicit `404 Not Found` and `400 Bad Request` responses
-- a deterministic four-request lifetime for integration testing
+- an unlimited deployment lifetime by default, with `VALEN_REQUEST_LIMIT` providing deterministic
+  shutdown for integration testing
 
 Both self-hosted compiler generations build the service as a self-contained executable without shared-library dependencies. The conformance suite starts each executable and verifies all four responses over a real TCP connection.
 
