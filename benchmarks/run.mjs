@@ -38,9 +38,9 @@ fs.writeFileSync(fileInput, fileContent);
 const fileChecksum = Buffer.from(fileContent).reduce((sum, byte) => sum + byte, 0);
 const workloads = {
     'integer-loop': {expectedOutput: '124999999686\n', iterations: 1000000000, javaClass: 'IntegerLoop'},
-    'object-dispatch': {expectedOutput: '1426395009\n', iterations: 10000000, javaClass: 'ObjectDispatch'},
-    'string-builders': {expectedOutput: '610000\n', iterations: 10000, javaClass: 'StringBuilders'},
-    'allocation-gc': {expectedOutput: '2146983647\n', iterations: 100000, javaClass: 'AllocationGc'},
+    'object-dispatch': {expectedOutput: '1426395009\n', iterations: 50000000, javaClass: 'ObjectDispatch'},
+    'string-builders': {expectedOutput: '650000\n', iterations: 50000, javaClass: 'StringBuilders'},
+    'allocation-gc': {expectedOutput: '2146983647\n', iterations: 500000, javaClass: 'AllocationGc'},
     collections: {expectedOutput: '136345492\n', iterations: 10000, javaClass: 'CollectionsWorkload'},
     'file-processing': {expectedOutput: `${fileChecksum}\n`, iterations: fileContent.length, javaClass: 'FileProcessing', runtimeArgs: [fileInput]},
     'cold-start': {expectedOutput: '0\n', iterations: 1, javaClass: 'ColdStart'}

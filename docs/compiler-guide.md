@@ -135,7 +135,7 @@ helpers are available. Stateless compiled-library objects are ABI-interoperable 
 both directions: native executables may consume LLVM libraries, and LLVM executables may consume
 native libraries.
 
-`-O0` retains mandatory IR cleanup and validation while disabling optional optimizations. `-O1` is the default and enables constant folding, dead/unreachable elimination, conservative linear-scan register allocation, immediate selection, and peepholes. Unsupported levels are rejected instead of silently aliasing another mode.
+`-O0` retains mandatory IR cleanup and validation while disabling optional optimizations. `-O1` is the default and enables the target-independent transformation pipeline followed by backend allocation, instruction selection, and peepholes. Unsupported levels are rejected instead of silently aliasing another mode. See [Optimization pipeline](optimization.md) for the current passes, benchmark attribution, and deliberately deferred work.
 
 ## Repository map
 
