@@ -10,7 +10,6 @@ import Site from'./libSite.ar'
 entry {{
     member serviceName:string
     member store:State.Store
-    member indexPage:string
 
     __() -> i32 {
         System.enableProcessArena()
@@ -24,17 +23,6 @@ entry {{
             System.writeError("\n")
             return 78
         }
-        local configuredRoot = System.environmentVariable("VALEN_DOCUMENT_ROOT")
-        local documentRoot:string = "examples/site"
-        if configuredRoot != null { documentRoot = configuredRoot! }
-        local document = Site.loadIndex(documentRoot, 3072)
-        if!document.valid {
-            System.writeError("valen-http: invalid or unreadable document root; OS error ")
-            System.writeError(document.error.toString())
-            System.writeError("\n")
-            return 78
-        }
-        self.indexPage = document.content
         local requestLimit:i64 = 4
         local configuredLimit = System.environmentVariable("VALEN_REQUEST_LIMIT")
         if configuredLimit != null {
@@ -94,7 +82,19 @@ entry {{
     }
 
     route(request:Http.Request) -> Http.Response {
-        if request.method == "GET" && request.target == "/" { return new Http.Response("200 OK", self.indexPage, "text/html; charset=utf-8") }
+        if request.method == "GET" && request.target == "/" {
+            local configuredRoot = System.environmentVariable("VALEN_DOCUMENT_ROOT")
+            local documentRoot:string = "examples/site"
+            if configuredRoot != null { documentRoot = configuredRoot! }
+            local document = Site.loadIndex(documentRoot, 3072)
+            if!document.valid {
+                System.writeError("valen-http: invalid or unreadable document root; OS error ")
+                System.writeError(document.error.toString())
+                System.writeError("\n")
+                return new Http.Response("500 Internal Server Error", "document root unavailable\n")
+            }
+            return new Http.Response("200 OK", document.content, "text/html; charset=utf-8")
+        }
         if request.method == "GET" && request.target == "/health" { return new Http.Response("200 OK", "ok\n") }
         if request.method == "GET" && request.target == "/health.json" { return new Http.Response("200 OK", "{\"status\":\"ok\",\"service\":" + Json.quote(self.serviceName) + "}\n", "application/json") }
         if request.method == "GET" && request.target == "/config" { return new Http.Response("200 OK", "service=" + self.serviceName + "\n") }

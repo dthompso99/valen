@@ -18,9 +18,10 @@ The original example mixed request parsing, response formatting, routing, and so
 
 The service exposes both `GET /health` as plain text and `GET /health.json` as a deterministic JSON response. The JSON route uses the standard quoting implementation for configured service names and gives the example corpus a small request-throughput and RSS target with stable output.
 
-The service loads `examples/site/index.html` at startup and serves it from `/`. `VALEN_DOCUMENT_ROOT`
-can select another directory, while a 3 KiB bound keeps the example response within its deliberately
-small fixed response limit. General static-file routing remains part of the website work in #81.
+The service loads `examples/site/index.html` when `/` is requested. `VALEN_DOCUMENT_ROOT` can select
+another directory, while a 3 KiB bound keeps the example response within its deliberately small fixed
+response limit. Other service routes remain available when the optional document root is absent.
+General static-file routing remains part of the website work in #81.
 
 The current network API still exposes listeners, connections, descriptor arrays, and readiness interests directly to the entrypoint. That is acceptable for this first transport example, but a reusable server library should eventually hide those mechanics from application orchestration.
 

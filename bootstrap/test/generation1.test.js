@@ -24,7 +24,7 @@ const exchange = request => new Promise((resolve, reject) => {
     socket.once('error', reject);
 });
 
-async function runHttpService(executable, environment, statePath, requests) {
+async function runHttpService(executable, environment, statePath, requests, phase = 'request sequence') {
     assert.equal(requests.length, 4, 'the deterministic service test requires exactly four requests');
     const child = spawn(executable, [], {
         cwd: projectRoot,
@@ -56,7 +56,20 @@ async function runHttpService(executable, environment, statePath, requests) {
         });
 
         const responses = [];
-        for (const request of requests) responses.push(await exchange(request));
+        for (let index = 0; index < requests.length; index++) {
+            try {
+                responses.push(await exchange(requests[index]));
+            } catch (error) {
+                const result = await Promise.race([
+                    exited,
+                    new Promise(resolve => setTimeout(() => resolve(null), 50))
+                ]);
+                const processState = result == null
+                    ? 'service still running'
+                    : `service exited with status ${result.status}, signal ${result.signal}`;
+                throw new Error(`${phase}, request ${index + 1}: ${error.message}; ${processState}\n${stderr || stdout}`, {cause: error});
+            }
+        }
 
         const result = await exited;
         assert.equal(result.status, 0, stderr || stdout || `HTTP service terminated by ${result.signal}`);
@@ -97,10 +110,25 @@ async function runConcurrentHttpService(executable, environment, statePath) {
             inspect();
         });
 
+        const checkedExchange = async (phase, request) => {
+            try {
+                return await exchange(request);
+            } catch (error) {
+                const result = await Promise.race([
+                    exited,
+                    new Promise(resolve => setTimeout(() => resolve(null), 50))
+                ]);
+                const processState = result == null
+                    ? 'service still running'
+                    : `service exited with status ${result.status}, signal ${result.signal}`;
+                throw new Error(`concurrent HTTP ${phase}: ${error.message}; ${processState}\n${stderr || stdout}`, {cause: error});
+            }
+        };
+
         slow = net.createConnection({host: '127.0.0.1', port: 18080});
         await new Promise((resolve, reject) => {
             slow.once('connect', () => { slow.write('GET /health HTTP/1.1\r\nHost: slow'); resolve(); });
-            slow.once('error', reject);
+            slow.once('error', error => reject(new Error(`concurrent HTTP slow connection: ${error.message}`, {cause: error})));
         });
         const slowClosed = new Promise((resolve, reject) => {
             const timeout = setTimeout(() => reject(new Error('slow client was not timed out')), 2000);
@@ -108,20 +136,20 @@ async function runConcurrentHttpService(executable, environment, statePath) {
             slow.once('error', error => { clearTimeout(timeout); reject(error); });
         });
 
-        const healthy = await exchange('GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n');
+        const healthy = await checkedExchange('health request', 'GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n');
         assert.match(healthy, /^HTTP\/1\.1 200 OK\r\n[\s\S]*\r\n\r\nok\n$/);
 
         const disconnected = net.createConnection({host: '127.0.0.1', port: 18080});
         await new Promise((resolve, reject) => {
             disconnected.once('connect', () => { disconnected.destroy(); resolve(); });
-            disconnected.once('error', reject);
+            disconnected.once('error', error => reject(new Error(`concurrent HTTP disconnected client: ${error.message}`, {cause: error})));
         });
 
-        const oversized = await exchange(`GET /health HTTP/1.1\r\nX-Fill: ${'x'.repeat(5000)}\r\n\r\n`);
+        const oversized = await checkedExchange('oversized request', `GET /health HTTP/1.1\r\nX-Fill: ${'x'.repeat(5000)}\r\n\r\n`);
         assert.match(oversized, /^HTTP\/1\.1 413 Content Too Large\r\n/);
-        assert.match(await exchange('GET /value HTTP/1.1\r\nHost: localhost\r\n\r\n'), /\r\n\r\n0\n$/);
+        assert.match(await checkedExchange('value request', 'GET /value HTTP/1.1\r\nHost: localhost\r\n\r\n'), /\r\n\r\n0\n$/);
         await slowClosed;
-        assert.match(await exchange('GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n'), /\r\n\r\nok\n$/);
+        assert.match(await checkedExchange('final health request', 'GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n'), /\r\n\r\nok\n$/);
 
         const result = await exited;
         assert.equal(result.status, 0, stderr || stdout || `concurrent HTTP service terminated by ${result.signal}`);
@@ -852,7 +880,7 @@ test('generation 1 passes the native compiler conformance suite', async t => {
 
                             const initial = await runHttpService(executable, environment, statePath, [
                                 get('/'), get('/health'), get('/config'), put('42')
-                            ]);
+                            ], `generation ${generation} initial HTTP run`);
                             assert.match(initial[0], /^HTTP\/1\.1 200 OK\r\nContent-Type: text\/html; charset=utf-8\r\n[\s\S]*<h1>Valen<\/h1>[\s\S]*$/);
                             assert.match(initial[1], /^HTTP\/1\.1 200 OK\r\n[\s\S]*\r\n\r\nok\n$/);
                             assert.match(initial[2], /\r\n\r\nservice=conformance\n$/);
@@ -861,7 +889,7 @@ test('generation 1 passes the native compiler conformance suite', async t => {
 
                             const restarted = await runHttpService(executable, environment, statePath, [
                                 get('/value'), put('invalid'), get('/missing'), put('-7')
-                            ]);
+                            ], `generation ${generation} restarted HTTP run`);
                             assert.match(restarted[0], /\r\n\r\n42\n$/);
                             assert.match(restarted[1], /^HTTP\/1\.1 400 Bad Request\r\n[\s\S]*\r\n\r\ninvalid value\n$/);
                             assert.match(restarted[2], /^HTTP\/1\.1 404 Not Found\r\n[\s\S]*\r\n\r\nnot found\n$/);
@@ -870,7 +898,7 @@ test('generation 1 passes the native compiler conformance suite', async t => {
 
                             const verified = await runHttpService(executable, environment, statePath, [
                                 get('/value'), 'not http', get('/missing'), get('/health.json')
-                            ]);
+                            ], `generation ${generation} verification HTTP run`);
                             assert.match(verified[0], /\r\n\r\n-7\n$/);
                             assert.match(verified[1], /^HTTP\/1\.1 400 Bad Request\r\n[\s\S]*\r\n\r\nbad request\n$/);
                             assert.match(verified[2], /^HTTP\/1\.1 404 Not Found\r\n/);

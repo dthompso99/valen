@@ -13,4 +13,5 @@ curl http://127.0.0.1:18080/
 ```
 
 Set `VALEN_DOCUMENT_ROOT` to serve a different directory containing an `index.html` file. This
-example serves only the root document; general static-file routing and deployment belong to #81.
+example serves only the root document and returns `500 Internal Server Error` from `/` when that
+document is unavailable; general static-file routing and deployment belong to #81.
