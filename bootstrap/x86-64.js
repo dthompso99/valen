@@ -59,6 +59,7 @@ export class X86_64Backend {
             'valen_System_openRead',
             'valen_System_openWrite',
             'valen_System_read',
+            'valen_System_readDirectory',
             'valen_System_writeFile',
             'valen_System_writeBytes',
             'valen_System_sync',
@@ -105,7 +106,7 @@ export class X86_64Backend {
         const runtimeSymbols = new Set(program.externals.map(external => external.runtimeSymbol));
         this.needsProcessArguments = runtimeSymbols.has('valen_System_arguments') || runtimeSymbols.has('valen_System_link') || runtimeSymbols.has('valen_System_compileLlvm') || runtimeSymbols.has('valen_System_environmentVariable');
         this.needsFilesystemState = [
-            'valen_System_openRead', 'valen_System_openWrite', 'valen_System_read',
+            'valen_System_openRead', 'valen_System_openWrite', 'valen_System_read', 'valen_System_readDirectory',
             'valen_System_writeFile', 'valen_System_writeBytes', 'valen_System_sync', 'valen_System_close',
             'valen_System_replaceFile', 'valen_System_removeFile', 'valen_System_makeExecutable', 'valen_System_lastError',
             'valen_System_currentDirectory'
@@ -140,6 +141,7 @@ export class X86_64Backend {
         if (runtimeSymbols.has('valen_System_openRead')) lines.push(...this.openRuntime('valen_System_openRead', 0));
         if (runtimeSymbols.has('valen_System_openWrite')) lines.push(...this.openRuntime('valen_System_openWrite', 577));
         if (runtimeSymbols.has('valen_System_read')) lines.push(...this.fileReadRuntime());
+        if (runtimeSymbols.has('valen_System_readDirectory')) lines.push(...this.fileReadRuntime('valen_System_readDirectory', 217));
         if (runtimeSymbols.has('valen_System_writeFile')) lines.push(...this.fileWriteRuntime());
         if (runtimeSymbols.has('valen_System_writeBytes')) lines.push(...this.fileWriteBytesRuntime());
         if (runtimeSymbols.has('valen_System_sync')) lines.push(...this.fileSyncRuntime());
@@ -1828,12 +1830,13 @@ export class X86_64Backend {
         ];
     }
 
-    fileReadRuntime() {
+    fileReadRuntime(symbol = 'valen_System_read', syscall = 0) {
+        const label = symbol === 'valen_System_read' ? '.Lfile_read_' : '.Ldirectory_read_';
         return [
-            '.globl valen_System_read',
-            'valen_System_read:',
+            `.globl ${symbol}`,
+            `${symbol}:`,
             '    test rsi, rsi',
-            '    js .Lfile_read_error',
+            `    js ${label}error`,
             '    push rbp',
             '    mov rbp, rsp',
             '    push rbx',
@@ -1845,29 +1848,29 @@ export class X86_64Backend {
             '    mov rdi, r13',
             '    call valen_string_new',
             '    mov rbx, rax',
-            '    xor eax, eax',
+            `    mov eax, ${syscall}`,
             '    mov rdi, r12',
             '    mov rsi, QWORD PTR [rbx]',
             '    mov rdx, r13',
             '    syscall',
             '    test rax, rax',
-            '    js .Lfile_read_error_frame',
+            `    js ${label}error_frame`,
             '    mov QWORD PTR [rip+valen_filesystem_error], 0',
             '    mov QWORD PTR [rbx+8], rax',
             '    mov rax, rbx',
-            '    jmp .Lfile_read_done',
-            '.Lfile_read_error_frame:',
+            `    jmp ${label}done`,
+            `${label}error_frame:`,
             '    neg rax',
             '    mov QWORD PTR [rip+valen_filesystem_error], rax',
             '    xor eax, eax',
-            '.Lfile_read_done:',
+            `${label}done:`,
             '    pop r14',
             '    pop r13',
             '    pop r12',
             '    pop rbx',
             '    leave',
             '    ret',
-            '.Lfile_read_error:',
+            `${label}error:`,
             '    mov QWORD PTR [rip+valen_filesystem_error], 22',
             '    xor eax, eax',
             '    ret',

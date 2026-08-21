@@ -15,7 +15,7 @@ export class AArch64Backend {
             'valen_System_gcWeakReferencesRetained', 'valen_System_gcNativeHandlesOpen',
             'valen_System_gcNativeHandlesFinalized', 'valen_System_print',
             'valen_System_write', 'valen_System_writeError', 'valen_System_exit', 'valen_System_openRead',
-            'valen_System_openWrite', 'valen_System_read', 'valen_System_writeFile', 'valen_System_close',
+            'valen_System_openWrite', 'valen_System_read', 'valen_System_readDirectory', 'valen_System_writeFile', 'valen_System_close',
             'valen_System_lastError', 'valen_System_arguments', 'valen_System_currentDirectory',
             'valen_System_environmentVariable', 'valen_System_enableProcessArena', 'valen_System_writeBytes',
             'valen_System_sync', 'valen_System_replaceFile', 'valen_System_removeFile', 'valen_System_makeExecutable',
@@ -1098,6 +1098,7 @@ export class AArch64Backend {
         if (this.runtimeSymbols.has('valen_System_openRead')) lines.push(...this.systemOpenRuntime('valen_System_openRead', 0));
         if (this.runtimeSymbols.has('valen_System_openWrite')) lines.push(...this.systemOpenRuntime('valen_System_openWrite', 577));
         if (this.runtimeSymbols.has('valen_System_read')) lines.push(...this.systemReadRuntime());
+        if (this.runtimeSymbols.has('valen_System_readDirectory')) lines.push(...this.systemReadRuntime('valen_System_readDirectory', 61));
         if (this.runtimeSymbols.has('valen_System_writeFile')) lines.push(...this.systemFileWriteRuntime());
         if (this.runtimeSymbols.has('valen_System_writeBytes')) lines.push(...this.systemFileWriteRuntime(true));
         if (this.runtimeSymbols.has('valen_System_close')) lines.push(...this.systemCloseRuntime());
@@ -1155,18 +1156,19 @@ export class AArch64Backend {
             '    ldr x30, [sp, #56]', '    add sp, sp, #64', '    ret', `.size ${symbol}, .-${symbol}`, ''];
     }
 
-    systemReadRuntime() {
-        return ['.globl valen_System_read', '.type valen_System_read, %function', 'valen_System_read:',
-            '    cmp x1, #0', '    b.lt .Lsystem_read_invalid', '    sub sp, sp, #48', '    str x30, [sp, #40]',
+    systemReadRuntime(symbol = 'valen_System_read', syscall = 63) {
+        const prefix = symbol === 'valen_System_read' ? '.Lsystem_read' : '.Ldirectory_read';
+        return [`.globl ${symbol}`, `.type ${symbol}, %function`, `${symbol}:`,
+            '    cmp x1, #0', `    b.lt ${prefix}_invalid`, '    sub sp, sp, #48', '    str x30, [sp, #40]',
             '    ldr x9, [x0, #0]', '    str x9, [sp, #0]', '    str x1, [sp, #8]', '    mov x0, x1',
             '    bl valen_string_new', '    str x0, [sp, #16]', '    ldr x1, [x0, #0]', '    ldr x0, [sp, #0]',
-            '    ldr x2, [sp, #8]', '    mov x8, #63', '    svc #0', '    cmp x0, #0',
-            '    b.lt .Lsystem_read_error', ...this.clearFilesystemError(), '    ldr x9, [sp, #16]',
-            '    str x0, [x9, #8]', '    mov x0, x9', '    b .Lsystem_read_done', '.Lsystem_read_error:',
-            '    neg x10, x0', ...this.storeFilesystemError('x10'), '    mov x0, #0', '.Lsystem_read_done:',
-            '    ldr x30, [sp, #40]', '    add sp, sp, #48', '    ret', '.Lsystem_read_invalid:',
+            `    ldr x2, [sp, #8]`, `    mov x8, #${syscall}`, '    svc #0', '    cmp x0, #0',
+            `    b.lt ${prefix}_error`, ...this.clearFilesystemError(), '    ldr x9, [sp, #16]',
+            `    str x0, [x9, #8]`, '    mov x0, x9', `    b ${prefix}_done`, `${prefix}_error:`,
+            '    neg x10, x0', ...this.storeFilesystemError('x10'), '    mov x0, #0', `${prefix}_done:`,
+            '    ldr x30, [sp, #40]', '    add sp, sp, #48', '    ret', `${prefix}_invalid:`,
             '    mov x10, #22', ...this.storeFilesystemError('x10'), '    mov x0, #0', '    ret',
-            '.size valen_System_read, .-valen_System_read', ''];
+            `.size ${symbol}, .-${symbol}`, ''];
     }
 
     systemFileWriteRuntime(bytes = false) {

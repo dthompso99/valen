@@ -548,6 +548,15 @@ test('generation 1 passes the native compiler conformance suite', async t => {
         await t.test('command-line examples process files with native and LLVM output', async t => {
             const input = path.join(directory, 'example-input.txt');
             fs.writeFileSync(input, 'alpha beta\ngamma\n');
+            const listingRoot = path.join(directory, 'example-listing');
+            fs.mkdirSync(listingRoot);
+            fs.writeFileSync(path.join(listingRoot, 'zeta'), '');
+            fs.writeFileSync(path.join(listingRoot, 'alpha'), '');
+            fs.mkdirSync(path.join(listingRoot, 'middle'));
+            fs.symlinkSync('alpha', path.join(listingRoot, 'link'));
+            const emptyListingRoot = path.join(directory, 'empty-listing');
+            fs.mkdirSync(emptyListingRoot);
+            const missingListingRoot = path.join(directory, 'missing-listing');
             const backends = [{name: 'native', arguments: []}];
             if (fs.existsSync('/usr/bin/clang')) backends.push({name: 'llvm', arguments: ['--backend', 'llvm']});
             for (const backend of backends) {
@@ -569,6 +578,24 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                     const wcRun = spawnSync(wc, [input], {encoding: 'utf8', env: environment, cwd: projectRoot});
                     assert.equal(wcRun.status, 0, wcRun.stderr);
                     assert.equal(wcRun.stdout, `2 3 17 ${input}\n`);
+
+                    const ls = path.join(directory, `example-ls-${backend.name}`);
+                    const lsCompile = spawnSync(compilerPath,
+                        [...backend.arguments, path.join(projectRoot, 'examples/ls/ls.ar'), '-o', ls],
+                        {encoding: 'utf8', env: environment, cwd: projectRoot});
+                    assert.equal(lsCompile.status, 0, lsCompile.stderr || lsCompile.stdout);
+                    const lsRun = spawnSync(ls, [listingRoot], {encoding: 'utf8', env: environment, cwd: projectRoot});
+                    assert.equal(lsRun.status, 0, lsRun.stderr);
+                    assert.equal(lsRun.stdout, 'alpha\nlink@\nmiddle/\nzeta\n');
+                    const lsFileRun = spawnSync(ls, [input], {encoding: 'utf8', env: environment, cwd: projectRoot});
+                    assert.equal(lsFileRun.status, 1, lsFileRun.stderr);
+                    assert.match(lsFileRun.stderr, /OS error 20/);
+                    const lsEmptyRun = spawnSync(ls, [emptyListingRoot], {encoding: 'utf8', env: environment, cwd: projectRoot});
+                    assert.equal(lsEmptyRun.status, 0, lsEmptyRun.stderr);
+                    assert.equal(lsEmptyRun.stdout, '');
+                    const lsMissingRun = spawnSync(ls, [missingListingRoot], {encoding: 'utf8', env: environment, cwd: projectRoot});
+                    assert.equal(lsMissingRun.status, 1, lsMissingRun.stderr);
+                    assert.match(lsMissingRun.stderr, /OS error 2/);
 
                     const jsonInput = path.join(directory, 'example-input.json');
                     fs.writeFileSync(jsonInput, ' { "name": "Valen", "values": [3, 2, 1] } \n');

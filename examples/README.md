@@ -11,9 +11,9 @@ and important limitations.
 ## Command-line programs
 
 - [cat](cat/README.md) copies files to standard output.
+- [ls](ls/README.md) lists directory entries with basic type metadata.
 - [wc](wc/README.md) counts lines, words, and bytes.
 - [JSON formatter](json-format/README.md) validates and canonicalizes JSON documents.
-- `ls` is planned, but requires a native directory-enumeration API that Valen does not yet expose.
 
 ## Compute and runtime
 
