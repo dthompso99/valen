@@ -1,0 +1,38 @@
+import System from'std/libSystem.ar'
+
+entry {{
+    __() -> i32 {
+        local arguments = System.arguments()
+        if arguments.length < 2 {
+            System.writeError("usage: valen-cat FILE...\n")
+            return 64
+        }
+        local index:i64 = 1
+        local status:i32 = 0
+        while index < arguments.length {
+            local file = System.openRead(arguments[index])
+            if file == null {
+                System.writeError("valen-cat: " + arguments[index] + ": OS error " + System.lastError().toString() + "\n")
+                status = 1
+            } else {
+                local reading:bool = true
+                while reading {
+                    local chunk = System.read(file!, 65536)
+                    if chunk == null {
+                        System.writeError("valen-cat: " + arguments[index] + ": OS error " + System.lastError().toString() + "\n")
+                        status = 1
+                        reading = false
+                    } else {
+                        if chunk!.length == 0 { reading = false } else { System.write(chunk!) }
+                    }
+                }
+                if System.close(file!) != 0 {
+                    System.writeError("valen-cat: " + arguments[index] + ": close failed\n")
+                    status = 1
+                }
+            }
+            index = index + 1
+        }
+        return status
+    }
+}}

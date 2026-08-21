@@ -545,6 +545,34 @@ test('generation 1 passes the native compiler conformance suite', async t => {
             assert.match(escaped.stderr, /escapes its owning root/);
         });
 
+        await t.test('command-line examples process files with native and LLVM output', async t => {
+            const input = path.join(directory, 'example-input.txt');
+            fs.writeFileSync(input, 'alpha beta\ngamma\n');
+            const backends = [{name: 'native', arguments: []}];
+            if (fs.existsSync('/usr/bin/clang')) backends.push({name: 'llvm', arguments: ['--backend', 'llvm']});
+            for (const backend of backends) {
+                await t.test(backend.name, () => {
+                    const cat = path.join(directory, `example-cat-${backend.name}`);
+                    const catCompile = spawnSync(compilerPath,
+                        [...backend.arguments, path.join(projectRoot, 'examples/cat/cat.ar'), '-o', cat],
+                        {encoding: 'utf8', env: environment, cwd: projectRoot});
+                    assert.equal(catCompile.status, 0, catCompile.stderr || catCompile.stdout);
+                    const catRun = spawnSync(cat, [input], {encoding: 'utf8', env: environment, cwd: projectRoot});
+                    assert.equal(catRun.status, 0, catRun.stderr);
+                    assert.equal(catRun.stdout, 'alpha beta\ngamma\n');
+
+                    const wc = path.join(directory, `example-wc-${backend.name}`);
+                    const wcCompile = spawnSync(compilerPath,
+                        [...backend.arguments, path.join(projectRoot, 'examples/wc/wc.ar'), '-o', wc],
+                        {encoding: 'utf8', env: environment, cwd: projectRoot});
+                    assert.equal(wcCompile.status, 0, wcCompile.stderr || wcCompile.stdout);
+                    const wcRun = spawnSync(wc, [input], {encoding: 'utf8', env: environment, cwd: projectRoot});
+                    assert.equal(wcRun.status, 0, wcRun.stderr);
+                    assert.equal(wcRun.stdout, `2 3 17 ${input}\n`);
+                });
+            }
+        });
+
         let sequence = 0;
         for (const fixture of validPrograms) {
             await t.test(fixture.name, () => {

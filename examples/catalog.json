@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "examples": [
+    {"slug":"simple","title":"Hello Valen","order":10,"kind":"language","capabilities":["entrypoint","stdout"],"source":"examples/simple/simple.ar","documentation":"docs/quickstart.md"},
+    {"slug":"cat","title":"cat","order":20,"kind":"cli","capabilities":["arguments","filesystem","errors"],"source":"examples/cat/cat.ar","documentation":"examples/cat/README.md"},
+    {"slug":"wc","title":"wc","order":30,"kind":"cli","capabilities":["arguments","filesystem","text-processing"],"source":"examples/wc/wc.ar","documentation":"examples/wc/README.md"},
+    {"slug":"http-native","title":"Native HTTP service","order":40,"kind":"service","capabilities":["http","event-loop","persistence"],"source":"examples/http-native/server.ar","documentation":"docs/service-friction/http-health-config.md"},
+    {"slug":"sqlite-native","title":"SQLite-backed HTTP service","order":50,"kind":"service","capabilities":["http","ffi","sqlite"],"source":"examples/sqlite-native/server.ar","documentation":"examples/sqlite-native/README.md"},
+    {"slug":"clippy","title":"Clippy","order":60,"kind":"service","capabilities":["http","websocket","deployment"],"source":"examples/clippy/server.ar","documentation":"docs/service-friction/clippy.md"}
+  ]
+}

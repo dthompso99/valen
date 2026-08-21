@@ -1,0 +1,79 @@
+import System from'std/libSystem.ar'
+
+Counts {{
+    member lines:i64
+    member words:i64
+    member bytes:i64
+
+    __() -> void { self.lines = 0; self.words = 0; self.bytes = 0 }
+}}
+
+entry {{
+    whitespace(byte:u8) -> bool { return byte == 9 || byte == 10 || byte == 11 || byte == 12 || byte == 13 || byte == 32 }
+
+    count(path:string) -> Counts?{
+        local file = System.openRead(path)
+        if file == null {
+            System.writeError("valen-wc: " + path + ": OS error " + System.lastError().toString() + "\n")
+            return null
+        }
+        local result = new Counts()
+        local inWord:bool = false
+        local reading:bool = true
+        while reading {
+            local chunk = System.read(file!, 65536)
+            if chunk == null {
+                System.writeError("valen-wc: " + path + ": OS error " + System.lastError().toString() + "\n")
+                System.close(file!)
+                return null
+            }
+            if chunk!.length == 0 { reading = false }
+            else {
+                result.bytes = result.bytes + chunk!.length
+                local index:i64 = 0
+                while index < chunk!.length {
+                    local byte = chunk![index]
+                    if byte == 10 { result.lines = result.lines + 1 }
+                    if self.whitespace(byte) { inWord = false }
+                    else { if!inWord { result.words = result.words + 1; inWord = true } }
+                    index = index + 1
+                }
+            }
+        }
+        if System.close(file!) != 0 {
+            System.writeError("valen-wc: " + path + ": close failed\n")
+            return null
+        }
+        return result
+    }
+
+    print(counts:Counts, name:string) -> void {
+        System.write(counts.lines.toString() + " " + counts.words.toString() + " " + counts.bytes.toString() + " " + name + "\n")
+    }
+
+    __() -> i32 {
+        local arguments = System.arguments()
+        if arguments.length < 2 {
+            System.writeError("usage: valen-wc FILE...\n")
+            return 64
+        }
+        local total = new Counts()
+        local successful:i64 = 0
+        local status:i32 = 0
+        local index:i64 = 1
+        while index < arguments.length {
+            local counts = self.count(arguments[index])
+            if counts == null { status = 1 }
+            else {
+                self.print(counts!, arguments[index])
+                total.lines = total.lines + counts!.lines
+                total.words = total.words + counts!.words
+                total.bytes = total.bytes + counts!.bytes
+                successful = successful + 1
+            }
+            index = index + 1
+        }
+        if successful > 1 { self.print(total, "total") }
+        return status
+    }
+}}

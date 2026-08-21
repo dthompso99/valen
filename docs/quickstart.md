@@ -56,6 +56,10 @@ Now compile and run an example:
 ./simple
 ```
 
+For progressively larger command-line programs and native services, browse the
+[example catalog](../examples/README.md). Its machine-readable index also supplies the content
+foundation for the Valen website.
+
 Freestanding programs use Valen's integrated linker automatically. `--linker native` requires
 that all symbols come from the generated object, while `--linker system` explicitly selects the
 host toolchain. The default `--linker auto` selects the system linker only when the program names
