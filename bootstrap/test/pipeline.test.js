@@ -548,6 +548,37 @@ test('stack arguments, runtime errors, division checks, and symbol mangling are 
     assert.notEqual(backend.mangle('A/B'), backend.mangle('A_2f_B'));
 });
 
+test('x86-64 strength-reduces signed constant division and remainder', t => {
+    const filePath = path.join(projectRoot, 'bootstrap/test/fixtures/optimizer-runtime.ar');
+    const analyze = () => new SemanticAnalyzer().analyzeFile(filePath, {sourceRoot: projectRoot});
+    const optimizedSemantic = analyze();
+    assert.equal(optimizedSemantic.success, true, JSON.stringify(optimizedSemantic.diagnostics));
+    const assembly = new X86_64Backend().generate(new IrGenerator().generate(optimizedSemantic));
+    const constructor = assembly.match(/\.globl ([^\n]*entry[^\n]*_5f__5f_)\n\1:\n[\s\S]*?\1__return:[\s\S]*?\n    ret/)?.[0];
+    assert.ok(constructor, 'could not isolate optimized entry constructor');
+    assert.match(constructor, /mov rcx, 2351776136887273513\n    imul rcx/);
+    assert.doesNotMatch(constructor, /idiv rcx/);
+
+    const baselineSemantic = analyze();
+    const baseline = new X86_64Backend().generate(new IrGenerator().generate(baselineSemantic), {optimizationLevel: 0});
+    assert.match(baseline, /idiv rcx/);
+
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'valen-division-'));
+    const assemblyPath = path.join(directory, 'division.s');
+    const executablePath = path.join(directory, 'division');
+    fs.writeFileSync(assemblyPath, assembly);
+    const compile = spawnSync('cc', ['-nostdlib', '-no-pie', assemblyPath, '-o', executablePath], {encoding: 'utf8'});
+    if (compile.error?.code === 'EPERM') {
+        fs.rmSync(directory, {recursive: true});
+        t.skip('process sandbox does not allow Node to spawn cc');
+        return;
+    }
+    assert.equal(compile.status, 0, compile.stderr);
+    const run = spawnSync(executablePath, [], {encoding: 'utf8'});
+    assert.equal(run.status, 0, run.stderr || `optimizer fixture exited with ${run.status}`);
+    fs.rmSync(directory, {recursive: true});
+});
+
 test('linear-scan register allocation keeps primitive temporaries across calls and reduces stack slots', () => {
     const source = `entry {{
         value() -> i64 { return 20 }

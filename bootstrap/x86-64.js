@@ -429,13 +429,19 @@ export class X86_64Backend {
         for (let blockIndex = 0; blockIndex < fn.blocks.length; blockIndex++) {
             const block = fn.blocks[blockIndex];
             if (block.label !== 'entry') lines.push(`${this.blockLabel(block.label)}:`);
-            for (const instruction of block.instructions) {
+            for (let instructionIndex = 0; instructionIndex < block.instructions.length;) {
+                const instruction = block.instructions[instructionIndex];
                 if (instruction.op === 'jump' && blockOrder.get(instruction.target) <= blockIndex ||
                     instruction.op === 'branch' && (blockOrder.get(instruction.thenTarget) <= blockIndex || blockOrder.get(instruction.elseTarget) <= blockIndex)) {
                     lines.push('    call valen_gc_safepoint');
                 }
+                if (this.optimize && instruction.op === 'binary' && instruction.operator === '/' && instructionIndex + 3 < block.instructions.length) {
+                    const remainder = this.generateRemainderSequence(fn, block, instructionIndex);
+                    if (remainder) { lines.push(...remainder); instructionIndex += 4; continue; }
+                }
                 if (instruction.op === 'jump') lines.push(...this.loopValueCopies(block.label, instruction.target));
                 lines.push(...this.generateInstruction(instruction, endLabel));
+                instructionIndex++;
             }
         }
 
@@ -468,7 +474,7 @@ export class X86_64Backend {
     selectImmediateConstants(fn) {
         const constants = new Map();
         const uses = new Map();
-        const supported = new Set(['+', '-', '*', '&', '|', '^', '<<', '>>', '==', '!=', '===', '!==', '<', '<=', '>', '>=']);
+        const supported = new Set(['+', '-', '*', '/', '&', '|', '^', '<<', '>>', '==', '!=', '===', '!==', '<', '<=', '>', '>=']);
         for (const instruction of fn.blocks.flatMap(block => block.instructions)) {
             if (instruction.op === 'constant' && instruction.result && !this.isFloat(instruction.type)) {
                 const value = BigInt(instruction.value);
@@ -885,9 +891,17 @@ export class X86_64Backend {
             } else lines.push(`    ${simple[instruction.operator]}`);
         }
         else if (instruction.operator === '/') {
-            lines.push('    test rcx, rcx', '    jz .Ldivision_by_zero_error');
-            if (this.isUnsigned(instruction.left.type)) lines.push('    xor edx, edx', '    div rcx');
-            else lines.push('    cqo', '    idiv rcx');
+            if (immediate !== undefined) {
+                const divisor = BigInt(immediate);
+                if (divisor === 0n) lines.push('    jmp .Ldivision_by_zero_error');
+                else if (this.isUnsigned(instruction.left.type)) lines.push(`    mov rcx, ${divisor}`, '    xor edx, edx', '    div rcx');
+                else if (divisor === -1n) lines.push('    mov rcx, -1', '    cqo', '    idiv rcx');
+                else lines.push(...this.signedConstantDivision(divisor));
+            } else {
+                lines.push('    test rcx, rcx', '    jz .Ldivision_by_zero_error');
+                if (this.isUnsigned(instruction.left.type)) lines.push('    xor edx, edx', '    div rcx');
+                else lines.push('    cqo', '    idiv rcx');
+            }
         }
         else if (condition[instruction.operator]) {
             const unsignedCondition = {'<': 'setb', '<=': 'setbe', '>': 'seta', '>=': 'setae'};
@@ -899,6 +913,78 @@ export class X86_64Backend {
         lines.push(...this.normalize('rax', instruction.type));
         lines.push(`    mov ${this.temp(instruction.result)}, rax`);
         return lines;
+    }
+
+    generateRemainderSequence(fn, block, index) {
+        const [division, constant, multiplication, subtraction] = block.instructions.slice(index, index + 4);
+        if (constant?.op !== 'constant' || multiplication?.op !== 'binary' || multiplication.operator !== '*' || subtraction?.op !== 'binary' || subtraction.operator !== '-') return null;
+        if (multiplication.left?.kind !== 'temporary' || multiplication.left.name !== division.result || multiplication.right?.kind !== 'temporary' || multiplication.right.name !== constant.result ||
+            subtraction.right?.kind !== 'temporary' || subtraction.right.name !== multiplication.result) return null;
+        if (this.temporaryUseCount(fn, division.result) !== 1 || this.temporaryUseCount(fn, multiplication.result) !== 1 || this.isUnsigned(division.left.type) || this.isFloat(division.left.type)) return null;
+        const divisorValue = division.right?.kind === 'temporary' ? this.immediates.get(division.right.name) : undefined;
+        const multiplierValue = multiplication.right?.kind === 'temporary' ? this.immediates.get(multiplication.right.name) : undefined;
+        if (divisorValue === undefined || multiplierValue === undefined || divisorValue !== multiplierValue) return null;
+        const divisor = BigInt(divisorValue);
+        if (divisor === 0n || divisor === -1n || !this.equivalentValues(block, division.left, subtraction.left, index)) return null;
+        return [...this.load(division.left, 'rax'), ...this.signedConstantDivision(divisor), `    imul rax, ${divisorValue}`, '    mov rcx, rax',
+            ...this.load(subtraction.left, 'rax'), '    sub rax, rcx', ...this.normalize('rax', subtraction.type), `    mov ${this.temp(subtraction.result)}, rax`];
+    }
+
+    equivalentValues(block, first, second, before) {
+        if (first?.kind !== 'temporary' || second?.kind !== 'temporary') return false;
+        if (first.name === second.name) return true;
+        let firstLocal, secondLocal, firstDefinition = -1, secondDefinition = -1;
+        for (let index = 0; index < before; index++) {
+            const instruction = block.instructions[index];
+            if (instruction.op !== 'load_local') continue;
+            if (instruction.result === first.name) { firstLocal = instruction.name; firstDefinition = index; }
+            if (instruction.result === second.name) { secondLocal = instruction.name; secondDefinition = index; }
+        }
+        if (firstLocal === undefined || firstLocal !== secondLocal) return false;
+        const lower = Math.min(firstDefinition, secondDefinition);
+        const upper = Math.max(firstDefinition, secondDefinition);
+        return !block.instructions.slice(lower + 1, upper).some(instruction => instruction.op === 'store_local' && instruction.name === firstLocal);
+    }
+
+    temporaryUseCount(fn, name) {
+        let count = 0;
+        const visit = value => {
+            if (!value || typeof value !== 'object') return;
+            if (value.kind === 'temporary') { if (value.name === name) count++; return; }
+            if (Array.isArray(value)) for (const item of value) visit(item);
+            else for (const [key, item] of Object.entries(value)) if (key !== 'result') visit(item);
+        };
+        for (const instruction of fn.blocks.flatMap(block => block.instructions)) for (const [key, value] of Object.entries(instruction)) if (key !== 'result') visit(value);
+        return count;
+    }
+
+    signedConstantDivision(divisor) {
+        if (divisor === 1n) return [];
+        const {multiplier, shift} = this.signedDivisionMagic(divisor);
+        const lines = ['    mov r11, rax', `    mov rcx, ${multiplier}`, '    imul rcx'];
+        if (divisor > 0n && multiplier < 0n) lines.push('    add rdx, r11');
+        if (divisor < 0n && multiplier > 0n) lines.push('    sub rdx, r11');
+        lines.push('    mov rax, rdx');
+        if (shift > 0n) lines.push(`    sar rax, ${shift}`);
+        return [...lines, '    mov rcx, rax', '    sar rcx, 63', '    sub rax, rcx'];
+    }
+
+    signedDivisionMagic(divisor) {
+        const absolute = divisor < 0n ? -divisor : divisor;
+        const two63 = 1n << 63n;
+        const t = two63 + (divisor < 0n ? 1n : 0n);
+        const anc = t - 1n - t % absolute;
+        let p = 63n, q1 = two63 / anc, r1 = two63 - q1 * anc, q2 = two63 / absolute, r2 = two63 - q2 * absolute;
+        while (true) {
+            p++;
+            q1 *= 2n; r1 *= 2n; if (r1 >= anc) { q1++; r1 -= anc; }
+            q2 *= 2n; r2 *= 2n; if (r2 >= absolute) { q2++; r2 -= absolute; }
+            const delta = absolute - r2;
+            if (!(q1 < delta || q1 === delta && r1 === 0n)) break;
+        }
+        let multiplier = q2 + 1n;
+        if (divisor < 0n) multiplier = -multiplier;
+        return {multiplier: BigInt.asIntN(64, multiplier), shift: p - 64n};
     }
 
     floatBinary(instruction) {
