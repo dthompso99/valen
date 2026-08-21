@@ -1,4 +1,4 @@
-import System from 'libSystem.ar'
+import System from'libSystem.ar'
 
 library Http {{
     Request {{
@@ -15,22 +15,24 @@ library Http {{
 
     Response {{
         member status:string
+        member contentType:string
         member body:string
 
-        __(status:string, body:string) -> void {
+        __(status:string, body:string, contentType:string = "text/plain; charset=utf-8") -> void {
             self.status = status
+            self.contentType = contentType
             self.body = body
         }
 
         serialize() -> string {
-            return "HTTP/1.1 " + self.status + "\r\nContent-Type: text/plain\r\nContent-Length: " + self.body.length.toString() + "\r\nConnection: close\r\n\r\n" + self.body
+            return"HTTP/1.1 " + self.status + "\r\nContent-Type: " + self.contentType + "\r\nContent-Length: " + self.body.length.toString() + "\r\nConnection: close\r\n\r\n" + self.body
         }
     }}
 
-    parse(input:string) -> Request? {
-        local methodEnd:i64 = -1
-        local targetEnd:i64 = -1
-        local bodyStart:i64 = -1
+    parse(input:string) -> Request?{
+        local methodEnd:i64 =- 1
+        local targetEnd:i64 =- 1
+        local bodyStart:i64 =- 1
         local index:i64 = 0
         while index < input.length {
             if methodEnd < 0 && input[index] == 32 {
@@ -51,7 +53,7 @@ library Http {{
     }
 
     complete(input:string) -> bool {
-        local bodyStart:i64 = -1
+        local bodyStart:i64 =- 1
         local index:i64 = 0
         while index + 3 < input.length {
             if input[index] == 13 && input[index + 1] == 10 && input[index + 2] == 13 && input[index + 3] == 10 {
@@ -68,7 +70,7 @@ library Http {{
                 local end = index + 16
                 while end < bodyStart && input[end] != 13 { end = end + 1 }
                 local parsed = System.parseInteger(input.slice(index + 16, end - index - 16))
-                if !parsed.valid || parsed.value < 0 { return true }
+                if!parsed.valid || parsed.value < 0 { return true }
                 contentLength = parsed.value
                 index = bodyStart
             }

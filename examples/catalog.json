@@ -4,8 +4,11 @@
     {"slug":"simple","title":"Hello Valen","order":10,"kind":"language","capabilities":["entrypoint","stdout"],"source":"examples/simple/simple.ar","documentation":"docs/quickstart.md"},
     {"slug":"cat","title":"cat","order":20,"kind":"cli","capabilities":["arguments","filesystem","errors"],"source":"examples/cat/cat.ar","documentation":"examples/cat/README.md"},
     {"slug":"wc","title":"wc","order":30,"kind":"cli","capabilities":["arguments","filesystem","text-processing"],"source":"examples/wc/wc.ar","documentation":"examples/wc/README.md"},
-    {"slug":"http-native","title":"Native HTTP service","order":40,"kind":"service","capabilities":["http","event-loop","persistence"],"source":"examples/http-native/server.ar","documentation":"docs/service-friction/http-health-config.md"},
-    {"slug":"sqlite-native","title":"SQLite-backed HTTP service","order":50,"kind":"service","capabilities":["http","ffi","sqlite"],"source":"examples/sqlite-native/server.ar","documentation":"examples/sqlite-native/README.md"},
-    {"slug":"clippy","title":"Clippy","order":60,"kind":"service","capabilities":["http","websocket","deployment"],"source":"examples/clippy/server.ar","documentation":"docs/service-friction/clippy.md"}
+    {"slug":"json-format","title":"JSON formatter","order":40,"kind":"cli","capabilities":["arguments","filesystem","json"],"source":"examples/json-format/json-format.ar","documentation":"examples/json-format/README.md"},
+    {"slug":"primes","title":"Prime counter","order":50,"kind":"compute","capabilities":["functions","integer-arithmetic","loops"],"source":"examples/primes/primes.ar","documentation":"examples/primes/README.md"},
+    {"slug":"tree-sum","title":"Tree sum","order":60,"kind":"runtime","capabilities":["allocation","ownership","recursion"],"source":"examples/tree-sum/tree-sum.ar","documentation":"examples/tree-sum/README.md"},
+    {"slug":"http-native","title":"Native HTTP service","order":70,"kind":"service","capabilities":["http","json","event-loop","persistence"],"source":"examples/http-native/server.ar","documentation":"docs/service-friction/http-health-config.md"},
+    {"slug":"sqlite-native","title":"SQLite-backed HTTP service","order":80,"kind":"service","capabilities":["http","ffi","sqlite"],"source":"examples/sqlite-native/server.ar","documentation":"examples/sqlite-native/README.md"},
+    {"slug":"clippy","title":"Clippy","order":90,"kind":"service","capabilities":["http","websocket","deployment"],"source":"examples/clippy/server.ar","documentation":"docs/service-friction/clippy.md"}
   ]
 }

@@ -569,6 +569,31 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                     const wcRun = spawnSync(wc, [input], {encoding: 'utf8', env: environment, cwd: projectRoot});
                     assert.equal(wcRun.status, 0, wcRun.stderr);
                     assert.equal(wcRun.stdout, `2 3 17 ${input}\n`);
+
+                    const jsonInput = path.join(directory, 'example-input.json');
+                    fs.writeFileSync(jsonInput, ' { "name": "Valen", "values": [3, 2, 1] } \n');
+                    const json = path.join(directory, `example-json-${backend.name}`);
+                    const jsonCompile = spawnSync(compilerPath,
+                        [...backend.arguments, path.join(projectRoot, 'examples/json-format/json-format.ar'), '-o', json],
+                        {encoding: 'utf8', env: environment, cwd: projectRoot});
+                    assert.equal(jsonCompile.status, 0, jsonCompile.stderr || jsonCompile.stdout);
+                    const jsonRun = spawnSync(json, [jsonInput], {encoding: 'utf8', env: environment, cwd: projectRoot});
+                    assert.equal(jsonRun.status, 0, jsonRun.stderr);
+                    assert.equal(jsonRun.stdout, '{"name":"Valen","values":[3,2,1]}\n');
+
+                    for (const example of [
+                        {name: 'primes', output: 'primes through 10000: 1229\n'},
+                        {name: 'tree-sum', output: 'tree nodes: 2047\n'}
+                    ]) {
+                        const executable = path.join(directory, `example-${example.name}-${backend.name}`);
+                        const compile = spawnSync(compilerPath,
+                            [...backend.arguments, path.join(projectRoot, `examples/${example.name}/${example.name}.ar`), '-o', executable],
+                            {encoding: 'utf8', env: environment, cwd: projectRoot});
+                        assert.equal(compile.status, 0, compile.stderr || compile.stdout);
+                        const run = spawnSync(executable, [], {encoding: 'utf8', env: environment, cwd: projectRoot});
+                        assert.equal(run.status, 0, run.stderr);
+                        assert.equal(run.stdout, example.output);
+                    }
                 });
             }
         });
@@ -817,12 +842,12 @@ test('generation 1 passes the native compiler conformance suite', async t => {
                             assert.equal(fs.readFileSync(statePath, 'utf8'), '-7\n');
 
                             const verified = await runHttpService(executable, environment, statePath, [
-                                get('/value'), 'not http', get('/missing'), get('/health')
+                                get('/value'), 'not http', get('/missing'), get('/health.json')
                             ]);
                             assert.match(verified[0], /\r\n\r\n-7\n$/);
                             assert.match(verified[1], /^HTTP\/1\.1 400 Bad Request\r\n[\s\S]*\r\n\r\nbad request\n$/);
                             assert.match(verified[2], /^HTTP\/1\.1 404 Not Found\r\n/);
-                            assert.match(verified[3], /\r\n\r\nok\n$/);
+                            assert.match(verified[3], /^HTTP\/1\.1 200 OK\r\nContent-Type: application\/json\r\n[\s\S]*\r\n\r\n{"status":"ok","service":"conformance"}\n$/);
 
                             fs.writeFileSync(statePath, 'not an integer\n');
                             const corrupt = spawnSync(executable, [], {

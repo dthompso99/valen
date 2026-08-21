@@ -1,0 +1,51 @@
+import Json from'std/libJson.ar'
+import System from'std/libSystem.ar'
+
+entry {{
+    read(path:string) -> string?{
+        local file = System.openRead(path)
+        if file == null {
+            System.writeError("valen-json: " + path + ": OS error " + System.lastError().toString() + "\n")
+            return null
+        }
+        local output = new StringBuilder()
+        local reading:bool = true
+        while reading {
+            local chunk = System.read(file!, 65536)
+            if chunk == null {
+                System.writeError("valen-json: " + path + ": OS error " + System.lastError().toString() + "\n")
+                System.close(file!)
+                return null
+            }
+            if chunk!.length == 0 { reading = false } else { output.append(chunk!) }
+        }
+        if System.close(file!) != 0 {
+            System.writeError("valen-json: " + path + ": close failed\n")
+            return null
+        }
+        return output.build()
+    }
+
+    __() -> i32 {
+        local arguments = System.arguments()
+        if arguments.length < 2 {
+            System.writeError("usage: valen-json FILE...\n")
+            return 64
+        }
+        local status:i32 = 0
+        local index:i64 = 1
+        while index < arguments.length {
+            local source = self.read(arguments[index])
+            if source == null { status = 1 }
+            else {
+                local parsed = Json.parse(source!)
+                if!parsed.valid {
+                    System.writeError("valen-json: " + arguments[index] + ": byte " + parsed.offset.toString() + ": " + parsed.message + "\n")
+                    status = 1
+                } else { System.write(parsed.value!.stringify() + "\n") }
+            }
+            index = index + 1
+        }
+        return status
+    }
+}}

@@ -1,0 +1,32 @@
+import System from'std/libSystem.ar'
+
+Node {{
+    member value:i64
+    member left:Node?
+    member right:Node?
+
+    __(value:i64, depth:i64) -> void {
+        self.value = value
+        self.left = null
+        self.right = null
+        if depth > 0 {
+            self.left = new Node(value, depth - 1)
+            self.right = new Node(value, depth - 1)
+        }
+    }
+
+    sum() -> i64 {
+        local result = self.value
+        if self.left != null { result = result + self.left!.sum() }
+        if self.right != null { result = result + self.right!.sum() }
+        return result
+    }
+}}
+
+entry {{
+    __() -> i32 {
+        local root = new Node(1, 10)
+        System.write("tree nodes: " + root.sum().toString() + "\n")
+        return 0
+    }
+}}

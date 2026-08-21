@@ -15,6 +15,8 @@ Both self-hosted compiler generations build the service as a self-contained exec
 
 The original example mixed request parsing, response formatting, routing, and socket handling in one object. A small local `Http` module now owns request-line parsing and response serialization. This was a library-boundary problem; it did not require language syntax.
 
+The service exposes both `GET /health` as plain text and `GET /health.json` as a deterministic JSON response. The JSON route uses the standard quoting implementation for configured service names and gives the example corpus a small request-throughput and RSS target with stable output.
+
 The current network API still exposes listeners, connections, descriptor arrays, and readiness interests directly to the entrypoint. That is acceptable for this first transport example, but a reusable server library should eventually hide those mechanics from application orchestration.
 
 Running the generation-1 and generation-2 services consecutively also showed that listeners could not immediately rebind after serving connections. The x86-64 networking runtime now sets `SO_REUSEADDR`; restart policy belongs in the transport boundary rather than in application sleeps or retry loops.

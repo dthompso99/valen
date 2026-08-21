@@ -12,11 +12,17 @@ and important limitations.
 
 - [cat](cat/README.md) copies files to standard output.
 - [wc](wc/README.md) counts lines, words, and bytes.
+- [JSON formatter](json-format/README.md) validates and canonicalizes JSON documents.
 - `ls` is planned, but requires a native directory-enumeration API that Valen does not yet expose.
+
+## Compute and runtime
+
+- [Prime counter](primes/README.md) performs deterministic integer-heavy work.
+- [Tree sum](tree-sum/README.md) builds and traverses an owned object graph.
 
 ## Services
 
-- [Native HTTP](../docs/service-friction/http-health-config.md) is a self-contained event-driven service.
+- [Native HTTP](../docs/service-friction/http-health-config.md) is a self-contained event-driven service with text and JSON health endpoints.
 - [SQLite HTTP](sqlite-native/README.md) demonstrates a narrow foreign-library boundary.
 - [Clippy](../docs/service-friction/clippy.md) is the independently deployed HTTP/WebSocket application.
 
